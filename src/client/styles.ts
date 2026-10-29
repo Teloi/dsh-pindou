@@ -107,13 +107,15 @@ const ENTRY = `
 .pd-pill{position:absolute;bottom:8px;right:12px;z-index:5;height:var(--pd-hint-h);display:flex;align-items:center;white-space:nowrap;background:var(--pd-surface-raised);color:var(--pd-text);border:1px solid var(--pd-border);border-radius:14px;box-shadow:var(--dsw-elevation-soft,0 4px 14px rgba(0,0,0,.08));font-size:12.5px;line-height:1;font-family:inherit;animation:pd-pill-in var(--pd-t) var(--pd-ease)}
 .pd-pill.pd-out{opacity:0;transform:translateY(4px);transition:opacity var(--pd-t) var(--pd-ease),transform var(--pd-t) var(--pd-ease);pointer-events:none}
 @keyframes pd-pill-in{from{opacity:0;transform:translateY(4px)}}
-.pd-pill button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:0}
+/* both buttons hit 32 high (design N6, R3-6): a ::after 3px above and below the 26px pill row */
+.pd-pill button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:0;position:relative}
+.pd-pill button::after{content:"";position:absolute;inset:-3px 0}
 .pd-pill .pd-pill-go{height:26px;display:flex;align-items:center;gap:6px;padding:0 4px 0 10px;border-radius:13px 0 0 13px}
 .pd-pill .pd-pill-bead{width:12px;height:12px;border-radius:50%;flex:none;background:radial-gradient(circle,color-mix(in srgb,var(--pd-bead-3) 50%,#000) 0 22%,transparent 26%),radial-gradient(circle at 38% 34%,color-mix(in srgb,var(--pd-bead-3) 80%,#fff),var(--pd-bead-3) 55%,color-mix(in srgb,var(--pd-bead-3) 75%,#000))}
 .pd-pill .pd-pill-x{width:24px;height:26px;display:grid;place-items:center;padding:0;border-radius:0 13px 13px 0;color:var(--pd-text-3)}
-.pd-pill .pd-pill-x{--pd-i:12px;position:relative}
+.pd-pill .pd-pill-x{--pd-i:12px}
 /* 24×26 drawn, 32×32 to hit (design N6): the extra lies above, below and right, never over 「去看看」 */
-.pd-pill .pd-pill-x::after{content:"";position:absolute;inset:-3px -8px -3px 0}
+.pd-pill .pd-pill-x::after{inset:-3px -8px -3px 0}
 @media (hover:hover){.pd-pill .pd-pill-go:hover,.pd-pill .pd-pill-x:hover{background:var(--pd-hover)}}
 @media (prefers-reduced-motion: reduce){.pd-entry.pd-busy .pd-dot{animation:none}@keyframes pd-pill-in{from{opacity:0}}.pd-pill.pd-out{transform:none}}
 `

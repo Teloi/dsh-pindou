@@ -193,6 +193,20 @@ function cssRule(sel: string): string {
   return m![1]!
 }
 
+describe('R3-6: the pill\'s main button 「打开拼豆小憩」 is ≥ 32 high to hit, like its ×', () => {
+  it('a ::after reaches 3px above and below the 26px button, inside the button\'s own width', () => {
+    const height = Number(/height:(\d+)px/.exec(cssRule('.pd-pill .pd-pill-go'))![1])
+    const own = cssRule('.pd-pill button')
+    expect(own).toMatch(/position:relative/)
+    const after = cssRule('.pd-pill button::after')
+    expect(after).toMatch(/content:""/)
+    expect(after).toMatch(/position:absolute/)
+    const [top, , bottom = top] = /inset:([^;}]+)/.exec(after)![1]!.split(' ').map(v => -parseFloat(v))
+    expect(height + top! + bottom!).toBeGreaterThanOrEqual(32)
+    expect(/inset:([^;}]+)/.exec(after)![1]!.split(' ')[1]).toBe('0') // never over the ×
+  })
+})
+
 describe('toast width (spec v2.0 22:15): one line, at most panel width − 32, ellipsis', () => {
   it('the toast is at most the panel width minus 32', () => {
     expect(cssRule('.pd-toast')).toContain('max-width:calc(100% - 32px)')

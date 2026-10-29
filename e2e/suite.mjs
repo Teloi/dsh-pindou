@@ -1297,6 +1297,8 @@ try {
   check('pill is announced politely', await pill.getAttribute('aria-live') === 'polite')
   const pillX = await hitBox(p, '.pd-pill .pd-pill-x')
   check('N6 pill × hit area ≥ 32 × 32', big(pillX), JSON.stringify(pillX))
+  const pillGo = await hitBox(p, '.pd-pill .pd-pill-go')
+  check('R3-6 pill main button 「打开拼豆小憩」 hit area ≥ 32 high (and still ends where the × begins)', !!pillGo && pillGo.h >= 32 && pillGo.w >= 32, JSON.stringify({ pillGo, pillX }))
   await shot(p, 'pill-light', { clip: { x: Math.max(0, geo.card[0] - 40), y: Math.max(0, geo.pill[1] - 40), width: Math.min(geo.vw, geo.card[2] - geo.card[0] + 80), height: geo.card[3] - geo.pill[1] + 60 } })
   await shot(p, 'busy-overview-light')
 
