@@ -28,7 +28,7 @@ describe('i18n', () => {
   })
 
   it('substitutes parameters', () => {
-    expect(translate('zh', 'templateProgress', { percent: 42 })).toBe('完成 42%')
+    expect(translate('zh', 'playProgress', { ok: 3, total: 9, pct: 33 })).toBe('3/9 · 33%')
     expect(translate('en', 'boardLabel', { size: 16 })).toBe('16×16 bead board')
   })
 })

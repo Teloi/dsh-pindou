@@ -65,3 +65,17 @@ describe('board', () => {
     expect(isBoard(null)).toBe(false)
   })
 })
+
+describe('floodFill', () => {
+  it('fills a 4-connected region and stops at borders', async () => {
+    const { floodFill, createBoard, setCell, getCell } = await import('../src/core/board.ts')
+    let b = createBoard(12)
+    for (let y = 0; y < 12; y++) b = setCell(b, 5, y, 3)
+    const f = floodFill(b, 0, 0, 7)
+    expect(getCell(f, 4, 11)).toBe(7)
+    expect(getCell(f, 5, 3)).toBe(3)
+    expect(getCell(f, 6, 0)).toBe(-1)
+    expect(floodFill(f, 0, 0, 7)).toBe(f)
+    expect(floodFill(f, 99, 0, 1)).toBe(f)
+  })
+})

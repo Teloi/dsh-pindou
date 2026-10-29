@@ -32,7 +32,7 @@ export const TEMPLATE_DEFS: readonly TemplateDef[] = Object.freeze([
     '................',
     '................',
   ] },
-  { id: 'whale', zh: '小鲸鱼', en: 'Whale', rows: [
+  { id: 'whale', zh: '小鲸鱼', en: 'Little Whale', rows: [
     '................',
     '.....8.8........',
     '......8.........',
@@ -50,7 +50,7 @@ export const TEMPLATE_DEFS: readonly TemplateDef[] = Object.freeze([
     '.99..99..99..99.',
     '9..99..99..99..9',
   ] },
-  { id: 'coffee', zh: '咖啡', en: 'Coffee', rows: [
+  { id: 'coffee', zh: '咖啡杯', en: 'Coffee Cup', rows: [
     '................',
     '.....e...e......',
     '....e...e.......',
@@ -68,7 +68,7 @@ export const TEMPLATE_DEFS: readonly TemplateDef[] = Object.freeze([
     '.eeeeeeeeeeee...',
     '................',
   ] },
-  { id: 'cat', zh: '橘猫', en: 'Cat', rows: [
+  { id: 'cat', zh: '橘猫', en: 'Orange Cat', rows: [
     '................',
     '................',
     '..33........33..',
@@ -194,7 +194,7 @@ export const TEMPLATE_DEFS: readonly TemplateDef[] = Object.freeze([
     '.0...0....0...0.',
     '................',
   ] },
-  { id: 'invader', zh: '像素怪', en: 'Invader', rows: [
+  { id: 'invader', zh: '像素小怪', en: 'Pixel Alien', rows: [
     '................',
     '................',
     '................',
@@ -212,7 +212,7 @@ export const TEMPLATE_DEFS: readonly TemplateDef[] = Object.freeze([
     '................',
     '................',
   ] },
-  { id: 'terminal', zh: '终端', en: 'Terminal', rows: [
+  { id: 'terminal', zh: '终端 >_', en: 'Terminal', rows: [
     '................',
     '................',
     '.ee4e2eaeeeeeee.',
@@ -234,15 +234,31 @@ export const TEMPLATE_DEFS: readonly TemplateDef[] = Object.freeze([
 
 export interface Template extends TemplateDef {
   readonly board: Board
+  /** Distinct colours used. */
+  readonly colors: number
+  /** Number of beads. */
+  readonly beads: number
+  /** 1–3 per the design spec: ≤2 colours and ≤120 beads is 1; ≥6 colours or 24×24 is 3; otherwise 2. */
+  readonly difficulty: 1 | 2 | 3
 }
+
+/** Display order: the designer's list first, then the extra patterns. */
+const ORDER = ['heart', 'invader', 'whale', 'coffee', 'mushroom', 'terminal', 'cat', 'star', 'cherry', 'flower', 'sun', 'ghost']
 
 function build(def: TemplateDef): Template {
   const result = decode(def.rows.join(''), 16)
   if (!result.ok) throw new Error(`pindou: template ${def.id} is malformed (${result.error})`)
-  return { ...def, board: result.board }
+  const board = result.board
+  const used = board.cells.filter(c => c >= 0)
+  const colors = new Set(used).size
+  const beads = used.length
+  const difficulty = colors <= 2 && beads <= 120 ? 1 : colors >= 6 || board.size === 24 ? 3 : 2
+  return { ...def, board, colors, beads, difficulty }
 }
 
-export const TEMPLATES: readonly Template[] = Object.freeze(TEMPLATE_DEFS.map(build))
+export const TEMPLATES: readonly Template[] = Object.freeze(
+  TEMPLATE_DEFS.map(build).toSorted((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id)),
+)
 
 export function findTemplate(id: string): Template | undefined {
   return TEMPLATES.find(t => t.id === id)

@@ -66,6 +66,27 @@ export function paintLine(board: Board, x0: number, y0: number, x1: number, y1: 
   return next
 }
 
+/** 4-connected flood fill from (x, y); returns the same board when nothing changes. */
+export function floodFill(board: Board, x: number, y: number, value: number): Board {
+  if (!inBounds(board, x, y)) return board
+  const { size } = board
+  const from = board.cells[y * size + x]
+  if (from === value) return board
+  const cells = [...board.cells]
+  const stack = [y * size + x]
+  while (stack.length > 0) {
+    const i = stack.pop()!
+    if (cells[i] !== from) continue
+    cells[i] = value
+    const cx = i % size
+    if (cx > 0) stack.push(i - 1)
+    if (cx < size - 1) stack.push(i + 1)
+    if (i >= size) stack.push(i - size)
+    if (i < size * (size - 1)) stack.push(i + size)
+  }
+  return { size, cells: Object.freeze(cells) }
+}
+
 export function clearBoard(board: Board): Board {
   return board.cells.every(c => c === EMPTY) ? board : createBoard(board.size)
 }

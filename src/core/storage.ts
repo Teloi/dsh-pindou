@@ -13,12 +13,15 @@ export const STORAGE_KEY = 'dsh-pindou:v1'
 /** Hard cap on what we write; a full board is ~600 bytes, the cache a few KB. */
 export const MAX_STORED_CHARS = 64 * 1024
 
-export type Tool = 'paint' | 'pick' | 'erase'
-export type Mode = 'free' | 'templates' | 'ai'
+export type Tool = 'paint' | 'erase' | 'pick' | 'fill'
+/** Which view the panel shows: start page, the board, or the AI prompt. */
+export type Mode = 'home' | 'play' | 'ai'
 
 export interface Prefs {
   readonly busyHint: boolean
   readonly showGuide: boolean
+  /** Print colour codes on swatches and guide cells (helps colour-blind players). */
+  readonly showCodes: boolean
 }
 
 export interface SavedState {
@@ -30,16 +33,21 @@ export interface SavedState {
   readonly target: string | null
   readonly ironed: boolean
   readonly prefs: Prefs
+  /** Built-in templates finished at least once. */
+  readonly done: readonly string[]
+  /** Whether the first-run coach card was dismissed. */
+  readonly coached: boolean
 }
 
-export const DEFAULT_PREFS: Prefs = { busyHint: true, showGuide: true }
+export const DEFAULT_PREFS: Prefs = { busyHint: true, showGuide: true, showCodes: false }
 
 export function defaultState(size: BoardSize = DEFAULT_SIZE): SavedState {
-  return { board: createBoard(size), color: 4, tool: 'paint', mode: 'free', target: null, ironed: false, prefs: DEFAULT_PREFS }
+  return { board: createBoard(size), color: 4, tool: 'paint', mode: 'home', target: null, ironed: false, prefs: DEFAULT_PREFS, done: [], coached: false }
 }
 
-const TOOLS: readonly Tool[] = ['paint', 'pick', 'erase']
-const MODES: readonly Mode[] = ['free', 'templates', 'ai']
+const TOOLS: readonly Tool[] = ['paint', 'erase', 'pick', 'fill']
+const MODES: readonly Mode[] = ['home', 'play', 'ai']
+const ID_RE = /^[a-z0-9-]{1,32}$/
 
 /** Parse untrusted JSON into a state; anything invalid falls back field by field. */
 export function parseState(json: string | null): { state: SavedState; corrupt: boolean } {
@@ -69,7 +77,12 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
     prefs: {
       busyHint: typeof prefsRaw['busyHint'] === 'boolean' ? prefsRaw['busyHint'] : DEFAULT_PREFS.busyHint,
       showGuide: typeof prefsRaw['showGuide'] === 'boolean' ? prefsRaw['showGuide'] : DEFAULT_PREFS.showGuide,
+      showCodes: typeof prefsRaw['showCodes'] === 'boolean' ? prefsRaw['showCodes'] : DEFAULT_PREFS.showCodes,
     },
+    done: Array.isArray(r['done'])
+      ? [...new Set(r['done'].filter((id): id is string => typeof id === 'string' && ID_RE.test(id)))].slice(0, 64)
+      : [],
+    coached: r['coached'] === true,
   }
   return { state, corrupt }
 }
@@ -85,6 +98,8 @@ export function serializeState(state: SavedState): string {
     target: state.target,
     ironed: state.ironed,
     prefs: state.prefs,
+    done: state.done,
+    coached: state.coached,
   })
 }
 

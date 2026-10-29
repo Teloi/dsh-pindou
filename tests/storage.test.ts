@@ -37,6 +37,15 @@ describe('storage', () => {
     expect(tampered.state).toMatchObject({ color: 4, tool: 'paint', prefs: { busyHint: true } })
   })
 
+  it('keeps completed ids and the coach flag, dropping bad ids', () => {
+    const s = { ...defaultState(), done: ['heart', 'cat', 'heart'], coached: true, mode: 'play' as const, tool: 'fill' as const }
+    const { state } = parseState(serializeState(s))
+    expect(state).toMatchObject({ done: ['heart', 'cat'], coached: true, mode: 'play', tool: 'fill' })
+    const bad = parseState(JSON.stringify({ ...JSON.parse(serializeState(s)), done: ['ok-1', '<script>', 7, 'x'.repeat(40)], coached: 'yes' }))
+    expect(bad.state.done).toEqual(['ok-1'])
+    expect(bad.state.coached).toBe(false)
+  })
+
   it('reports recovered and resets the key', () => {
     const backend = memoryStorage()
     backend.data.set(STORAGE_KEY, '{"size":16,"board":"oops"}')
