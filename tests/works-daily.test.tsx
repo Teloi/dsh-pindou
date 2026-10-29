@@ -2,7 +2,7 @@
 // F1 每日一拼, all in the works chunk: today's pattern on top of the wall page (start /
 // continue / again), the streak derived from the daily works, the badge, the label, the
 // delete note, and 再拼一次 keeping a daily a daily.
-import { act } from 'react'
+import { act, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GameStore } from '../src/client/game-store.ts'
@@ -260,5 +260,43 @@ describe('F1: only finished dailies ironed on their own day make the streak (spe
     e.store.go('works')
     await mount(e, e.store.works())
     expect(card().textContent).toBe(`今日一拼 · ${today.zh}连续 1 天开始`)
+  })
+})
+
+const press = async (el: Element, k: string): Promise<void> => { await act(async () => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })) }) }
+
+describe('F1: deleting a daily with the Delete key says the streak is recalculated (spec 03:30)', () => {
+  const live = async (e: Env): Promise<void> => {
+    const Live = (): ReturnType<typeof chunk.WorksPage> => { useSyncExternalStore(e.store.subscribe, e.store.getSnapshot); return <chunk.WorksPage env={e} kit={kit} wall={e.store.works()} /> }
+    await act(async () => { root.render(<Live />) })
+  }
+
+  it.each([['zh', '已删除作品 · 删除后连续天数会重新计算'], ['en', 'Work deleted · Your streak will be recalculated.']] as const)('(%s) Delete on a daily card: the toast carries the note, and the streak drops at once', async (lang, text) => {
+    const e = env(lang)
+    e.store.setWall([daily('2026-10-29'), daily('2026-10-30')])
+    await live(e)
+    expect(card().textContent).toMatch(lang === 'zh' ? /连续 2 天/ : /2-day streak/)
+    const newest = host.querySelector<HTMLElement>('.pd-wc')!
+    await press(newest, 'Delete')
+    expect(host.querySelector('.pd-toast span')!.textContent).toBe(text)
+    expect(host.querySelector('.pd-toast')!.getAttribute('role')).toBe('status')
+    expect(card().textContent).toMatch(lang === 'zh' ? /连续 1 天/ : /1-day streak/)
+  })
+
+  it('Delete on a non-daily card: the plain toast, no note', async () => {
+    const e = env()
+    e.store.setWall([daily('2026-10-29'), tpl(NOW - 1000)])
+    await live(e)
+    await press(host.querySelector<HTMLElement>('.pd-wc')!, 'Delete')
+    expect(host.querySelector('.pd-toast span')!.textContent).toBe('已删除作品')
+  })
+
+  it('删除 in a daily\'s detail card: the same note in the toast', async () => {
+    const e = env()
+    e.store.setWall([daily('2026-10-30')])
+    await live(e)
+    await act(async () => { host.querySelector<HTMLElement>('.pd-wc')!.click() })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-wdet .pd-wdel')!.click() })
+    expect(host.querySelector('.pd-toast span')!.textContent).toBe('已删除作品 · 删除后连续天数会重新计算')
   })
 })

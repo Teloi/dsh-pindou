@@ -298,7 +298,7 @@ function Detail({ env, kit, w, onClose, onDelete }: { readonly env: Env; readonl
 }
 
 /** The delete toast: 撤销 for 5 s; hovering or focusing it holds the clock (like the panel's toast). */
-function UndoToast({ lang, onUndo, onDone }: { readonly lang: 'zh' | 'en'; readonly onUndo: () => void; readonly onDone: () => void }): ReactElement {
+function UndoToast({ lang, daily, onUndo, onDone }: { readonly lang: 'zh' | 'en'; readonly daily: boolean; readonly onUndo: () => void; readonly onDone: () => void }): ReactElement {
   const t = STRINGS[lang]
   const [held, setHeld] = useState(0)
   const left = useRef(UNDO_MS)
@@ -312,7 +312,8 @@ function UndoToast({ lang, onUndo, onDone }: { readonly lang: 'zh' | 'en'; reado
   return (
     <div className="pd-toast" role="status" data-held={held > 0 || undefined}
       onPointerEnter={hold(true)} onPointerLeave={hold(false)} onFocus={hold(true)} onBlur={hold(false)}>
-      <span>{t.deleted}</span>
+      {/* a daily's delete says the streak is recalculated however it was deleted (detail 删除 or the Delete key; spec 03:30) */}
+      <span>{daily ? `${t.deleted} · ${t.note}` : t.deleted}</span>
       <button type="button" onClick={onUndo}>{t.undo}</button>
     </div>
   )
@@ -443,7 +444,7 @@ export function WorksPage(props: WorksProps): ReactElement {
         : null}
       {undo
         ? (
-          <UndoToast key={undo.seq} lang={env.lang}
+          <UndoToast key={undo.seq} lang={env.lang} daily={dailyOf(undo.w.s) !== null}
             onUndo={() => { restore(undo.w) }}
             onDone={() => { setUndo(null) }} />
         )
