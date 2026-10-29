@@ -45,7 +45,7 @@ export const isPictureSource = (target: string | null): boolean => target?.start
 export type ViewMode = Mode | 'picture' | 'works'
 
 export type Overlay = 'coach' | 'done' | 'result' | null
-export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered'
+export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'say'
 
 export interface GameState {
   readonly history: History

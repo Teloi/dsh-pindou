@@ -89,6 +89,8 @@ const COPY = {
   toastCleared: ['已清空', 'Board cleared'],
   toastNewGame: ['已开始新的一局', 'Started a new board'],
   toastUndo: ['撤销', 'Undo'],
+  // a toast whose words come from a lazy chunk (they ship with it, not on the first screen)
+  say: ['{s}', '{s}'],
   toastLocked: ['已熨烫，撤销后可继续修改', 'Ironed — undo to keep editing'],
   toastExported: ['已导出 {name}', 'Saved {name}'],
   toastCopied: ['图片已复制，可以直接粘贴到对话里', 'Image copied — paste it into the chat'],

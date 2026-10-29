@@ -18,7 +18,7 @@ import { WorksView } from './Works.tsx'
 const TOAST_TEXT: Record<ToastKey, MessageKey> = {
   cleared: 'toastCleared', newGame: 'toastNewGame', locked: 'toastLocked', exported: 'toastExported', exportFailed: 'toastExportFailed',
   copied: 'toastCopied', copyFailed: 'toastCopyFailed',
-  storageUnavailable: 'storageUnavailable', storageRecovered: 'storageRecovered',
+  storageUnavailable: 'storageUnavailable', storageRecovered: 'storageRecovered', say: 'say',
 }
 const TOAST_MS = 2400
 const TOAST_UNDO_MS = 5000

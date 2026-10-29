@@ -18,11 +18,11 @@ import { WORKS_CSS } from './works-styles.ts'
 const STRINGS = {
   zh: {
     wall: '我的作品', empty: '熨烫过的作品会住在这里', go: '去拼一个', tpl: '模板', free: '自由拼', ai: 'AI 生成', picture: '图片转图纸',
-    export: '导出 PNG', copy: '复制图片', again: '再拼一次', del: '删除', close: '关闭', deleted: '已删除作品', undo: '撤销', all: '全部 ›',
+    export: '导出 PNG', copy: '复制图片', again: '再拼一次', del: '删除', close: '关闭', deleted: '已删除作品', undo: '撤销', all: '全部 ›', resumed: '接着上次没拼完的',
   },
   en: {
     wall: 'My works', empty: 'Your ironed pieces will live here', go: 'Make one', tpl: 'Pattern', free: 'Free play', ai: 'AI pattern', picture: 'Picture',
-    export: 'Export PNG', copy: 'Copy image', again: 'Bead it again', del: 'Delete', close: 'Close', deleted: 'Work deleted', undo: 'Undo', all: 'All ›',
+    export: 'Export PNG', copy: 'Copy image', again: 'Bead it again', del: 'Delete', close: 'Close', deleted: 'Work deleted', undo: 'Undo', all: 'All ›', resumed: 'Picked up where you left off.',
   },
 } as const
 export const WORKS_STRINGS = STRINGS
@@ -52,13 +52,22 @@ function useWorks({ env, wall }: WorksProps): readonly Work[] {
   return clean.works
 }
 
-/** 再拼一次: a new game from the work's source (spec §18.4); see game-store.ts §4.3 for how a source resumes. */
+/**
+ * 再拼一次: a new game from the work's source (spec §18.4); see game-store.ts §4.3 for how a source
+ * resumes. An unfinished game of the same template (or free play) goes on, and a top toast says so
+ * (spec 03:30); a picture's source is a new board every time.
+ */
 export function replay(env: Env, kit: WorksKit, w: Work): void {
   const s = w.s
-  if (s === null) { env.store.startFree(); return }
-  if (s.startsWith('template:')) { env.store.follow(s.slice(9)); return }
-  const d = kit.decode(w.p ?? w.b, w.n)
-  if (d.ok) env.store.startPicture(d.board, s.startsWith('board:p-') ? 'p-' : '')
+  const g = env.store.getSnapshot()
+  const resumes = (s === null || s.startsWith('template:')) && g.target === s && !g.ironed && g.ironingSince === null && !g.complete
+  if (s === null) env.store.startFree()
+  else if (s.startsWith('template:')) env.store.follow(s.slice(9))
+  else {
+    const d = kit.decode(w.p ?? w.b, w.n)
+    if (d.ok) env.store.startPicture(d.board, s.startsWith('board:p-') ? 'p-' : '')
+  }
+  if (resumes) env.store.showToast('say', false, { s: STRINGS[env.lang].resumed })
 }
 
 function useStyles(): void {
