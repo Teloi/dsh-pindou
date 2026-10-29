@@ -882,10 +882,11 @@ async function worksSection() {
       const cols = []
       for (const px of [300, 359, 360, 420, 560, 561, 640, 900]) {
         await setWidth(v, px)
-        cols.push([px, await v.evaluate(() => getComputedStyle(document.querySelector('.pd-wcols')).gridTemplateColumns.split(' ').length)])
+        cols.push([px, await v.evaluate(() => getComputedStyle(document.querySelector('.pd-wcols')).gridTemplateColumns.split(' ').length), await v.evaluate(() => Math.round(document.querySelector('.pd-wall').closest('.pd-view').getBoundingClientRect().width))])
         if ([300, 420, 640, 900].includes(px)) await outShot(v, `w-wall-${lang}-${scheme}-${px}`, { clip: await v.locator('.pd-root').boundingBox() })
       }
       check(`W (${lang} ${scheme}) wall columns: 3 below 360, 4 to 560, 6 above`, cols.map(c => c[1]).join() === '3,3,4,4,4,6,6,6', JSON.stringify(cols))
+      check(`W (${lang} ${scheme}) b4 suggestion: the wall page is as wide as the home page on a wide panel (640), the panel's width below that`, cols.map(c => c[2]).join() === '300,359,360,420,560,561,640,640', JSON.stringify(cols))
       await setWidth(v, null)
       await v.locator('.pd-wall .pd-wc').first().click()
       await v.locator('.pd-wdet').waitFor()

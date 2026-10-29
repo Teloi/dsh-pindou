@@ -18,6 +18,8 @@ export const WORKS_CSS = `
 .pd-wcols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 @container pd (min-width: 360px){.pd-wcols{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @container pd (min-width: 561px){.pd-wcols{grid-template-columns:repeat(6,minmax(0,1fr))}}
+/* a wide panel gives the wall the home page's 640 (spec §3.1), not the play column's 480 + padding (b4 suggestion) */
+@container pd (min-width: 560px){.pd-view:has(>.pd-wall){max-width:640px}}
 .pd-wc{aspect-ratio:1;padding:4px;border:1px solid var(--pd-border-subtle);border-radius:var(--pd-radius-card);background:var(--pd-surface);cursor:pointer;transition:background var(--pd-t-fast)}
 @media (hover:hover){.pd-wc:hover{background:var(--pd-hover)}}
 /* the detail card covers the page inside the panel (not a modal) */
