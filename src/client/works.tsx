@@ -163,6 +163,17 @@ export function WorksRow(props: WorksProps & { readonly fade: boolean, readonly 
     return () => { ro?.disconnect() }
   }, [])
   const shown = wall.slice(-fit).toReversed()
+  // one Tab stop for the row, arrows move it, like the wall (b4 suggestion)
+  const [at, setAt] = useState(0)
+  const stop = Math.min(at, shown.length - 1)
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const last = shown.length - 1
+    const to = e.key === 'ArrowRight' ? Math.min(last, stop + 1) : e.key === 'ArrowLeft' ? Math.max(0, stop - 1) : e.key === 'Home' ? 0 : e.key === 'End' ? last : -1
+    if (to < 0) return
+    e.preventDefault()
+    setAt(to)
+    ref.current?.querySelectorAll<HTMLElement>('.pd-wt')[to]?.focus()
+  }
   // arrived after the retry button had the focus (b4 重要 3): the first thumbnail takes it, or
   // the heading when there is none; once, and only while focus is in the panel or was lost
   const title = useRef<HTMLHeadingElement>(null)
@@ -180,11 +191,12 @@ export function WorksRow(props: WorksProps & { readonly fade: boolean, readonly 
         <span>{env.t('homeWorks')} · {wall.length}</span>
         <button type="button" className="pd-link" onClick={() => { env.store.go('works') }}>{STRINGS[env.lang].all}</button>
       </h3>
-    <div ref={ref} className={fade && !env.reducedMotion() ? 'pd-wrow pd-fade' : 'pd-wrow'}>
+    <div ref={ref} className={fade && !env.reducedMotion() ? 'pd-wrow pd-fade' : 'pd-wrow'} onKeyDown={onKeyDown}>
       {fit === 0
         ? null
-        : shown.map(w => (
-          <button key={w.i} type="button" className="pd-wt" aria-label={workLabel(w, env.lang, kit.template)}
+        : shown.map((w, i) => (
+          <button key={w.i} type="button" className="pd-wt" aria-label={workLabel(w, env.lang, kit.template)} tabIndex={i === stop ? 0 : -1}
+            onFocus={() => { setAt(i) }}
             onClick={() => { openOnArrival = w.i; env.store.go('works') }}>
             <Piece kit={kit} w={w} css={THUMB - 10} />
           </button>
