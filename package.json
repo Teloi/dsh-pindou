@@ -24,7 +24,7 @@
     "拼豆"
   ],
   "engines": {
-    "node": ">=20",
+    "node": ">=20.3",
     "dsh": ">=0.2.1"
   },
   "main": "./lib/index.js",
