@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
-import { auditPanel, guideRings, settlePlugin, toastCovers } from './audit.mjs'
+import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -175,19 +175,22 @@ const shot = async (p, name, opts, dir = ASSETS, auditOpts = {}) => {
   await pluginShot(p, name)
 }
 /**
- * A settled crop of just the plugin (.pd-root plus any .pd-portal) in e2e/.out/plugin/, for
+ * Settled crops of just the plugin, one per .pd-root / top-level .pd-portal (name.png, name.1.png…), in e2e/.out/plugin/, for
  * run-to-run comparison with `node e2e/compare-shots.mjs <runA> <runB>`. The full-page shots
  * above also carry host clocks and streamed text, and can catch a bead mid-animation, so they
  * differ between two runs of the same build; these crops wait for the plugin's finite
  * animations first and leave the host out.
  */
 async function pluginShot(p, name) {
-  const box = await p.evaluate(settlePlugin)
-  if (!box) return
+  const boxes = await p.evaluate(settlePlugin)
   const dir = join(OUT, 'plugin')
   mkdirSync(dir, { recursive: true })
-  await p.screenshot({ path: join(dir, `${name}.png`), clip: box })
-  if (SELFCHECK) { mkdirSync(join(SELFCHECK, 'plugin'), { recursive: true }); copyFileSync(join(dir, `${name}.png`), join(SELFCHECK, 'plugin', `${name}.png`)) }
+  for (const [i, box] of boxes.entries()) {
+    const file = `${name}${i ? `.${i}` : ''}.png`
+    await p.screenshot({ path: join(dir, file), clip: box })
+    if (SELFCHECK) { mkdirSync(join(SELFCHECK, 'plugin'), { recursive: true }); copyFileSync(join(dir, file), join(SELFCHECK, 'plugin', file)) }
+  }
+  await p.evaluate(resumePlugin)
 }
 const outShot = (p, name, opts, auditOpts) => shot(p, name, opts, OUT, auditOpts)
 /** Is focus somewhere real (not <body>) — design I2 */

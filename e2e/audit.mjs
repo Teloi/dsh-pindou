@@ -203,18 +203,32 @@ export function guideRings([codes, hot]) {
   })
 }
 
-// Wait for the plugin's finite animations (beads landing, toasts sliding in) and two frames,
-// then return the box around .pd-root and any .pd-portal, or null when none is on screen.
+// Wait for the plugin's finite animations (beads landing, toasts sliding in), freeze the looping ones, wait two frames,
+// then return one viewport-clipped box per top-level .pd-root / .pd-portal (empty when none is on screen).
 export async function settlePlugin() {
   const ours = el => !!el && !!(el instanceof Element ? el : null)?.closest('.pd-root, .pd-portal')
   const finite = document.getAnimations().filter(a => ours(a.effect?.target) && Number.isFinite(a.effect?.getComputedTiming().endTime))
   await Promise.race([Promise.allSettled(finite.map(a => a.finished)), new Promise(r => { setTimeout(r, 2000) })])
+  // infinite ones (the entry's pulsing dot, a generating shimmer) are frozen at t=0 until
+  // resumePlugin(), so two runs capture the same frame
+  const loops = document.getAnimations().filter(a => ours(a.effect?.target) && !Number.isFinite(a.effect?.getComputedTiming().endTime))
+  for (const a of loops) { a.pause(); a.currentTime = 0 }
+  globalThis.__pdFrozen = loops
   await new Promise(r => { requestAnimationFrame(() => { requestAnimationFrame(r) }) })
-  const rects = [...document.querySelectorAll('.pd-root, .pd-portal')].map(e => e.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0)
-  if (!rects.length) return null
-  const x = Math.max(0, Math.floor(Math.min(...rects.map(r => r.left)))), y = Math.max(0, Math.floor(Math.min(...rects.map(r => r.top))))
-  const right = Math.min(innerWidth, Math.ceil(Math.max(...rects.map(r => r.right)))), bottom = Math.min(innerHeight, Math.ceil(Math.max(...rects.map(r => r.bottom))))
-  return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : null
+  // one crop per plugin root: the union would span the host chat between the pill and the
+  // panel, and bring the host clock and streamed text back into the comparison
+  return [...document.querySelectorAll('.pd-root, .pd-portal')]
+    .filter(e => !e.parentElement?.closest('.pd-root, .pd-portal'))
+    .map(e => e.getBoundingClientRect())
+    .map(r => ({ x: Math.max(0, Math.floor(r.left)), y: Math.max(0, Math.floor(r.top)), right: Math.min(innerWidth, Math.ceil(r.right)), bottom: Math.min(innerHeight, Math.ceil(r.bottom)) }))
+    .filter(r => r.right > r.x && r.bottom > r.y)
+    .map(r => ({ x: r.x, y: r.y, width: r.right - r.x, height: r.bottom - r.y }))
+}
+
+/** Restart the animations settlePlugin() froze. */
+export function resumePlugin() {
+  for (const a of globalThis.__pdFrozen ?? []) a.play()
+  globalThis.__pdFrozen = []
 }
 
 // Design R3-2: what the visible toast covers — any control of the panel (buttons, swatches,
