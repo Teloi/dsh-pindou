@@ -34,7 +34,7 @@ const DESKTOP_PROFILES = ['desktop:macos', 'desktop:windows', 'desktop:linux'] a
 
 /** The DSH desktop app's preload exposes `window.dshDesktop` (apps/desktop/src/preload-app.ts). */
 function isDesktopShell(): boolean {
-  return typeof window !== 'undefined' && 'dshDesktop' in window
+  return 'dshDesktop' in globalThis
 }
 
 type Dispose = () => void

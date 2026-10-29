@@ -115,6 +115,21 @@ describe('client apply', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).target).toBe('template:heart')
   })
 
+  for (const desktop of [false, true]) {
+    it(`entry button announces ⌘⌥K only in the desktop shell (${desktop ? 'desktop' : 'web'})`, async () => {
+      if (desktop) vi.stubGlobal('dshDesktop', {})
+      const f = fakeCtx()
+      apply(f.ctx)
+      const Entry = f.slots[1]!.component as ComponentType<{ sessionId: string; useSession: <R>(s: (v: { running: boolean }) => R) => R }>
+      const root = createRoot(host)
+      await act(async () => { root.render(<Entry sessionId="s1" useSession={sel => sel({ running: false })} />) })
+      expect(host.querySelector('.pd-entry')?.getAttribute('aria-keyshortcuts') ?? null).toBe(desktop ? 'Control+Alt+K Meta+Alt+K' : null)
+      await act(async () => { root.unmount() })
+      f.dispose()
+      vi.unstubAllGlobals()
+    })
+  }
+
   it('header entry shows a quiet busy dot and opens the tab, surviving a missing session surface', async () => {
     const f = fakeCtx()
     f.openTab.mockImplementation(() => { throw new Error('no surface') })

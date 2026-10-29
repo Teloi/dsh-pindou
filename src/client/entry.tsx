@@ -117,7 +117,7 @@ export function resetHintCounts(): void {
 }
 
 function useNarrow(): boolean {
-  const get = (): boolean => typeof window !== 'undefined' && window.innerWidth < HINT_MIN_VIEWPORT
+  const get = (): boolean => globalThis.innerWidth < HINT_MIN_VIEWPORT // (false without a window)
   return useSyncExternalStore((fn) => {
     window.addEventListener('resize', fn)
     return () => { window.removeEventListener('resize', fn) }

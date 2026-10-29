@@ -246,7 +246,16 @@ describe('build-time CSS minifier', () => {
   it('drops comments and insignificant whitespace but keeps combinators and calc() spacing', async () => {
     const { minifyCss } = await import('../scripts/minify-css.ts')
     expect(minifyCss('/* x */ .pd-root :focus-visible { outline: 2px solid red ; }\n.a > .b, .c{width:calc(100% + 2 * var(--x)) }'))
-      .toBe('.pd-root :focus-visible{outline: 2px solid red}.a > .b,.c{width:calc(100% + 2 * var(--x))}')
+      .toBe('.pd-root :focus-visible{outline:2px solid red}.a > .b,.c{width:calc(100% + 2 * var(--x))}')
+  })
+  it('writes declarations, media features, numbers and colours in their shortest equal form', async () => {
+    const { minifyCss } = await import('../scripts/minify-css.ts')
+    expect(minifyCss('.a{--pd-x: var(--y, #FFFFFF);color: #ffffff80;opacity: 0.60;width:10.50px;top:1.0px;margin:.05em 0.25em}'))
+      .toBe('.a{--pd-x:var(--y,#FFF);color:#ffffff80;opacity:.6;width:10.5px;top:1.0px;margin:.05em .25em}')
+    expect(minifyCss("@property --pd-h { syntax: '<number>'; inherits: true; initial-value: 0.6 }"))
+      .toBe("@property --pd-h{syntax:'<number>';inherits:true;initial-value:.6}")
+    expect(minifyCss('@container pd (max-width: 359px){.a :hover,.b:not(.c) .d{x:calc(1px + 0.5em)}} .pd-g2 .pd-x10{y:#abcabc}'))
+      .toBe('@container pd (max-width:359px){.a :hover,.b:not(.c) .d{x:calc(1px + .5em)}}.pd-g2 .pd-x10{y:#abcabc}')
   })
   it('the shipped stylesheet keeps every rule of the source', async () => {
     const { minifyCss } = await import('../scripts/minify-css.ts')

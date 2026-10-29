@@ -157,8 +157,7 @@ const PANEL = `
 .pd-big{border:1px solid var(--pd-border);background:var(--pd-surface-raised);border-radius:var(--pd-radius-card);padding:8px 10px;text-align:left;cursor:pointer;display:grid;grid:auto auto/28px minmax(0,1fr);align-content:center;gap:1px 8px;height:64px;transition:background var(--pd-t-fast),transform var(--pd-t-fast)}
 @media (hover:hover){.pd-big:hover{background:var(--pd-hover)}}
 .pd-big:active{transform:scale(.98)}
-.pd-big .pd-ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--pd-surface);grid-row:span 2}
-.pd-big .pd-ic{--pd-i:16px}
+.pd-big .pd-ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--pd-surface);grid-row:span 2;--pd-i:16px}
 .pd-big b,.pd-big span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pd-big b{font-size:13.5px;font-weight:600}
 .pd-big span{font-size:12px;color:var(--pd-text-3)}
