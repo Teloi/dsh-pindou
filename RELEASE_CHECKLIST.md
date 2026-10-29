@@ -10,7 +10,7 @@
 
 推送之后（由仓库所有者操作）/ After pushing (repo owner):
 
-- [ ] 把 `feat/pindou-break-v0.1.0` 合进 `main`（`github:Teloi/dsh-pindou` 安装的是默认分支）
+- [ ] **经主人明确确认后**，合并 PR，把 `feat/pindou-break-v0.1.0` 合进 `main`（`github:Teloi/dsh-pindou` 安装的是默认分支；未确认前不得合并）
 - [ ] 在 GitHub 上用 README 里的命令装一次：`npx @deepseek-ai/dsh plugin --profile web add github:Teloi/dsh-pindou`
 - [ ] 仓库 About → Topics 加上：`dsh-plugin`（awesome-dsh-hub 靠它收录）、`game`、`perler-beads`、`pixel-art`、`deepseek-harness`
 - [ ] 仓库 About → Description 填：
