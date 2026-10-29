@@ -303,6 +303,10 @@ const RESPONSIVE = `
   .pd-root .pd-palette{--pd-swatch-gap:6px;--pd-swatch:32px}
   .pd-root .pd-foot .pd-io{display:none}
   .pd-root .pd-foot:not(:has(> :not(.pd-io))){display:none}
+  /* ten toolbar buttons on one row at 360–390px: shrink width (never below 32), keep height */
+  .pd-root .pd-tools{flex-wrap:nowrap;gap:0;justify-content:space-between}
+  .pd-root .pd-tools .pd-tool{flex:1 1 0;min-width:32px;max-width:var(--pd-hit)}
+  .pd-root .pd-tools .pd-sep{margin:0;flex:none}
 }
 @media (min-width: 768px){ .pd-root .pd-m-only{display:none} }
 @media (prefers-reduced-motion: reduce){
