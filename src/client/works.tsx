@@ -346,7 +346,9 @@ export function WorksPage(props: WorksProps): ReactElement {
           </div>
         )
         : (
-          <div ref={grid} className="pd-wall" role="group" aria-label={t.wall} onKeyDown={onKeyDown}>
+          // while the detail card is open the grid behind it is inert: out of the screen-reader
+          // tree and of Tab (b4 suggestion); React 18 has no `inert` prop, so the attribute as is
+          <div ref={grid} className="pd-wall" role="group" aria-label={t.wall} onKeyDown={onKeyDown} {...(detail ? { inert: '' } : {})}>
             {groups.map(g => (
               <section key={g.key}>
                 <h3 className="pd-sec">{monthLabel(g.at, env.lang)}</h3>

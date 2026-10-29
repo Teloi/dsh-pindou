@@ -700,9 +700,13 @@ async function worksSection() {
     const trap = []
     for (let i = 0; i < 6; i++) { await k.keyboard.press('Tab'); trap.push(await k.evaluate(() => !!document.activeElement?.closest('.pd-wdet'))) }
     check('W Tab stays inside the detail card', trap.every(Boolean), JSON.stringify(trap))
+    const behind = () => k.evaluate(() => ({ inert: document.querySelector('.pd-wall')?.inert, cardInert: !!document.querySelector('.pd-wdet')?.closest('[inert]') }))
+    const behindOpen = await behind()
     await k.keyboard.press('Escape')
     await k.waitForTimeout(150)
     check('W Esc closes the card and focus goes back to the work', await k.locator('.pd-wdet').count() === 0 && (await focused())?.endsWith('6 月 1 日'))
+    const behindClosed = await behind()
+    check('b4 suggestion: the wall behind the open card is inert (not the card), and not once it closes', behindOpen.inert === true && !behindOpen.cardInert && behindClosed.inert === false, JSON.stringify({ behindOpen, behindClosed }))
     await k.keyboard.press('Enter')
     await k.locator('.pd-wdet').waitFor()
     await k.locator('.pd-wdet .pd-primary').click()
