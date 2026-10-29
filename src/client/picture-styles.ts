@@ -8,6 +8,8 @@ export const PICTURE_CSS = `
 .pd-pic{display:flex;flex-direction:column;gap:12px}
 /* one column as wide as the board at most, centred under the crop frame on a wide panel (b1 S9) */
 .pd-pic>:not(.pd-sr){width:100%;max-width:var(--pd-board-max);margin-inline:auto}
+/* the alert is centred like the note under it (b1 S10) */
+.pd-pic>.pd-pic-err{text-align:center}
 /* the drop zone and the crop frame: square, as wide as the board, at most 480 */
 .pd-pic-zone{position:relative;width:100%;max-width:var(--pd-board-max);aspect-ratio:1;margin:0 auto;border-radius:var(--pd-radius-board);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
 .pd-pic-drop{border:1.5px dashed var(--pd-border);background:var(--pd-surface);color:var(--pd-text-2);font-size:13px;cursor:pointer;transition:border-color var(--pd-t-fast),background var(--pd-t-fast)}

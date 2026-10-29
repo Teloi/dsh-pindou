@@ -1003,6 +1003,14 @@ try {
     }))
     check('T1 adjust defaults: 16×16, 全部 16 色, 抖动 off, 去掉背景 on, 开始拼 enabled', adjust.pressed.join() === '16×16,全部 16 色' && adjust.switches.join() === '抖动:false,去掉背景:true' && adjust.start, JSON.stringify(adjust))
     await outShot(q, 't1-adjust')
+    // b1 S9/S10/S6: one column under the crop frame, the alert centred, the slider says a percentage
+    const column = await q.evaluate(() => {
+      const c = document.querySelector('.pd-pic-crop').getBoundingClientRect()
+      const off = [...document.querySelectorAll('.pd-pic > :not(.pd-sr)')].map((e) => { const r = e.getBoundingClientRect(); return { cls: e.className, l: r.left - c.left, r: r.right - c.right } }).filter(o => Math.abs(o.l) > 0.5 || Math.abs(o.r) > 0.5)
+      const range = document.querySelector('.pd-pic input[type=range]')
+      return { crop: c.width, panel: document.querySelector('.pd-pic').getBoundingClientRect().width, off, align: getComputedStyle(document.querySelector('#pd-pic-err')).textAlign, valuetext: range.getAttribute('aria-valuetext'), step: range.step }
+    })
+    check('b1 S9 the adjust column lines up with the crop frame (every row starts and ends where it does); S10 the alert is centred; S6 the slider reads a percentage, 5 % steps', column.off.length === 0 && column.align === 'center' && column.valuetext === '100%' && column.step === '0.05', JSON.stringify(column))
     // keyboard on the crop: + zooms, arrows pan
     await q.locator('.pd-pic-crop').focus()
     await q.keyboard.press('+')

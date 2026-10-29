@@ -29,8 +29,11 @@ describe('zoom slider (design I2)', () => {
   })
 })
 
-describe('b1 S9: the adjust page is one centred column', () => {
+describe('b1 S9/S10: the adjust page is one centred column', () => {
   it('S9: everything under the crop frame is as wide as the board at most, and centred with it', () => {
     expect(PICTURE_CSS).toMatch(/\.pd-pic>:not\(\.pd-sr\)\{width:100%;max-width:var\(--pd-board-max\);margin-inline:auto\}/)
+  })
+  it('S10: the alert under the drop zone or the crop frame is centred like the note under it', () => {
+    expect(PICTURE_CSS).toMatch(/\.pd-pic>\.pd-pic-err\{text-align:center\}/)
   })
 })
