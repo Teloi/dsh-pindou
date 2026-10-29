@@ -1,4 +1,5 @@
 export * from './palette.ts'
+export * from './contrast.ts'
 export * from './board.ts'
 export * from './history.ts'
 export * from './codec.ts'

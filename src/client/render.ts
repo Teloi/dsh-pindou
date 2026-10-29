@@ -91,6 +91,15 @@ export function renderExport(doc: Document, board: Board, ironed: boolean, dark:
       ctx.fillStyle = hex
       roundRect(ctx, o + x * o - 0.5, o + y * o - 0.5, o + 1, o + 1, [tl ? r : 0, tr ? r : 0, br ? r : 0, bl ? r : 0])
       ctx.fill()
+      // the same soft inner shade as the panel, so fused light beads keep their texture (design N13)
+      if (typeof ctx.createRadialGradient === 'function') {
+        const cx = o + (x + 0.5) * o, cy = o + (y + 0.5) * o
+        const inner = ctx.createRadialGradient(cx, cy, o * 0.22, cx, cy, o * 0.72)
+        inner.addColorStop(0, 'rgba(0,0,0,0)')
+        inner.addColorStop(1, 'rgba(0,0,0,0.07)')
+        ctx.fillStyle = inner
+        ctx.fill()
+      }
     } else {
       bead(ctx, o + (x + 0.5) * o, o + (y + 0.5) * o, o * 0.44, hex, true)
     }

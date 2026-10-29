@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import * as icons from '../src/client/icons.tsx'
 import { CSS } from '../src/client/styles.ts'
+import { contrast as coreContrast, DARK_BOARD, GHOST_RING_TARGET, GHOST_RINGS, ghostRing, mix as coreMix, PALETTE } from '../src/core/index.ts'
 
 const hex = (h: string): [number, number, number] => {
   const v = h.replace('#', '')
@@ -52,6 +53,34 @@ describe('contrast of the fallback palette (WCAG AA 4.5:1 for body text)', () =>
   it('the light theme does not use the host tertiary (3.6:1 on white)', () => {
     expect(token('--pd-text-3')).toBe('#6B6F76')
     expect(contrast('#81858C', '#FFFFFF')).toBeLessThan(4.5)
+  })
+})
+
+describe('N10: target ghost dots on the dark board reach 3:1 for all 16 colours', () => {
+  const dark = CSS.slice(CSS.indexOf('body[data-ds-dark-theme] .pd-root, body[data-ds-dark-theme] .pd-portal {'))
+  it('the core board constant is the dark --pd-board token', () => {
+    expect(token('--pd-board', dark)).toBe(DARK_BOARD)
+  })
+  for (const [i, c] of PALETTE.entries()) {
+    it(`${c.en} ${c.hex}: ring ${GHOST_RINGS[i]} ≥ 3:1 on ${DARK_BOARD}`, () => {
+      expect(contrast(GHOST_RINGS[i]!, DARK_BOARD)).toBeGreaterThanOrEqual(3)
+      expect(coreContrast(GHOST_RINGS[i]!, DARK_BOARD)).toBeCloseTo(contrast(GHOST_RINGS[i]!, DARK_BOARD), 6)
+    })
+  }
+  it('the rings are needed: grey-fill alone at the dark ghost alpha falls short for black, navy and brown', () => {
+    const alpha = Number(/--pd-ghost-alpha:\s*([\d.]+)/.exec(dark)![1])
+    expect(alpha).toBe(0.34)
+    const fills = PALETTE.map(c => coreMix(DARK_BOARD, c.hex, alpha))
+    expect(fills.filter(f => contrast(f, DARK_BOARD) < 3).length).toBeGreaterThan(8)
+  })
+  it('the dark theme draws the ring at full strength (faintness in the fill, not in opacity)', () => {
+    expect(CSS).toContain('body[data-ds-dark-theme] .pd-root .pd-cell.pd-g::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr)}')
+    const ghost = /\.pd-cell\.pd-g::after\{[^}]*\}/.exec(CSS)![0]
+    expect(ghost).not.toMatch(/opacity:var\(--pd-ghost/)
+    expect(ghost).toContain('color-mix(in srgb,var(--pd-gc) calc(var(--pd-ga) * 100%),transparent)')
+  })
+  it('ghostRing keeps hue and never returns below target', () => {
+    for (const h of ['#000000', '#26272B', '#1C1D20', '#FFFFFF', '#2D4FA0']) expect(contrast(ghostRing(h), DARK_BOARD)).toBeGreaterThanOrEqual(GHOST_RING_TARGET)
   })
 })
 

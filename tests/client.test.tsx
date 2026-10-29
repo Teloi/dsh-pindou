@@ -3,10 +3,11 @@ import { act, type ComponentType } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject, KIND, langOf, SHORTCUT_ID, type ClientContext } from '../src/client/index.tsx'
-import { HINT_DELAY_MS, resetHintCounts } from '../src/client/entry.tsx'
-import { STYLE_ID } from '../src/client/styles.ts'
-import { settingsOpener } from '../src/client/settings.ts'
+import { HINT_DELAY_MS, HINTS_KEY, hintCount, resetHintCounts } from '../src/client/entry.tsx'
+import { CSS, STYLE_ID } from '../src/client/styles.ts'
+import { formatKeys, settingsOpener } from '../src/client/settings.ts'
 import { cellSize } from '../src/client/ui/Board.tsx'
+import { panelOnScreen } from '../src/client/ui/App.tsx'
 import { canCopyImage, copyPng, exportFileName, cornerRadii, saveRoute } from '../src/client/render.ts'
 import { createBoard, defaultState, findTemplate, serializeState, setCell, STORAGE_KEY } from '../src/core/index.ts'
 
@@ -198,7 +199,11 @@ describe('client apply', () => {
   })
 })
 
-const settingsEntry = { id: 'settings.open', label: 'Open settings', keys: 'Ctrl Alt ,', aria: 'Control+Alt+Comma', binding: { code: 'Comma', modifiers: ['control', 'alt'] } }
+// Real catalog shape (DSH packages/client/shortcuts/src/binding.ts presentBinding): keys is an array of keycaps,
+// Windows already carries '+' separator tokens, macOS uses symbols, Linux plain names.
+const binding = { code: 'Comma', modifiers: ['control', 'alt'] }
+const entryFor = (keys: readonly string[]) => ({ id: 'settings.open', label: 'Open settings', aliases: [], keys, aria: 'Control+Alt+Comma', binding, modified: false, conflicts: [], issue: undefined })
+const settingsEntry = entryFor(['Ctrl', '+', 'Alt', '+', ','])
 const webShortcuts = { runtime: 'web', platform: 'windows', catalog: { getSnapshot: () => [settingsEntry] } }
 
 async function renderAi(status: Record<string, unknown>, face: Record<string, unknown> = {}) {
@@ -221,7 +226,7 @@ describe('design walkthrough fixes', () => {
     const open = [...card.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '打开 DSH 设置')!
     expect(open.className).toContain('pd-primary')
     expect([...card.querySelectorAll('button.pd-ghost')].map(b => b.textContent)).toEqual(['先玩模板'])
-    expect(card.textContent).toContain('按 Ctrl Alt , 打开 DSH 设置 → 模型')
+    expect(card.textContent).toContain('按 Ctrl+Alt+, 打开 DSH 设置 → 模型')
     expect(host.querySelector('textarea')!.disabled).toBe(true)
     expect([...host.querySelectorAll<HTMLButtonElement>('.pd-chip')].every(b => b.disabled)).toBe(true)
     expect(document.activeElement).toBe(open)
@@ -340,9 +345,22 @@ describe('design walkthrough fixes', () => {
   it('I4: settings opener only on DOM keyboard adapters with a bound shortcut', () => {
     expect(settingsOpener(undefined)).toEqual({})
     expect(settingsOpener({ runtime: 'web', catalog: { getSnapshot: () => [{ ...settingsEntry, binding: null }] } })).toEqual({})
-    expect(settingsOpener({ runtime: 'desktop', platform: 'macos', catalog: { getSnapshot: () => [settingsEntry] } })).toEqual({ keys: 'Ctrl Alt ,' })
+    expect(settingsOpener({ runtime: 'desktop', platform: 'macos', catalog: { getSnapshot: () => [entryFor(['⌃', '⌥', ','])] } })).toEqual({ keys: '⌃⌥,' })
     expect(typeof settingsOpener({ runtime: 'desktop', platform: 'linux', catalog: { getSnapshot: () => [settingsEntry] } }).open).toBe('function')
     expect(settingsOpener({ runtime: 'web', catalog: { getSnapshot: () => { throw new Error('x') } } })).toEqual({})
+  })
+
+  it('N2: keycaps from the real catalog array, per platform (never 「⌥,⌘,,」)', () => {
+    const mac = { runtime: 'web', platform: 'macos', catalog: { getSnapshot: () => [{ ...entryFor(['⌥', '⌘', ',']), binding: { code: 'Comma', modifiers: ['alt', 'meta'] } }] } }
+    expect(settingsOpener(mac).keys).toBe('⌥⌘,')
+    expect(settingsOpener(webShortcuts).keys).toBe('Ctrl+Alt+,')
+    expect(settingsOpener({ ...webShortcuts, platform: 'linux', catalog: { getSnapshot: () => [entryFor(['Ctrl', 'Alt', ','])] } }).keys).toBe('Ctrl+Alt+,')
+    expect(formatKeys(['⌘', 'K', 'L'], 'macos', true)).toBe('⌘K L')
+    expect(formatKeys(['Ctrl', '+', 'K', 'L'], 'windows', true)).toBe('Ctrl+K L')
+    expect(formatKeys(['Ctrl', '+', '+'], 'windows')).toBe('Ctrl++')
+    expect(formatKeys([], 'linux')).toBeUndefined()
+    expect(formatKeys('⌘ ,', 'macos')).toBe('⌘ ,')
+    expect(formatKeys(42, 'macos')).toBeUndefined()
   })
 })
 
@@ -374,5 +392,162 @@ describe('client helpers', () => {
     b = setCell(setCell(b, 1, 1, 2), 2, 1, 2)
     expect(cornerRadii(b, 1, 1)).toEqual([true, false, false, true])
     expect(cornerRadii(b, 2, 1)).toEqual([false, true, true, false])
+  })
+})
+
+describe('design walkthrough round 2 fixes (r3)', () => {
+  const mount = async () => {
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    const done = async (): Promise<void> => { await act(async () => { root.unmount() }); f.dispose() }
+    return { f, root, done }
+  }
+
+  it('N1: template → beads → home → same template keeps the beads; the UI shows the newGame toast for a different one', async () => {
+    const { done } = await mount()
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-coach .pd-btn')!.click() })
+    const grid = (): HTMLElement => host.querySelector<HTMLElement>('[role=grid]')!
+    await act(async () => { grid().dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
+    expect(grid().querySelectorAll('.pd-bead').length).toBe(1)
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-head .pd-ib[aria-label="返回"]')!.click() })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
+    expect(grid().querySelectorAll('.pd-bead').length).toBe(1)
+    expect(host.querySelector('.pd-toast')).toBeNull()
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-head .pd-ib[aria-label="返回"]')!.click() })
+    await act(async () => { host.querySelectorAll<HTMLButtonElement>('.pd-tpl')[1]!.click() })
+    expect(grid().querySelectorAll('.pd-bead').length).toBe(0)
+    expect(host.querySelector('.pd-toast')?.textContent).toContain('已开始新的一局')
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-toast button')!.click() })
+    expect(grid().querySelectorAll('.pd-bead').length).toBe(1)
+    await done()
+  })
+
+  it('N4/N14: toast 撤销 puts focus on the board; hover or focus pauses the 5 s clock and keeps the rest', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const { done } = await mount()
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-coach .pd-btn')!.click() })
+    const grid = host.querySelector<HTMLElement>('[role=grid]')!
+    await act(async () => { grid.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
+    await act(async () => { host.querySelector<HTMLButtonElement>('[role=toolbar] button[aria-label="清空"]')!.click() })
+    const toast = (): HTMLElement | null => host.querySelector<HTMLElement>('.pd-toast')
+    await act(async () => { vi.advanceTimersByTime(1000) })
+    // focus inside the toast holds it
+    await act(async () => { toast()!.querySelector('button')!.focus() })
+    expect(toast()!.dataset['held']).toBe('true')
+    await act(async () => { vi.advanceTimersByTime(20_000) })
+    expect(toast()).not.toBeNull()
+    await act(async () => { toast()!.querySelector('button')!.blur() })
+    await act(async () => { vi.advanceTimersByTime(3900) })
+    expect(toast()).not.toBeNull()
+    await act(async () => { vi.advanceTimersByTime(200) })
+    expect(toast()).toBeNull()
+    // again, then 撤销: the bead is back and focus is on the board
+    await act(async () => { grid.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
+    await act(async () => { host.querySelector<HTMLButtonElement>('[role=toolbar] button[aria-label="清空"]')!.click() })
+    const undo = toast()!.querySelector<HTMLButtonElement>('button')!
+    undo.focus()
+    await act(async () => { undo.click() })
+    await act(async () => { vi.advanceTimersByTime(1) })
+    expect(grid.querySelectorAll('.pd-bead').length).toBe(1)
+    expect(document.activeElement).toBe(grid)
+    await done()
+    vi.useRealTimers()
+  })
+
+  it('N8: the done card swaps in for tools + palette + footer, in the flow, with ≥32px actions', async () => {
+    const { done } = await mount()
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-coach .pd-btn')!.click() })
+    const under = host.querySelector('.pd-under')!
+    expect(under.classList.contains('pd-swapped')).toBe(false)
+    expect(under.querySelector(':scope > .pd-tp > .pd-tools + .pd-palette + .pd-foot')).not.toBeNull()
+    // an ironed, finished heart restored from storage shows the result card
+    await done()
+    const heart = findTemplate('heart')!
+    localStorage.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board: heart.board, target: 'heart', mode: 'play', coached: true, ironed: true }))
+    const again = await mount()
+    const u = host.querySelector('.pd-under')!
+    expect(u.classList.contains('pd-swapped')).toBe(true)
+    const card = u.querySelector(':scope > .pd-overlay.pd-result')!
+    expect(card).not.toBeNull()
+    expect(u.querySelector(':scope > .pd-tp')).not.toBeNull()
+    expect(CSS).toContain('.pd-under.pd-swapped>.pd-tp{visibility:hidden}')
+    expect(CSS).toContain('.pd-overlay .pd-acts .pd-btn{min-height:var(--pd-hit)}')
+    expect(CSS).toMatch(/\.pd-overlay\{position:relative;/)
+    await again.done()
+  })
+
+  it('N5: the busy pill budget survives a reload of the page (sessionStorage), memory when storage fails', async () => {
+    vi.useFakeTimers()
+    resetHintCounts()
+    sessionStorage.setItem(HINTS_KEY, JSON.stringify({ s1: 2 }))
+    expect(hintCount('s1')).toBe(2)
+    const f = fakeCtx()
+    apply(f.ctx)
+    type P = { sessionId: string; useSession: <R>(s: (v: { running: boolean }) => R) => R; useInput: <R>(s: (v: { draft: string }) => R) => R }
+    const Pill = f.slots[2]!.component as ComponentType<P>
+    const root = createRoot(host)
+    const render = async (id: string): Promise<void> => {
+      await act(async () => { root.render(<Pill sessionId={id} useSession={sel => sel({ running: true })} useInput={sel => sel({ draft: '' })} />) })
+    }
+    await render('s1')
+    await act(async () => { vi.advanceTimersByTime(HINT_DELAY_MS + 50) })
+    expect(host.querySelector('.pd-pill')).toBeNull()
+    await render('s2')
+    await act(async () => { vi.advanceTimersByTime(HINT_DELAY_MS + 50) })
+    expect(host.querySelector('.pd-pill')).not.toBeNull()
+    expect(JSON.parse(sessionStorage.getItem(HINTS_KEY)!)).toEqual({ s1: 2, s2: 1 })
+    // corrupt or unavailable storage: no throw, memory count applies
+    sessionStorage.setItem(HINTS_KEY, '{oops')
+    expect(hintCount('s2')).toBe(1)
+    await act(async () => { root.unmount() })
+    f.dispose()
+    resetHintCounts()
+    vi.useRealTimers()
+  })
+
+  it('N4: a failed generation puts focus on 重试', async () => {
+    const fetch = vi.fn(async (url: string) => String(url).includes('status')
+      ? new Response(JSON.stringify({ configured: true, route: 'host', model: 'm', verified: true }), { status: 200 })
+      : new Response(JSON.stringify({ ok: false, error: 'upstream', message: 'x' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const { done } = await mount()
+    await act(async () => { host.querySelectorAll<HTMLButtonElement>('.pd-big')[1]!.click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 10)) })
+    const area = host.querySelector('textarea')!
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      set.call(area, '小猫'); area.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-ai-row .pd-primary')!.click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+    expect(host.querySelector('.pd-card.pd-err')).not.toBeNull()
+    expect(document.activeElement?.textContent).toBe('重试')
+    await done()
+    vi.unstubAllGlobals()
+  })
+
+  it('N9: panelOnScreen follows the host hide / collapse attributes and the viewport', () => {
+    const outer = document.createElement('section')
+    const el = document.createElement('div')
+    outer.append(el); document.body.append(outer)
+    vi.spyOn(el, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
+    const rect = { left: 900, right: 1280, top: 0, bottom: 800 }
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => rect as DOMRect)
+    vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800)
+    expect(panelOnScreen(el)).toBe(true)
+    for (const [k, v] of [['hidden', ''], ['inert', ''], ['aria-hidden', 'true']] as const) {
+      outer.setAttribute(k, v)
+      expect(panelOnScreen(el)).toBe(false)
+      outer.removeAttribute(k)
+    }
+    rect.left = 1281; rect.right = 1661 // collapsed: same size, slid past the edge
+    expect(panelOnScreen(el)).toBe(false)
+    vi.unstubAllGlobals()
   })
 })

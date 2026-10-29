@@ -251,15 +251,26 @@ function OverlayCard({ only }: { readonly only: 'coach' | 'other' }): ReactEleme
   )
 }
 
+/**
+ * Under the board: the done / result card takes the place of the toolbar,
+ * palette and footer (design N8). Both sit in one grid cell, so the card is in
+ * the document flow, the area keeps the taller of the two heights (the board
+ * doesn't jump), and the hidden tools are out of the tab order and the
+ * accessibility tree (visibility:hidden), never peeking through.
+ */
 export function PlayView(): ReactElement {
+  const s = useGame()
+  const card = s.overlay === 'done' || s.overlay === 'result'
   return (
     <div className="pd-view">
       <StatusLine />
       <BoardView overlay={<OverlayCard only="coach" />} />
-      <div className="pd-under">
-        <Toolbar />
-        <Palette />
-        <Footer />
+      <div className={cx('pd-under', card && 'pd-swapped')}>
+        <div className="pd-tp">
+          <Toolbar />
+          <Palette />
+          <Footer />
+        </div>
         <OverlayCard only="other" />
       </div>
     </div>

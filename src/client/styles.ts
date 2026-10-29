@@ -111,7 +111,9 @@ const ENTRY = `
 .pd-pill .pd-pill-go{height:26px;display:flex;align-items:center;gap:6px;padding:0 4px 0 10px;border-radius:13px 0 0 13px}
 .pd-pill .pd-pill-bead{width:12px;height:12px;border-radius:50%;flex:none;background:radial-gradient(circle,color-mix(in srgb,var(--pd-bead-3) 50%,#000) 0 22%,transparent 26%),radial-gradient(circle at 38% 34%,color-mix(in srgb,var(--pd-bead-3) 80%,#fff),var(--pd-bead-3) 55%,color-mix(in srgb,var(--pd-bead-3) 75%,#000))}
 .pd-pill .pd-pill-x{width:24px;height:26px;display:grid;place-items:center;padding:0;border-radius:0 13px 13px 0;color:var(--pd-text-3)}
-.pd-pill .pd-pill-x{--pd-i:12px}
+.pd-pill .pd-pill-x{--pd-i:12px;position:relative}
+/* 24×26 drawn, 32×32 to hit (design N6): the extra lies above, below and right, never over 「去看看」 */
+.pd-pill .pd-pill-x::after{content:"";position:absolute;inset:-3px -8px -3px 0}
 @media (hover:hover){.pd-pill .pd-pill-go:hover,.pd-pill .pd-pill-x:hover{background:var(--pd-hover)}}
 @media (prefers-reduced-motion: reduce){.pd-entry.pd-busy .pd-dot{animation:none}@keyframes pd-pill-in{from{opacity:0}}.pd-pill.pd-out{transform:none}}
 `
@@ -186,7 +188,7 @@ body[data-ds-dark-theme] .pd-tpl canvas{background:#2a2b2f}
 .pd-tokens{font-size:11.5px;color:var(--pd-text-3);display:inline-flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums}
 .pd-shimmer{background:linear-gradient(90deg,var(--pd-text-3) 0%,var(--pd-text) 45%,var(--pd-text-3) 90%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:pd-shim 1.6s linear infinite}
 @keyframes pd-shim{from{background-position:100% 0}to{background-position:-100% 0}}
-.pd-link{border:0;background:transparent;color:var(--pd-link);cursor:pointer;font-size:12.5px;padding:0 4px;min-height:24px}
+.pd-link{border:0;background:transparent;color:var(--pd-link);cursor:pointer;font-size:12.5px;padding:0 4px;min-height:var(--pd-hit)}
 `
 
 const BOARD = `
@@ -198,9 +200,15 @@ const BOARD = `
 .pd-row{display:contents}
 .pd-cell{position:relative}
 .pd-cell::before{content:"";position:absolute;left:50%;top:50%;width:22%;height:22%;margin:-11% 0 0 -11%;border-radius:50%;background:var(--pd-peg);transition:opacity var(--pd-t-slow)}
-.pd-cell.pd-g::after{content:attr(data-code);position:absolute;inset:14%;border-radius:50%;background:var(--pd-gc);opacity:var(--pd-ghost-alpha);display:grid;place-items:center;font:600 calc(var(--pd-cell)*.42)/1 var(--pd-font-code);color:transparent;transition:opacity var(--pd-t)}
-.pd-root.pd-codes .pd-cell.pd-g::after{color:var(--pd-gl)}
-.pd-cell.pd-g.pd-hot::after{opacity:var(--pd-ghost-hot);box-shadow:0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
+.pd-cell.pd-g{--pd-ga:var(--pd-ghost-alpha)}
+.pd-cell.pd-g.pd-hot{--pd-ga:var(--pd-ghost-hot)}
+/* the faintness lives in the fill (not in opacity), so the dark-mode ring below stays at full strength */
+.pd-cell.pd-g::after{content:attr(data-code);position:absolute;inset:14%;border-radius:50%;background:color-mix(in srgb,var(--pd-gc) calc(var(--pd-ga) * 100%),transparent);display:grid;place-items:center;font:600 calc(var(--pd-cell)*.42)/1 var(--pd-font-code);color:transparent;transition:opacity var(--pd-t),background-color var(--pd-t)}
+.pd-root.pd-codes .pd-cell.pd-g::after{color:color-mix(in srgb,var(--pd-gl) calc(var(--pd-ga) * 100%),transparent)}
+.pd-cell.pd-g.pd-hot::after{box-shadow:0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
+/* dark board: a per-colour ring at ≥3:1 so grey, black, navy and brown guides stay visible (design N10, core/contrast.ts) */
+body[data-ds-dark-theme] .pd-root .pd-cell.pd-g::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr)}
+body[data-ds-dark-theme] .pd-root .pd-cell.pd-g.pd-hot::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr),0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
 .pd-board.pd-pulse .pd-cell.pd-g.pd-hot::after{animation:pd-hot 520ms var(--pd-ease) 2}
 .pd-bead.pd-out{animation:pd-erase var(--pd-t-erase) var(--pd-ease) forwards;pointer-events:none}
 @keyframes pd-erase{to{transform:scale(.6);opacity:0}}
@@ -216,12 +224,13 @@ const BOARD = `
   transition:inset var(--pd-t-iron-cell) var(--pd-ease-out) var(--pd-d,0ms),border-radius var(--pd-t-iron-cell) var(--pd-ease-out) var(--pd-d,0ms),--pd-hole var(--pd-t-iron-cell) var(--pd-ease-out) var(--pd-d,0ms),--pd-hl var(--pd-t-iron-cell) var(--pd-ease) var(--pd-d,0ms),--pd-lt var(--pd-t-iron-cell) var(--pd-ease) var(--pd-d,0ms),--pd-dk var(--pd-t-iron-cell) var(--pd-ease) var(--pd-d,0ms),box-shadow var(--pd-t-iron-cell) var(--pd-d,0ms),filter var(--pd-t-iron-cell) var(--pd-d,0ms)}
 @keyframes pd-place{0%{transform:scale(.6)}100%{transform:scale(1)}}
 body[data-ds-dark-theme] .pd-root .pd-bead{box-shadow:0 1px 1.5px rgba(0,0,0,.5),inset 0 0 0 .5px rgba(255,255,255,.18)}
-body[data-ds-dark-theme] .pd-root .pd-board.pd-ironed .pd-bead{box-shadow:inset 0 0 0 .5px rgba(255,255,255,.08)}
+body[data-ds-dark-theme] .pd-root .pd-board.pd-ironed .pd-bead{box-shadow:inset 0 0 0 .5px rgba(255,255,255,.08),inset 0 0 calc(var(--pd-cell) * .22) rgb(0 0 0 / .08)}
 .pd-cell.pd-wrong .pd-bead{outline:1.5px dashed var(--pd-danger);outline-offset:-1px}
 .pd-board.pd-kbd:focus-visible .pd-cell.pd-cur{outline:2px solid var(--pd-cursor);outline-offset:0;border-radius:30%;z-index:3}
 .pd-board.pd-ironed{background:transparent;box-shadow:none;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.22))}
 .pd-board.pd-ironed .pd-cell::before,.pd-board.pd-ironed .pd-cell.pd-g::after{opacity:0}
-.pd-board.pd-ironed .pd-bead{inset:-.5px;border-radius:var(--pd-rtl,0) var(--pd-rtr,0) var(--pd-rbr,0) var(--pd-rbl,0);--pd-hole:0%;--pd-hl:.16;--pd-lt:6%;--pd-dk:8%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.05);filter:saturate(.94)}
+.pd-board.pd-ironed .pd-bead{inset:-.5px;border-radius:var(--pd-rtl,0) var(--pd-rtr,0) var(--pd-rbr,0) var(--pd-rbl,0);--pd-hole:0%;--pd-hl:.16;--pd-lt:6%;--pd-dk:8%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.05),inset 0 0 calc(var(--pd-cell) * .22) rgb(0 0 0 / .07);filter:saturate(.94)}
+/* ↑ the soft inner shade keeps each fused bead readable on white and cream too (design N13) */
 .pd-sweep{position:absolute;inset:0;pointer-events:none;border-radius:var(--pd-radius-board);overflow:hidden;z-index:4}
 .pd-sweep::before{content:"";position:absolute;width:60%;height:300%;left:-80%;top:-100%;transform:rotate(35deg);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--pd-warm) 38%,transparent) 45%,rgb(255 255 255 / .35) 50%,color-mix(in srgb,var(--pd-warm) 38%,transparent) 55%,transparent);animation:pd-sweep var(--pd-t-iron-total) var(--pd-ease) forwards}
 @keyframes pd-sweep{to{left:130%}}
@@ -265,21 +274,26 @@ const CONTROLS = `
 .pd-btn.pd-ghost{border-color:transparent;background:transparent;color:var(--pd-text-2)}
 @media (hover:hover){.pd-btn.pd-ghost:hover{background:var(--pd-hover);color:var(--pd-text)}}
 .pd-btn.pd-grow{flex:1}
-/* cards under the board (coach / done / result): cover tools, never the artwork */
-.pd-under{position:relative}
-.pd-overlay{position:absolute;left:0;right:0;top:0;z-index:7;background:var(--pd-surface-raised);border:1px solid var(--pd-border);border-radius:var(--pd-radius-card);box-shadow:0 8px 24px rgba(0,0,0,.12);padding:12px;display:flex;flex-direction:column;gap:10px;animation:pd-card-in var(--pd-t) var(--pd-ease)}
+/* under the board: the done / result card swaps in for tools + palette + footer, in flow (design N8) */
+.pd-under{display:grid;grid-template-columns:minmax(0,1fr)}
+.pd-under>*{grid-row:1;grid-column:1;min-width:0}
+.pd-tp{display:flex;flex-direction:column}
+.pd-under.pd-swapped>.pd-tp{visibility:hidden}
+.pd-under>.pd-overlay{align-self:start;margin-top:var(--pd-gap)}
+.pd-overlay{position:relative;z-index:7;background:var(--pd-surface-raised);border:1px solid var(--pd-border);border-radius:var(--pd-radius-card);box-shadow:0 8px 24px rgba(0,0,0,.12);padding:12px;display:flex;flex-direction:column;gap:10px;animation:pd-card-in var(--pd-t) var(--pd-ease)}
 @keyframes pd-card-in{from{opacity:0;transform:translateY(8px)}}
 .pd-overlay .pd-t{font-weight:600;font-size:13.5px;display:flex;gap:8px;align-items:center;margin:0}
 .pd-overlay .pd-d{font-size:12.5px;color:var(--pd-text-2);line-height:1.55;margin:0}
 .pd-overlay .pd-acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.pd-overlay .pd-acts .pd-btn{min-height:var(--pd-hit)}
 .pd-overlay.pd-result{animation-delay:80ms;animation-fill-mode:backwards}
 /* the coach card sits on the board's lower half (spec §4.1): compact, title and button on one row */
 .pd-boardbox{position:relative}
-.pd-overlay.pd-coach{top:auto;bottom:8px;left:8px;right:8px;max-height:calc(50% - 8px);overflow:auto;padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:6px 8px;align-items:center}
+.pd-overlay.pd-coach{position:absolute;top:auto;bottom:8px;left:8px;right:8px;max-height:calc(50% - 8px);overflow:auto;padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:6px 8px;align-items:center}
 .pd-overlay.pd-coach .pd-t{grid-row:1;grid-column:1}
 .pd-overlay.pd-coach .pd-acts{grid-row:1;grid-column:2}
 .pd-overlay.pd-coach .pd-d{grid-row:2;grid-column:1 / -1;font-size:12px;line-height:1.5}
-.pd-overlay.pd-coach .pd-btn{min-height:28px}
+.pd-overlay.pd-coach .pd-btn{min-height:var(--pd-hit)}
 /* AI view */
 .pd-ai-box{border:1px solid var(--pd-border);border-radius:var(--pd-radius-card);background:var(--pd-surface-raised);padding:10px;display:flex;flex-direction:column;gap:8px;transition:border-color var(--pd-t),box-shadow var(--pd-t)}
 .pd-ai-box:focus-within{border-color:var(--pd-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--pd-accent) 18%,transparent)}
@@ -312,9 +326,9 @@ const CONTROLS = `
 .pd-mi[aria-checked=true] .pd-sw2::after{transform:translateX(12px)}
 .pd-menu hr{border:0;border-top:1px solid var(--pd-border-subtle);margin:4px 0}
 .pd-keys{margin:4px 8px 6px;padding:0;list-style:none;font-size:11.5px;color:var(--pd-text-2);display:flex;flex-direction:column;gap:3px}
-.pd-toast{position:absolute;left:50%;bottom:calc(var(--pd-footer-h) + 12px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--pd-toast-bg);color:var(--pd-toast-label);font-size:12.5px;border-radius:10px;padding:7px 8px 7px 12px;display:flex;gap:10px;align-items:center;z-index:40;max-width:calc(100% - 24px);box-shadow:0 6px 20px rgba(0,0,0,.18);animation:pd-toast-in var(--pd-t) var(--pd-ease)}
+.pd-toast{position:absolute;left:50%;bottom:calc(var(--pd-footer-h) + 12px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--pd-toast-bg);color:var(--pd-toast-label);font-size:12.5px;border-radius:10px;padding:5px 6px 5px 12px;display:flex;gap:10px;align-items:center;z-index:40;max-width:calc(100% - 24px);box-shadow:0 6px 20px rgba(0,0,0,.18);animation:pd-toast-in var(--pd-t) var(--pd-ease)}
 @keyframes pd-toast-in{from{opacity:0;transform:translate(-50%,8px)}}
-.pd-toast button{border:0;background:rgb(255 255 255 / .14);color:inherit;border-radius:6px;padding:0 8px;min-height:28px;font-size:12px;cursor:pointer;font-weight:600}
+.pd-toast button{border:0;background:rgb(255 255 255 / .14);color:inherit;border-radius:6px;padding:0 10px;min-height:var(--pd-hit);font-size:12px;cursor:pointer;font-weight:600}
 body[data-ds-dark-theme] .pd-toast button{background:rgb(0 0 0 / .08)}
 .pd-preview{position:absolute;inset:var(--pd-header-h) 0 0;z-index:35;background:var(--pd-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:var(--pd-pad);text-align:center}
 .pd-preview img{max-width:min(100%,480px);max-height:70%;object-fit:contain;image-rendering:pixelated;border-radius:var(--pd-radius-card);border:1px solid var(--pd-border-subtle)}
@@ -325,6 +339,8 @@ const RESPONSIVE = `
 /* container queries: the panel is 300px up to ~900px wide */
 @container pd (max-width: 340px){
   .pd-root{--pd-pad:12px;--pd-swatch:26px}
+  /* count badges stay inside their own 32px hit box, clear of the neighbour (design N12) */
+  .pd-sw .pd-cnt{top:-2px;right:-1px;min-width:14px;height:14px;line-height:14px;padding:0 2px;font-size:9px}
   .pd-tools .pd-sep{margin:0 1px}
   .pd-tpls{gap:6px}
 }
