@@ -54,6 +54,9 @@ if (!existsSync(join(WS, 'README.md'))) writeFileSync(join(WS, 'README.md'), '# 
 
 // 1. install the plugin into an isolated Web profile from this checkout
 const profilePkg = join(DSH_HOME, 'profiles/web/package.json')
+// the default home is shared by every checkout on this machine: never test another checkout's build
+const linked = existsSync(profilePkg) ? /"dsh-pindou":\s*"link:([^"]+)"/.exec(readFileSync(profilePkg, 'utf8'))?.[1] : undefined
+if (linked && resolve(linked) !== REPO) throw new Error(`${DSH_HOME} runs the plugin from ${linked}, not ${REPO}: set E2E_DSH_HOME (or TMPDIR) to a home of this checkout's own`)
 if (!existsSync(profilePkg) || !readFileSync(profilePkg, 'utf8').includes('"dsh-pindou"')) {
   log('installing plugin into', DSH_HOME)
   const r = spawnSync(process.execPath, [DSH_BIN, 'plugin', '--profile', 'web', 'add', `link:${REPO}`],
