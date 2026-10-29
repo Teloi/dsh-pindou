@@ -49,6 +49,11 @@ const ROUND = new Set(['round', 'superellipse(1)'])
 const FIXED_NOW = process.env.E2E_CLOCK === 'real' ? null : new Date('2026-06-01T10:00:00+08:00')
 
 const log = (...a) => { process.stdout.write(`${a.join(' ')}\n`) }
+// The plugin's own finite animations are over: finished or cancelled. An animation whose element
+// leaves the page is cancelled and its `finished` rejects with AbortError, which Promise.all turned
+// into a crash (runs rc-4 and kr-old-rerun, 06:20, both at the F1 detail card under load).
+const animationsDone = p => p.evaluate(() => Promise.allSettled(document.getAnimations()
+  .filter(a => a.effect?.target?.closest?.('.pd-root') && a.effect.getTiming().iterations !== Infinity).map(a => a.finished)))
 const checks = []
 function check(name, ok, detail = '') {
   // this file's `pd-…` names were shortened as it loaded (e2e/classes-hook.mjs): log the source's names
@@ -774,7 +779,7 @@ async function worksSection() {
     check('F1 the wall page opens with today\'s pattern (day 151 → 31, 小猪), yesterday\'s daily makes a 1-day streak, then 开始; the wall below; yesterday\'s work carries the badge',
       before.text === '今日一拼 · 小猪连续 1 天开始' && before.first && before.tags.join() === `今日一拼 · ${DAILY_DEFS[30].zh} · 5 月 31 日`, JSON.stringify(before))
     // shoot once the page has slid in (the plugin's own finite animations are done)
-    await y.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.target?.closest?.('.pd-root') && a.effect.getTiming().iterations !== Infinity).map(a => a.finished)))
+    await animationsDone(y)
     const shown = await y.evaluate(() => getComputedStyle(document.querySelector('.pd-view:has(> .pd-wday)')).opacity)
     check('F1 the wall page has slid in before its screenshot (opacity 1)', shown === '1', shown)
     await outShot(y, 'f1-daily-zh-light')
@@ -795,7 +800,7 @@ async function worksSection() {
     await y.locator('.pd-wdet').waitFor()
     const note = await y.evaluate(() => { const d = document.querySelector('.pd-wdet .pd-wdel'); return document.getElementById(d?.getAttribute('aria-describedby') ?? '')?.textContent ?? null })
     check('F1 a daily work\'s detail card says 「删除后连续天数会重新计算」 and 删除 is described by it', note === '删除后连续天数会重新计算', JSON.stringify(note))
-    await y.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.target?.closest?.('.pd-root') && a.effect.getTiming().iterations !== Infinity).map(a => a.finished)))
+    await animationsDone(y)
     await outShot(y, 'f1-detail-zh-light')
     await y.context().close()
     // today's daily one bead short (saved game), finished on the page: now it counts
@@ -818,7 +823,7 @@ async function worksSection() {
     await z.locator('.pd-toast').waitFor({ timeout: 5000 })
     const gone = await z.evaluate(() => ({ text: document.querySelector('.pd-wdaily')?.textContent, toast: document.querySelector('.pd-toast span')?.textContent, role: document.querySelector('.pd-toast')?.getAttribute('role') }))
     check('F1 the Delete key on today\'s daily: the toast says 「删除后连续天数会重新计算」 and the streak is recalculated at once (1 day, 开始 again)', gone.text === '今日一拼 · 小猪连续 1 天开始' && gone.toast === '已删除作品 · 删除后连续天数会重新计算' && gone.role === 'status', JSON.stringify(gone))
-    await z.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.target?.closest?.('.pd-root') && a.effect.getTiming().iterations !== Infinity).map(a => a.finished)))
+    await animationsDone(z)
     await outShot(z, 'f1-delete-toast-zh-light')
     await z.context().close()
   }
@@ -971,6 +976,15 @@ async function worksSection() {
 // E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
 try {
+  {
+    // the harness's own wait: an animation cancelled mid-wait (its element removed) counts as done
+    const h = await browser.newPage()
+    await h.setContent('<div class="pd-root"><i id="x" style="display:block;animation:x 1s"></i></div><style>@keyframes x{to{opacity:.5}}</style>')
+    await h.evaluate(() => { setTimeout(() => document.getElementById('x')?.remove(), 100) })
+    const r = await animationsDone(h).then(() => 'done', e => String(e))
+    check('harness: waiting for animations survives one cancelled mid-wait (AbortError crashed rc-4 and kr-old-rerun)', r === 'done', r)
+    await h.close()
+  }
   sections: {
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
   if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
@@ -998,7 +1012,7 @@ try {
     await q.locator('.pd-pic-drop').waitFor({ timeout: 10000 })
     check('T1 opening the page fetches lib/client.picture.js from DSH once (200) and it runs', chunkResponses.join() === '200', chunkResponses.join())
     // measure once the page has slid in
-    await q.evaluate(() => Promise.all(document.getAnimations().filter(a => a.animationName === 'pd-view-in').map(a => a.finished)))
+    await q.evaluate(() => Promise.allSettled(document.getAnimations().filter(a => a.animationName === 'pd-view-in').map(a => a.finished)))
     const empty = await q.evaluate(v => ({
       title: document.querySelector('.pd-head h2')?.textContent,
       back: !!document.querySelector('.pd-head .pd-ib'),
