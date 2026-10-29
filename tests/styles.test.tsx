@@ -61,6 +61,9 @@ describe('N10: target ghost dots on the dark board reach 3:1 for all 16 colours'
   it('the core board constant is the dark --pd-board token', () => {
     expect(token('--pd-board', dark)).toBe(DARK_BOARD)
   })
+  it('the shipped ring table is exactly what ghostRing() computes for the palette', () => {
+    expect(GHOST_RINGS).toEqual(PALETTE.map(c => ghostRing(c.hex)))
+  })
   for (const [i, c] of PALETTE.entries()) {
     it(`${c.en} ${c.hex}: ring ${GHOST_RINGS[i]} ≥ 3:1 on ${DARK_BOARD}`, () => {
       expect(contrast(GHOST_RINGS[i]!, DARK_BOARD)).toBeGreaterThanOrEqual(3)

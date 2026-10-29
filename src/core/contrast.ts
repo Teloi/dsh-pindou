@@ -1,10 +1,9 @@
 /**
  * WCAG contrast helpers, used for the target ghost dots on the dark board
  * (design N10): every one of the 16 colours must stand out at least 3:1
- * (WCAG 1.4.11, non-text) from the board behind it.
+ * (WCAG 1.4.11, non-text) from the board behind it. Only GHOST_RINGS ships
+ * in the panel; the helpers are for tests and for recomputing the table.
  */
-import { PALETTE } from './palette.ts'
-
 /** The dark board colour (`--pd-board` under the host dark theme; styles.test keeps them equal). */
 export const DARK_BOARD = '#1C1D20'
 /** What the ghost ring aims for: 3:1 is the floor, a little headroom against rounding and antialiasing. */
@@ -52,5 +51,12 @@ export function ghostRing(hex: string, board = DARK_BOARD, target = GHOST_RING_T
   return lifted
 }
 
-/** Ring colour per palette index (computed once). */
-export const GHOST_RINGS: readonly string[] = Object.freeze(PALETTE.map(c => ghostRing(c.hex)))
+/**
+ * Ring colour per palette index: `ghostRing(PALETTE[i].hex)`, written out so
+ * the panel bundle carries 16 strings rather than the solver (styles.test
+ * recomputes it and checks every ring against the board).
+ */
+export const GHOST_RINGS: readonly string[] = Object.freeze([
+  '#6D6D6C', '#746D57', '#816A28', '#9B5E22', '#CA3139', '#8C6074', '#8558AE', '#4E6AAE',
+  '#43718F', '#217871', '#357A3F', '#5E7343', '#8E6248', '#83674E', '#696C72', '#6B6C6F',
+])
