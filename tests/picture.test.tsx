@@ -708,3 +708,41 @@ describe('drop and paste (spec §18.2)', () => {
     expect(JSON.parse(backend.data.get(STORAGE_KEY)!)).toMatchObject({ mode: 'home' })
   })
 })
+
+describe('b2 D-C1: in both degraded states a pasted picture is ignored like a dropped one', () => {
+  it('load failed: paste on the start page and on the failed page does nothing and loads nothing', async () => {
+    const { mod, calls } = gate()
+    const { card, rootEl } = await panel(mod)
+    await act(async () => { card().click() })
+    await act(async () => { calls[0]!.reject(new Error('offline')) })
+    await flush()
+    // on the failed page
+    const onPage = pasteEvent([file(pngHead(10, 10), 'a.png', 'image/png')])
+    await act(async () => { rootEl().dispatchEvent(onPage) })
+    await flush(20)
+    expect(host.querySelector('.pd-lazy[data-lazy=failed]')).not.toBeNull()
+    expect(calls).toHaveLength(1)
+    // back on the start page
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-head .pd-ib')!.click() })
+    card().focus()
+    const onHome = pasteEvent([file(pngHead(10, 10), 'b.png', 'image/png')])
+    await act(async () => { rootEl().dispatchEvent(onHome) })
+    await flush(20)
+    expect(rootEl().dataset['mode']).toBe('home')
+    expect(calls).toHaveLength(1) // no reload (was: jumped to the page and fetched again)
+    expect(onHome.defaultPrevented).toBe(false) // left alone, as with no require.async
+    expect(host.querySelector('.pd-toast')).toBeNull()
+    // only the card (or the in-page retry) loads again
+    await act(async () => { card().click() })
+    expect(calls).toHaveLength(2)
+  })
+
+  it('no require.async: paste on the start page does nothing (unchanged)', async () => {
+    const { rootEl } = await panel(undefined)
+    const p = pasteEvent([file(pngHead(10, 10), 'a.png', 'image/png')])
+    await act(async () => { rootEl().dispatchEvent(p) })
+    await flush(20)
+    expect(rootEl().dataset['mode']).toBe('home')
+    expect(p.defaultPrevented).toBe(false)
+  })
+})

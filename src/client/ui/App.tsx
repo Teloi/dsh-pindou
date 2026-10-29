@@ -213,8 +213,10 @@ export function App(): ReactElement {
   const [menu, setMenu] = useState(false)
   // Picture to pattern (spec §18.2): a picture dropped anywhere on the panel, or pasted on
   // the start or picture page, opens the page with it. Never when the host cannot load the chunk.
+  // Off in both degraded states (§18.6): no require.async, or the chunk failed. Then a dropped or
+  // pasted picture is ignored alike (design D-C1); only the card or the in-page retry loads again.
   const status = useLazy(picture)
-  const pictures = status !== 'unsupported'
+  const pictures = status !== 'unsupported' && status !== 'failed'
   const [dropped, setDropped] = useState<Blob | null>(null)
   const taken = useCallback(() => { setDropped(null) }, [])
   const take = useCallback((file: File | undefined): void => {
@@ -225,8 +227,8 @@ export function App(): ReactElement {
   // The first picture of a drop; on the picture page any file (it explains why it is not one);
   // elsewhere a drop without a picture is ignored. Nothing when the chunk cannot load (§18.6).
   const onFiles = useCallback((files: FileList): void => {
-    if (pictures && status !== 'failed') take([...files].find(f => f.type.startsWith('image/')) ?? (s.mode === 'picture' ? files[0] : undefined))
-  }, [pictures, status, s.mode, take])
+    if (pictures) take([...files].find(f => f.type.startsWith('image/')) ?? (s.mode === 'picture' ? files[0] : undefined))
+  }, [pictures, s.mode, take])
   const scroller = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
   usePanelVisibility(root)
