@@ -1017,8 +1017,17 @@ try {
     const refusedSaid = await q.waitForFunction(() => document.querySelector('#pd-pic-err')?.textContent === '这个文件不是图片', undefined, { timeout: 3000 }).then(() => true, () => false)
     const loud = await errBox()
     const kept = await q.evaluate(() => ({ crop: document.querySelectorAll('.pd-pic-crop[data-e2e-mark]').length, zone: document.querySelectorAll('.pd-pic-drop').length, prev: document.querySelectorAll('.pd-pic-prev canvas[role=img]').length }))
-    check('spec 00:58 一 a picture loaded, a text file dropped on the panel: the same picture stays, 「这个文件不是图片」 shows under it (no room taken before)', refused.dropPrevented && refusedSaid && quiet?.h === 0 && quiet.text === '' && loud?.h > 0 && kept.crop === 1 && kept.zone === 0 && kept.prev === 1, JSON.stringify({ quiet, loud, kept, prevented: refused.dropPrevented }))
+    // spec 03:30: the alert's row keeps one line all the time, so the slider below never moves (b4: it jumped 30 px)
+    check('spec 00:58 一 / 03:30 a picture loaded, a text file dropped on the panel: the same picture stays, 「这个文件不是图片」 shows under it in the row kept for it (one line, the same height before and after)', refused.dropPrevented && refusedSaid && quiet?.h > 0 && quiet.text === '' && loud?.h === quiet.h && kept.crop === 1 && kept.zone === 0 && kept.prev === 1, JSON.stringify({ quiet, loud, kept, prevented: refused.dropPrevented }))
     await outShot(q, 'spec0058-refused-kept')
+    // spec 03:30: moving the crop frame puts the refusal away; nothing below moves either way
+    const sliderTop = () => q.evaluate(() => Math.round(document.querySelector('.pd-pic input[type=range]').getBoundingClientRect().top * 4) / 4)
+    const topLoud = await sliderTop()
+    await q.locator('.pd-pic-crop').focus()
+    await q.keyboard.press('ArrowLeft')
+    const cleared = await q.waitForFunction(() => document.querySelector('#pd-pic-err')?.textContent === '', undefined, { timeout: 2000 }).then(() => true, () => false)
+    const afterPan = { box: await errBox(), top: await sliderTop() }
+    check('spec 03:30 the refusal clears when the crop frame moves (arrow key); its row and the slider stay put', cleared && afterPan.box?.h === quiet.h && afterPan.top === topLoud, JSON.stringify({ topLoud, afterPan, quiet }))
     await q.locator('.pd-head .pd-ib').first().click()
     await q.locator('.pd-v-home').waitFor()
     await pictureCard(q).focus()

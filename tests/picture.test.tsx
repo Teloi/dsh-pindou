@@ -810,6 +810,9 @@ describe('b2 D-I1: a picture loaded from a drop or paste (I4, the other path)', 
   })
 })
 
+/** A pointer event as jsdom can make one (it has no PointerEvent): a mouse event with a pointer id. */
+const pointer = (type: string, x: number): Event => Object.assign(new MouseEvent(type, { clientX: x, clientY: 50, bubbles: true }), { pointerId: 1 })
+
 describe('spec 00:58: refused drops and failed loads', () => {
   const png = (): File => file(pngHead(600, 400), 'p.png', 'image/png')
   it('a picture is loaded: a non-image dropped on the panel keeps it, and the alert says why', async () => {
@@ -834,6 +837,43 @@ describe('spec 00:58: refused drops and failed loads', () => {
     await vi.waitFor(() => { expect(bitmap).toHaveBeenCalledTimes(2) })
     expect(await alertSays()).toBe('')
     expect(host.querySelector('.pd-pic-crop')).not.toBeNull()
+  })
+
+  it('spec 03:30: the refusal goes as soon as the crop frame moves, the zoom or the size changes, or a new picture loads', async () => {
+    const { rootEl } = await panel(ready())
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-crop')).not.toBeNull() })
+    const refuse = async (): Promise<void> => {
+      await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])) })
+      await flush(20)
+      expect(await alertSays()).toBe('这个文件不是图片')
+    }
+    const crop = host.querySelector<HTMLElement>('.pd-pic-crop')!
+    await refuse()
+    await act(async () => { crop.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })) })
+    expect(await alertSays()).toBe('')
+    await refuse()
+    await act(async () => { crop.dispatchEvent(pointer('pointerdown', 50)); crop.dispatchEvent(pointer('pointermove', 40)); crop.dispatchEvent(pointer('pointerup', 40)) })
+    expect(await alertSays()).toBe('')
+    await refuse()
+    const zoom = host.querySelector<HTMLInputElement>('.pd-pic input[type=range]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(zoom, '2')
+      zoom.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(await alertSays()).toBe('')
+    await refuse()
+    const size = [...host.querySelectorAll<HTMLButtonElement>('.pd-seg button')].find(b => b.textContent === '24×24')!
+    await act(async () => { size.click() })
+    expect(await alertSays()).toBe('')
+    // a colour count or a switch is not the crop or the size: the refusal stays
+    await refuse()
+    const colours = [...host.querySelectorAll<HTMLButtonElement>('.pd-seg button')].find(b => b.textContent === '8 色')!
+    await act(async () => { colours.click() })
+    expect(await alertSays()).toBe('这个文件不是图片')
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    await vi.waitFor(() => { expect(bitmap).toHaveBeenCalledTimes(2) })
+    expect(await alertSays()).toBe('')
   })
 
   it('a picture dropped while the chunk loads, then the load fails: the retry opens an empty page', async () => {

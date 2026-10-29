@@ -16,8 +16,8 @@ export const PICTURE_CSS = `
 @keyframes pd-pic-shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 @media (prefers-reduced-motion: reduce){.pd-pic-drop.pd-shake{animation:none}}
 .pd-pic-err{color:var(--pd-danger);font-size:12.5px;font-weight:500;min-height:1em;margin:0}
-/* under a loaded picture the alert takes no room until it speaks (a refused drop keeps the picture) */
-.pd-pic-crop~.pd-pic-err:empty{min-height:0;margin-top:-12px}
+/* under a loaded picture the alert keeps its one line, so nothing below moves when it speaks or goes (spec 03:30) */
+.pd-pic-crop~.pd-pic-err{min-height:1lh}
 .pd-pic-note{font-size:11.5px;color:var(--pd-text-3);text-align:center;margin:0}
 .pd-pic-file{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .pd-pic-crop{padding:0;overflow:hidden;background:var(--pd-surface);touch-action:none;cursor:grab;outline-offset:2px}

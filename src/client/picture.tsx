@@ -276,8 +276,10 @@ export function PicturePage(props: PictureProps): ReactElement {
   }, [shown, draw])
 
   const pick = (): void => { input.current?.click() }
+  // moving or zooming the crop frame, or a new size, puts the refusal away (spec 03:30)
   const move = (dx: number, dy: number, zoom = 1): void => {
     if (!pic) return
+    setError(null)
     const { width: w, height: h } = pic.pixels
     setView(v => clampView(w, h, { cx: v.cx + dx, cy: v.cy + dy, zoom: v.zoom * zoom }))
   }
@@ -372,7 +374,7 @@ export function PicturePage(props: PictureProps): ReactElement {
       <div className="pd-pic-row">
         <span>{t('size')}</span>
         <span className="pd-seg" role="group" aria-label={t('size')}>
-          {PICTURE_SIZES.map(s => <button key={s} type="button" aria-pressed={n === s} onClick={() => { set({ size: s }) }}>{s}×{s}</button>)}
+          {PICTURE_SIZES.map(s => <button key={s} type="button" aria-pressed={n === s} onClick={() => { setError(null); set({ size: s }) }}>{s}×{s}</button>)}
         </span>
       </div>
       <div className="pd-pic-row">
