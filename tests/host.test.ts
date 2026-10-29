@@ -188,16 +188,24 @@ describe('generator guards', () => {
   })
 })
 
+function loaderCtx(cfg: unknown): HostContext {
+  return {
+    connection: { fetch: { register: () => () => {} } },
+    get: ((n: string) => (n === 'loader' ? { entries: () => [{ options: { id: 'ns' }, fiber: { effectiveConfig: cfg } }] } : undefined)) as HostContext['get'],
+    effect: () => undefined,
+  }
+}
+
 describe('status reflects usable credentials (no model call)', () => {
   const official = { currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-flash' }) }
   const withDirectory = (rows: unknown[]): LlmRuntimeLike => ({ ...fakeLlm([]), listConfigurableProviders: () => rows as never })
   const officialRow = { provider: 'deepseek-official', settingsNs: 'llm-deepseek-api-key', settingsPath: [] }
 
   it('default model present but no key anywhere → configured:false', async () => {
-    const describe = vi.fn(async () => ({ configured: false }))
-    const g = new Generator(deps({ llm: () => withDirectory([officialRow]), defaultModel: () => official, credentials: () => ({ describe }) }))
+    const describeRef = vi.fn(async () => ({ configured: false }))
+    const g = new Generator(deps({ llm: () => withDirectory([officialRow]), defaultModel: () => official, credentials: () => ({ describe: describeRef }) }))
     expect(await g.status()).toEqual({ configured: false, route: 'host', model: 'deepseek-v4-flash', verified: true })
-    expect(describe).toHaveBeenCalledWith('DEEPSEEK_API_KEY')
+    expect(describeRef).toHaveBeenCalledWith('DEEPSEEK_API_KEY')
   })
 
   it('default model with a stored key → configured and verified', async () => {
@@ -248,11 +256,7 @@ describe('status reflects usable credentials (no model call)', () => {
   })
 
   it('reads a profile apiKeyEnv from the loader (string or volatile)', () => {
-    const ctx = (cfg: unknown): HostContext => ({
-      connection: { fetch: { register: () => () => {} } },
-      get: ((n: string) => (n === 'loader' ? { entries: () => [{ options: { id: 'ns' }, fiber: { effectiveConfig: cfg } }] } : undefined)) as HostContext['get'],
-      effect: () => undefined,
-    })
+    const ctx = loaderCtx
     expect(profileKeyRef(ctx({ apiKeyEnv: { get: () => 'MY_KEY' } }), { provider: 'deepseek-official', settingsNs: 'ns', settingsPath: [] })).toBe('MY_KEY')
     expect(profileKeyRef(ctx({ p: { a: { apiKeyEnv: 'A_KEY' } } }), { provider: 'x', settingsNs: 'ns', settingsPath: ['p', 'a'] })).toBe('A_KEY')
     expect(profileKeyRef(ctx({ apiKeyEnv: 'sk-not-a-name' }), { provider: 'x', settingsNs: 'ns' })).toBeUndefined()
