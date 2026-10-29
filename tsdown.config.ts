@@ -51,8 +51,10 @@ const client: UserConfig = {
   sourcemap: false,
   // Local identifiers are mangled (property names, exports and the CSS class names
   // stay as written), which is what keeps the gzip budget (scripts/check-bundle.mjs)
-  // roomy; review the readable source in src/, not lib/.
-  minify: { compress: true, mangle: true, codegen: { removeWhitespace: true } },
+  // roomy; review the readable source in src/, not lib/. The factory's `require`
+  // parameter keeps its name: check:bundle audits every `require(...)` and
+  // `require.async(...)` in the shipped text, which a mangled `e(...)` would hide.
+  minify: { compress: true, mangle: { reserved: ['require'] }, codegen: { removeWhitespace: true } },
   deps: {
     neverBundle: PLATFORM_MODULES,
     alwaysBundle: (id: string) => !PLATFORM_MODULES.includes(id),
