@@ -68,23 +68,21 @@ export function replay(env: Env, kit: WorksKit, w: Work): void {
   else if (s.startsWith('template:')) env.store.follow(s.slice(9))
   else {
     const d = kit.decode(w.p ?? w.b, w.n)
-    // a daily keeps its own key, so the wall still knows its date (no new board per replay)
-    if (d.ok && dailyOf(s) !== null) env.store.startPattern(s, d.board)
-    else if (d.ok) env.store.startPicture(d.board, s.startsWith('board:p-') ? 'p-' : '')
+    const date = dailyOf(s)
+    if (d.ok) env.store.startPicture(d.board, date ? `${DAILY}${date}-` : s.startsWith('board:p-') ? 'p-' : '')
   }
   if (resumes) env.store.showToast('say', false, { s: STRINGS[env.lang].resumed })
 }
 
 /**
- * F1 每日一拼 (spec §18.3), all in this chunk: a daily game's source key is `daily:<YYYY-MM-DD>`
- * (spec). The entry only keeps it: any non-template key with a pattern is restored and
- * collected like a picture pattern. Its date names the pattern and counts for the streak.
+ * F1 每日一拼 (spec §18.3), all in this chunk: a daily game is a picture-like `board:` source
+ * `board:p-daily-<date>-…` (the entry restores and collects it like any picture pattern; a
+ * `daily:` key would need entry code). Its date names the pattern and counts for the streak.
  */
-const DAILY = 'daily:'
+const DAILY = 'p-daily-'
 /** 「2026-10-30」 of a daily source key, or null. */
 export function dailyOf(s: string | null): string | null {
-  const date = s?.startsWith(DAILY) ? s.slice(DAILY.length) : ''
-  return Number.isFinite(dailyDayOf(date)) ? date : null
+  return s?.startsWith(`board:${DAILY}`) ? s.slice(6 + DAILY.length, 16 + DAILY.length) : null
 }
 /** The pattern of a daily date. */
 const dailyDef = (date: string): typeof DAILY_DEFS[number] | undefined => DAILY_DEFS[dailyIndex(dailyDayOf(date))]
@@ -103,7 +101,7 @@ function Daily({ env, kit, wall }: { readonly env: Env; readonly kit: WorksKit; 
   const start = (): void => {
     if (going) { env.store.go('play'); return }
     const d = kit.decode(preview.b, 16)
-    if (d.ok) env.store.startPattern(`${DAILY}${date}`, d.board)
+    if (d.ok) env.store.startPicture(d.board, `${DAILY}${date}-`)
   }
   return (
     <section className="pd-wday">

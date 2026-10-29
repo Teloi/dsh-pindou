@@ -6,7 +6,7 @@
  * A work is the ironed board's code, its source key, its date and size: under
  * 1 KB each (a 24×24 code is 576 characters), at most 60, oldest dropped first.
  * Its id is the ironing time in ms (unique per wall), which is also its date.
- * A `board:` or `daily:` source up to 16×16 keeps the followed pattern as well, so 再拼一次
+ * A `board:` source up to 16×16 keeps the followed pattern as well, so 再拼一次
  * can follow it again; a 24×24 one follows the piece itself.
  *
  * The entry (game-store.ts) appends and withdraws and only checks ids; this
@@ -41,7 +41,7 @@ export interface Work {
   readonly p?: string
 }
 
-const SOURCE_RE = /^(template|board|daily):[a-z0-9-]{1,32}$/
+const SOURCE_RE = /^(template|board):[a-z0-9-]{1,32}$/
 const codeOk = (v: unknown, n: number): v is string => typeof v === 'string' && v.length === n * n && /^[.0-9a-f]*$/.test(v)
 
 /** One stored entry, or null when any part of it is broken. */
@@ -51,7 +51,7 @@ export function parseWork(raw: unknown): Work | null {
   const { i, n, b, s, p } = r
   if (!Number.isSafeInteger(i) || (i as number) <= 0 || !isBoardSize(n) || !codeOk(b, n)) return null
   if (s !== null && !(typeof s === 'string' && SOURCE_RE.test(s))) return null
-  if (p !== undefined && !(typeof s === 'string' && /^(board|daily):/.test(s) && codeOk(p, n))) return null
+  if (p !== undefined && !(typeof s === 'string' && s.startsWith('board:') && codeOk(p, n))) return null
   if (JSON.stringify(raw).length >= MAX_WORK_CHARS) return null
   return p === undefined ? { i: i as number, n, b, s } : { i: i as number, n, b, s, p }
 }

@@ -55,7 +55,7 @@ function StatusLine(): ReactElement {
   const isAi = !pic && (s.target?.startsWith('board:') ?? false)
   // only the board the last generation made: undo back to an older one and its facts are gone (R3-4)
   const ai = isAi && s.ai.result?.board === target ? s.ai.result : undefined
-  const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : isAi ? (ai?.prompt ?? t('homeAi')) : s.target ? t('myPattern') : t('playFree')
+  const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : pic ? t('myPattern') : isAi ? (ai?.prompt ?? t('homeAi')) : t('playFree')
   const beads = board.cells.filter(c => c !== EMPTY).length
   const c = target ? completion(board, target) : null
   return (

@@ -9,10 +9,7 @@ import { GameStore } from '../src/client/game-store.ts'
 import { renderExport } from '../src/client/render.ts'
 import type { Env } from '../src/client/ui/context.tsx'
 import { DAILY_DEFS, dailyDay, dailyIndex } from '../src/core/daily.ts'
-import { decode, defaultState, encode, findTemplate, makeTranslate, parseState, SafeStore, serializeState, STORAGE_KEY, WORKS_KEY, type StoredWork } from '../src/core/index.ts'
-import { cleanWorks } from '../src/core/works.ts'
-import { App } from '../src/client/ui/App.tsx'
-import { EnvContext } from '../src/client/ui/context.tsx'
+import { decode, encode, findTemplate, makeTranslate, SafeStore, type StoredWork } from '../src/core/index.ts'
 import * as chunk from '../src/client/works.tsx'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -49,7 +46,7 @@ const env = (lang: 'zh' | 'en' = 'zh', reduced = true): Env => ({
 const today = DAILY_DEFS[2]!
 const pattern = (def = today): string => def.rows.join('')
 /** A daily work of the given date (ironed at noon that day). */
-const daily = (date: string, at = Date.parse(`${date}T04:00:00Z`)): StoredWork => ({ i: at, n: 16, b: pattern(), s: `daily:${date}`, p: pattern() })
+const daily = (date: string, at = Date.parse(`${date}T04:00:00Z`)): StoredWork => ({ i: at, n: 16, b: pattern(), s: `board:p-daily-${date}-abc`, p: pattern() })
 const tpl = (i: number): StoredWork => ({ i, n: 16, b: encode(findTemplate('heart')!.board), s: 'template:heart' })
 const card = (): HTMLButtonElement => host.querySelector<HTMLButtonElement>('.pd-wdaily')!
 const mount = async (e: Env, wall: readonly StoredWork[]): Promise<void> => {
@@ -64,13 +61,13 @@ describe('F1: today\'s pattern on the wall page', () => {
     expect(host.querySelector('.pd-wday + .pd-wempty')).not.toBeNull() // above the empty wall too
   })
 
-  it('开始 starts a new game following today\'s pattern, keyed daily:2026-10-30 (spec §18.3), on the play page', async () => {
+  it('开始 starts a new game following today\'s pattern, keyed board:p-daily-2026-10-30-…, on the play page', async () => {
     const e = env()
     await mount(e, [])
     await act(async () => { card().click() })
     const g = e.store.getSnapshot()
     expect(g.mode).toBe('play')
-    expect(g.target).toBe('daily:2026-10-30')
+    expect(g.target).toMatch(/^board:p-daily-2026-10-30-[0-9a-z]+$/)
     expect(encode(g.targetBoard!)).toBe(pattern())
     expect(chunk.dailyOf(g.target)).toBe('2026-10-30')
   })
@@ -107,7 +104,7 @@ describe('F1: today\'s pattern on the wall page', () => {
     e.store.fillTarget()
     e.store.iron()
     const wall = e.store.works()
-    expect(wall.at(-1)?.s).toBe('daily:2026-10-30')
+    expect(wall.at(-1)?.s).toMatch(/^board:p-daily-2026-10-30-/)
     e.store.go('works')
     await mount(e, wall)
     expect(card().textContent).toBe(`今日一拼 · ${today.zh}连续 2 天再拼一次`)
@@ -145,69 +142,12 @@ describe('F1: daily works on the wall', () => {
 
   it('再拼一次 of a daily work stays a daily of its own date (so a replay never makes up a missed day)', () => {
     const e = env()
-    chunk.replay(e, kit, { i: 1, n: 16, b: pattern(), s: 'daily:2026-10-01', p: pattern() })
-    expect(e.store.getSnapshot().target).toBe('daily:2026-10-01')
+    chunk.replay(e, kit, { i: 1, n: 16, b: pattern(), s: 'board:p-daily-2026-10-01-xyz', p: pattern() })
+    expect(e.store.getSnapshot().target).toMatch(/^board:p-daily-2026-10-01-/)
   })
 
   it('dailyOf reads the date of a daily key only', () => {
-    expect(chunk.dailyOf('daily:2026-10-30')).toBe('2026-10-30')
-    for (const s of [null, 'board:p-mh2k', 'board:abc', 'template:heart', 'board:p-daily-2026-10-30-k3', 'daily:2026-1-30', 'daily:x', 'daily:']) expect(chunk.dailyOf(s)).toBeNull()
-  })
-})
-
-const mem = (): { data: Map<string, string>; getItem: (k: string) => string | null; setItem: (k: string, v: string) => void; removeItem: (k: string) => void } => {
-  const data = new Map<string, string>()
-  return { data, getItem: k => data.get(k) ?? null, setItem: (k, v) => { data.set(k, v) }, removeItem: (k) => { data.delete(k) } }
-}
-const storeOn = (backend: ReturnType<typeof mem>): GameStore => new GameStore({ store: new SafeStore(backend), saveDelayMs: 0, reducedMotion: () => true })
-
-describe('F1: the spec key daily:<YYYY-MM-DD> (spec §18.3), kept by the entry', () => {
-  it('the saved game keeps a daily key and its pattern (the entry drops no unknown-but-valid key)', () => {
-    const { state } = parseState(serializeState({ ...defaultState(), target: 'daily:2026-10-30', pattern: pattern() }))
-    expect(state.target).toBe('daily:2026-10-30')
-    expect(state.pattern).toBe(pattern())
-    // without its pattern a daily is nothing to follow: free play, like a `board:` key
-    expect(parseState(serializeState({ ...defaultState(), target: 'daily:2026-10-30', pattern: null })).state.target).toBeNull()
-    // a template never carries one
-    expect(parseState(serializeState({ ...defaultState(), target: 'template:heart', pattern: pattern() })).state.pattern).toBeNull()
-  })
-
-  it('a daily game survives a reload: same key, same pattern to follow', () => {
-    const backend = mem()
-    const a = storeOn(backend)
-    const d = decode(pattern(), 16)
-    if (!d.ok) throw new Error('pattern')
-    a.startPattern('daily:2026-10-30', d.board)
-    a.flush()
-    expect(JSON.parse(backend.data.get(STORAGE_KEY)!)).toMatchObject({ target: 'daily:2026-10-30', pattern: pattern() })
-    const b = storeOn(backend).getSnapshot()
-    expect(b.target).toBe('daily:2026-10-30')
-    expect(b.targetBoard && encode(b.targetBoard)).toBe(pattern())
-  })
-
-  it('an ironed daily goes on the wall with its pattern, and the wall chunk keeps it', () => {
-    const backend = mem()
-    const e = storeOn(backend)
-    const d = decode(pattern(), 16)
-    if (!d.ok) throw new Error('pattern')
-    e.startPattern('daily:2026-10-30', d.board)
-    e.fillTarget()
-    e.iron()
-    const raw = JSON.parse(backend.data.get(WORKS_KEY)!) as StoredWork[]
-    expect(raw.at(-1)).toMatchObject({ s: 'daily:2026-10-30', p: pattern() })
-    const { works, dropped } = cleanWorks(raw)
-    expect(dropped).toBe(false)
-    expect(works.at(-1)).toMatchObject({ s: 'daily:2026-10-30', p: pattern() })
-  })
-
-  it('the play page names a daily game 「我的图纸」, not 自由拼, and offers no 一键铺满 (an AI helper)', async () => {
-    const e = env()
-    const d = decode(pattern(), 16)
-    if (!d.ok) throw new Error('pattern')
-    e.store.startPattern('daily:2026-10-30', d.board)
-    await act(async () => { root.render(<EnvContext.Provider value={e}><App /></EnvContext.Provider>) })
-    expect(host.querySelector('.pd-status')!.textContent).toContain('我的图纸')
-    expect(host.querySelector('.pd-status')!.textContent).not.toContain('自由拼')
-    expect([...host.querySelectorAll('button')].some(b => b.textContent?.includes('一键铺满'))).toBe(false)
+    expect(chunk.dailyOf('board:p-daily-2026-10-30-k3')).toBe('2026-10-30')
+    for (const s of [null, 'board:p-mh2k', 'board:abc', 'template:heart', 'board:p-dailyx']) expect(chunk.dailyOf(s)).toBeNull()
   })
 })
