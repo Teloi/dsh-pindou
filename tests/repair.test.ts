@@ -50,6 +50,24 @@ describe('repairGrid', () => {
     if (r.ok) expect(r.issues).toEqual(expect.arrayContaining(['extra-rows', 'row-length']))
   })
 
+  it('drops leading hex chatter instead of the last grid row (audit A2 repro)', () => {
+    const r = repairGrid(`Here is a bad face:\nabadfacedeadbeef\n${rows}\n`, 16)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.issues).toEqual(['extra-rows'])
+    expect(encode(r.board)).toBe(encode(heart.board))
+    expect(encodeRows(r.board).split('\n')[0]).not.toBe('abadfacedeadbeef')
+  })
+
+  it('drops trailing hex chatter and prefers full-width windows', () => {
+    const r = repairGrid(`${rows}\ndeadbeefdeadbeef`, 16)
+    expect(r.ok && encode(r.board)).toBe(encode(heart.board))
+    const short = rows.split('\n')
+    const shifted = ['4'.repeat(15), ...short].join('\n') // a 15-wide junk row on top, 17 rows total
+    const s = repairGrid(shifted, 16)
+    expect(s.ok && encode(s.board)).toBe(encode(heart.board))
+  })
+
   it('splits a grid emitted as a single line', () => {
     const r = repairGrid(encode(heart.board), 16)
     expect(r.ok && encode(r.board)).toBe(encode(heart.board))

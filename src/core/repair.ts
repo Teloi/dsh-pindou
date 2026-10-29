@@ -33,6 +33,27 @@ function gridRatio(line: string): number {
   return ok / line.length
 }
 
+/** A row that looks drawn rather than written: hex words ("deadbeef") have no digits or empties. */
+function drawn(row: string): boolean {
+  return /[0-9]/.test(row) || [...row].some(ch => EMPTY_ALIASES.has(ch))
+}
+
+/**
+ * Surplus rows: keep the contiguous `size`-row window with the most rows of
+ * exactly `size` cells, then the most drawn-looking rows; earliest on a tie.
+ * Chatter that happens to be hex ("abadfacedeadbeef") at either end loses.
+ */
+export function bestWindow(rows: readonly string[], size: number): string[] {
+  let best = 0
+  let bestScore = [-1, -1]
+  for (let start = 0; start + size <= rows.length; start++) {
+    const window = rows.slice(start, start + size)
+    const score = [window.filter(r => r.length === size).length, window.filter(drawn).length]
+    if (score[0]! > bestScore[0]! || (score[0] === bestScore[0] && score[1]! > bestScore[1]!)) { best = start; bestScore = score }
+  }
+  return rows.slice(best, best + size)
+}
+
 /**
  * Turn untrusted model output into a board, repairing what can be repaired:
  * code fences, reasoning wrappers, upper case, separators, wrong row lengths,
@@ -81,7 +102,7 @@ export function repairGrid(raw: unknown, size: BoardSize): RepairResult {
   }
   if (rows.length < Math.ceil(size / 4)) return { ok: false, error: 'no-grid' }
 
-  if (rows.length > size) { rows = rows.slice(0, size); issues.add('extra-rows') }
+  if (rows.length > size) { rows = bestWindow(rows, size); issues.add('extra-rows') }
   if (rows.length < size) issues.add('missing-rows')
 
   const cells: number[] = []
