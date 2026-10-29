@@ -92,7 +92,7 @@ export function renderExport(doc: Document, board: Board, ironed: boolean, dark:
       roundRect(ctx, o + x * o - 0.5, o + y * o - 0.5, o + 1, o + 1, [tl ? r : 0, tr ? r : 0, br ? r : 0, bl ? r : 0])
       ctx.fill()
       // the same soft inner shade as the panel, so fused light beads keep their texture (design N13)
-      if (typeof ctx.createRadialGradient === 'function') {
+      if (ctx.createRadialGradient) {
         const cx = o + (x + 0.5) * o, cy = o + (y + 0.5) * o
         const inner = ctx.createRadialGradient(cx, cy, o * 0.22, cx, cy, o * 0.72)
         inner.addColorStop(0, 'rgba(0,0,0,0)')
@@ -109,7 +109,7 @@ export function renderExport(doc: Document, board: Board, ironed: boolean, dark:
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number | number[]): void {
   ctx.beginPath()
-  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r)
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r)
   else ctx.rect(x, y, w, h)
 }
 

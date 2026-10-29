@@ -82,7 +82,7 @@ const HINTS_KEPT = 50
 const shownCount = new Map<string, number>()
 
 function sessionStore(): Storage | undefined {
-  try { return typeof globalThis.sessionStorage === 'undefined' ? undefined : globalThis.sessionStorage } catch { return undefined }
+  try { return globalThis.sessionStorage } catch { return undefined }
 }
 
 function readCounts(): Record<string, number> {

@@ -194,7 +194,7 @@ export class SafeStore {
 /** Resolve `window.localStorage` without throwing (access itself can throw). */
 export function browserStorage(): StorageLike | undefined {
   try {
-    return typeof globalThis.localStorage === 'undefined' ? undefined : globalThis.localStorage
+    return globalThis.localStorage
   } catch {
     return undefined
   }

@@ -145,7 +145,7 @@ export function panelOnScreen(el: HTMLElement): boolean {
   if (!el.isConnected || el.getClientRects().length === 0 || el.ownerDocument.visibilityState === 'hidden') return false
   // The host hides a tab with [hidden]/display:none and a collapsed sidebar with inert + aria-hidden.
   if (el.closest('[hidden],[inert],[aria-hidden="true"]')) return false
-  if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) return false
+  if (el.checkVisibility?.({ visibilityProperty: true }) === false) return false // (older engines lack it)
   const view = el.ownerDocument.defaultView
   if (!view || !view.innerWidth) return true
   const r = el.getBoundingClientRect()
