@@ -154,14 +154,18 @@ const PANEL = `
 @keyframes pd-view-in{from{opacity:0;transform:translateX(8px)}}
 /* start page: three equal entry cards, 64 high, icon left (spec §18.1); narrower than 360: icon on top, 72 high */
 .pd-start{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:16px}
-.pd-big{border:1px solid var(--pd-border);background:var(--pd-surface-raised);border-radius:var(--pd-radius-card);padding:8px 10px;text-align:left;cursor:pointer;display:grid;grid:auto auto/28px minmax(0,1fr);align-content:center;gap:1px 8px;height:64px;transition:background var(--pd-t-fast),transform var(--pd-t-fast)}
+.pd-big{border:1px solid var(--pd-border);background:var(--pd-surface-raised);border-radius:var(--pd-radius-card);padding:8px 10px;text-align:left;cursor:pointer;display:grid;grid:auto auto/28px minmax(0,1fr);align-content:center;gap:1px 8px;min-height:64px;transition:background var(--pd-t-fast),transform var(--pd-t-fast)}
 @media (hover:hover){.pd-big:hover{background:var(--pd-hover)}}
 .pd-big:active{transform:scale(.98)}
 .pd-big .pd-ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--pd-surface);grid-row:span 2;--pd-i:16px}
-.pd-big b,.pd-big span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* entry cards (design C1): a title is never cut (CJK keeps whole, Latin may wrap at spaces); a description
+   shows up to two lines; a status line (需要新版 DSH / 加载失败) always shows in full; the row grows to fit */
+.pd-big b{word-break:keep-all}
+.pd-big b+span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.pd-big .pd-st{display:block}
 .pd-big b{font-size:13.5px;font-weight:600}
 .pd-big span{font-size:12px;color:var(--pd-text-3)}
-@container pd (max-width: 359px){.pd-big{grid:auto/minmax(0,1fr);height:72px;padding:6px 8px}.pd-big .pd-ic{grid-row:auto;width:24px;height:24px}}
+@container pd (max-width: 479px){.pd-big{grid:auto/minmax(0,1fr);min-height:72px;padding:6px 8px;align-content:start}.pd-big .pd-ic{grid-row:auto;width:24px;height:24px}.pd-big b{font-size:13px}}
 /* lazy modules (spec §18.6): no require.async → shown, focusable, inert; loading > 150 ms → a --pd-surface block */
 .pd-big.pd-off{opacity:.5;cursor:default;background:var(--pd-surface-raised);transform:none}
 .pd-lazy{display:grid;justify-items:center}

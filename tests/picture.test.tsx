@@ -204,6 +204,8 @@ describe('degradation path, from apply() to a game (host without require.async)'
     // the reason is part of its accessible name
     expect(card.textContent).toContain('图片转图纸')
     expect(card.textContent).toContain('需要新版 DSH')
+    // a status line, so it is never clamped or cut (design I1/C1)
+    expect(card.querySelector('b + span.pd-st')?.textContent).toBe('需要新版 DSH')
     // clicking (Enter/Space on a button are clicks) does nothing
     await act(async () => { card.click() })
     expect(host.querySelector('.pd-v-home')).not.toBeNull()
@@ -294,6 +296,7 @@ describe('load failure: in-page retry, no toast (spec §18.6)', () => {
     await act(async () => { store.go('home') })
     expect(card().dataset['lazy']).toBe('failed')
     expect(card().textContent).toContain('Couldn’t load · Retry')
+    expect(card().querySelector('b + span.pd-st')?.textContent).toBe('Couldn’t load · Retry')
     expect(card().hasAttribute('aria-disabled')).toBe(false)
     await act(async () => { card().click() })
     expect(calls).toHaveLength(2)

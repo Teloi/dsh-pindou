@@ -290,6 +290,44 @@ const allOk = r => r.normal.length === 16 && r.hot.length === 16 && [...r.normal
 const bad = r => JSON.stringify([...r.normal, ...r.hot].filter(x => !x.ok).slice(0, 4))
 /** The third start card: picture to pattern (spec §18.1). */
 const pictureCard = p => p.locator('.pd-start .pd-big').nth(2)
+/** How many rendered lines an element's text takes (evaluated in the page). */
+function lines(el) { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top))).size }
+/** The three start cards as laid out now (`lineCount` is `lines`, passed in: both run in the page): size, title and description lines, what is cut (design I1/C1). */
+const startCards = lineCount => [...document.querySelectorAll('.pd-start .pd-big')].map((c) => {
+  const b = c.querySelector('b'), d = c.querySelector('b + span'), box = c.getBoundingClientRect()
+  const lh = d.getClientRects()[0] ? d.scrollHeight / Math.max(1, lineCount(d)) : 16
+  return {
+    w: Math.round(box.width), h: Math.round(box.height), top: Math.round(box.top), title: b.textContent, sub: d.textContent, status: d.classList.contains('pd-st'),
+    titleLines: lineCount(b), titleCut: b.scrollWidth > b.clientWidth + 1 || b.scrollHeight > b.clientHeight + 1,
+    subLines: lineCount(d), subShown: Math.round(d.clientHeight / lh), subCut: d.scrollHeight > d.clientHeight + 1 || d.scrollWidth > d.clientWidth + 1,
+    clamp: getComputedStyle(d).webkitLineClamp,
+  }
+})
+/**
+ * I1/C1 at each panel width: titles never cut (Chinese on one line; English may wrap at a space), a
+ * status line (需要新版 DSH / 加载失败) in full, other descriptions at most two whole lines, three
+ * equal cards in one row at least 64 px (72 px icon-on-top below 480).
+ */
+async function cardsFit(p, label, widths = [300, 360, 420, 640, 900], shots = []) {
+  const all = []
+  for (const px of widths) {
+    await p.evaluate(v => { document.querySelector('.pd-root').style.width = `${v}px` }, px)
+    await p.waitForTimeout(350)
+    const cards = await p.evaluate(`(${startCards})(${lines})`)
+    const hs = cards.map(c => c.h), ws = cards.map(c => c.w)
+    const min = px < 480 ? 72 : 64
+    const cut = cards.filter(c => c.titleCut || (label.startsWith('zh') && c.titleLines !== 1) || c.titleLines > 2
+      || (c.status ? c.subCut : c.subShown > 2 || (c.subCut && c.clamp !== '2')))
+    const ok = cards.length === 3 && cut.length === 0 && Math.max(...hs) - Math.min(...hs) <= 1 && Math.max(...ws) - Math.min(...ws) <= 1
+      && Math.min(...hs) >= min && new Set(cards.map(c => c.top)).size === 1
+    check(`I1/C1 (${label}) panel ${px}px: card titles whole, status line whole, descriptions ≤ 2 lines, three equal cards ≥ ${min}px`, ok, JSON.stringify(cut.length ? cut : cards.map(c => [c.w, c.h, c.titleLines, c.subLines, c.subShown])))
+    all.push({ px, cards })
+    if (shots.includes(px)) await outShot(p, `c1-home-${label}-${px}`, { clip: await p.locator('.pd-start').boundingBox() })
+  }
+  await p.evaluate(() => { document.querySelector('.pd-root').style.width = '' })
+  await p.waitForTimeout(350)
+  if (SELFCHECK) writeFileSync(join(SELFCHECK, `c1-cards-${label}.json`), `${JSON.stringify(all, null, 2)}\n`)
+}
 const b64 = buf => Buffer.from(buf).toString('base64')
 /** Place `n` correct beads by following the ghost guide. */
 async function placeBeads(p, n) {
@@ -647,6 +685,7 @@ try {
     const failCards = await f.evaluate(hostFileCards, 'failed-panel.png')
     check('T1 load failed: a picture dropped on the panel is swallowed (no DSH attachment), nothing opens or reloads', failDrop.dropPrevented && failDrop.hostSaw.length === 0 && failCards === 0 && fetches === 2 && await f.locator('.pd-v-home').count() === 1, JSON.stringify({ ...failDrop, failCards, fetches }))
     await outShot(f, 't1-card-failed')
+    await cardsFit(f, 'zh-load-failed', undefined, [300, 420])
     await pictureCard(f).click()
     await f.locator('.pd-lazy[data-lazy=failed] button').waitFor({ timeout: 10000 })
     mode = 'slow'
@@ -701,6 +740,7 @@ try {
         check('T1 no require.async: a picture dropped on the chat input is still a DSH attachment', offChatCard && offChat.hostSaw.includes('drop'), JSON.stringify({ offChatCard, ...offChat }))
       }
       await outShot(u, `t1-unsupported-${lang}`)
+      await cardsFit(u, `${lang}-unsupported`, undefined, [300, 420])
       await u.locator('.pd-start .pd-big').first().click()
       await u.locator('.pd-board').waitFor({ timeout: 5000 })
       for (let i = 0; i < 3; i++) await u.locator('.pd-board .pd-cell').nth(i * 17).click()
@@ -1049,7 +1089,7 @@ try {
         homeCols === (px >= 560 ? 4 : 3) && mm.scroll <= mm.client + 1 && mm.over.length === 0, JSON.stringify({ ...mm, cols: homeCols }))
       await outShot(p, `width-${px}-home`, await rootClip())
     }
-    await p.evaluate(() => { document.querySelector('.pd-root').style.width = '' })
+    await cardsFit(p, 'zh', undefined, [300, 360])
     await p.setViewportSize({ width: 1280, height: 800 })
   }
   await p.context().close()
@@ -1179,6 +1219,7 @@ try {
   await openPanel(e1)
   check('en-US panel is labelled “Bead Break”', await e1.locator('.pd-root').getAttribute('aria-label') === 'Bead Break')
   await outShot(e1, 'en-home')
+  await cardsFit(e1, 'en', undefined, [300, 360, 640])
   await playFirstTemplate(e1)
   await outShot(e1, 'en-play')
   await e1.locator('.pd-head .pd-ib').first().click()

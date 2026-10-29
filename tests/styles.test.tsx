@@ -242,6 +242,27 @@ describe('style isolation', () => {
 
 const count = (s: string): number => (s.replace(/\/\*[\s\S]*?\*\//g, '').match(/\{/g) ?? []).length
 
+describe('I1/C1 start cards never cut a title or a status line', () => {
+  const plain = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+  const rules = (sel: string): string => [...plain.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m => m[1]!.trim().split(',').includes(sel)).map(m => m[2]).join(';')
+  it('cards grow with their text: min-height 64, no fixed height, no ellipsis or nowrap anywhere on them', () => {
+    expect(rules('.pd-big')).toMatch(/(^|;)min-height:64px/)
+    expect(rules('.pd-big')).not.toMatch(/(^|;)height:/)
+    expect(plain).not.toMatch(/\.pd-big[^{]*\{[^}]*(text-overflow|white-space:nowrap)/)
+  })
+  it('titles keep CJK words whole and wrap Latin only at spaces; descriptions clamp to two lines; status lines are not clamped', () => {
+    expect(rules('.pd-big b')).toContain('word-break:keep-all')
+    expect(rules('.pd-big b+span')).toMatch(/display:-webkit-box.*-webkit-line-clamp:2/)
+    expect(rules('.pd-big .pd-st')).toBe('display:block')
+  })
+  it('below 480 the icon sits on top and cards are at least 72 high', () => {
+    const q = /@container pd \(max-width: 479px\)\{(.*?\})\}/.exec(plain)?.[1] ?? ''
+    expect(q).toMatch(/\.pd-big\{grid:auto\/minmax\(0,1fr\);min-height:72px/)
+    expect(q).toMatch(/\.pd-big \.pd-ic\{grid-row:auto/)
+    expect(plain).not.toMatch(/max-width: 359px\)\{\.pd-big/)
+  })
+})
+
 describe('build-time CSS minifier', () => {
   it('drops comments and insignificant whitespace but keeps combinators and calc() spacing', async () => {
     const { minifyCss } = await import('../scripts/minify-css.ts')

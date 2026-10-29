@@ -35,7 +35,8 @@ export function LazyCard({ mod = UNSUPPORTED, icon, title, desc, onOpen }: {
       onClick={off ? undefined : onOpen}>
       <span className="pd-ic" aria-hidden>{icon}</span>
       <b>{title}</b>
-      <span>{off ? t('needNewerDsh') : status === 'failed' ? t('loadRetry') : desc}</span>
+      {/* a status line shows in full (design C1) */}
+      {off || status === 'failed' ? <span className="pd-st">{t(off ? 'needNewerDsh' : 'loadRetry')}</span> : <span>{desc}</span>}
     </button>
   )
 }
