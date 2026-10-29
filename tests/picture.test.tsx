@@ -376,7 +376,8 @@ describe('picture page (spec §18.2)', () => {
 
   it('C4 copy, both languages, as in the spec revision', () => {
     expect(chunk.PICTURE_STRINGS.zh.svg).toBe('暂不支持 SVG，换成 PNG 或 JPG 试试')
-    expect(chunk.PICTURE_STRINGS.en.svg).toBe('SVG isn\'t supported yet. Try a PNG or JPG.')
+    // curly apostrophe like the rest of the English copy (b3 S6)
+    expect(chunk.PICTURE_STRINGS.en.svg).toBe('SVG isn’t supported yet. Try a PNG or JPG.')
     expect(chunk.PICTURE_STRINGS.zh.transparent).toBe('这张图几乎是透明的，换一张试试')
     expect(chunk.PICTURE_STRINGS.en.transparent).toBe('This image is almost fully transparent. Try another one.')
   })

@@ -30,7 +30,7 @@ const STRINGS = {
   en: {
     drop: 'Drop, paste or choose a picture', choose: 'Choose a picture', note: 'Your picture never leaves this device',
     notImage: 'That file isn’t an image.', tooBig: 'That picture is too big — try a smaller one', cannotOpen: 'Couldn’t open this picture',
-    svg: 'SVG isn\'t supported yet. Try a PNG or JPG.', transparent: 'This image is almost fully transparent. Try another one.',
+    svg: 'SVG isn’t supported yet. Try a PNG or JPG.', transparent: 'This image is almost fully transparent. Try another one.',
     tooSimple: 'Too simple — try turning off Remove background', start: 'Start beading', another: 'Choose another',
     crop: 'Crop: drag or use the arrow keys to move, + / - to zoom', zoom: 'Zoom', size: 'Size', colors: 'Colours',
     all: 'All 16', some: '{n} colours', dither: 'Dithering', removeBg: 'Remove background', preview: '{n}×{n} preview, {beads} beads', loaded: 'Image loaded',
