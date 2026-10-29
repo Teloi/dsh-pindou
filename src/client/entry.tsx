@@ -55,11 +55,12 @@ export function makeEntry(deps: EntryDeps): (props: SessionProps) => ReactElemen
     const running = useRunning(props)
     const dot = useSyncExternalStore(store.subscribe, () => entryDot(store.getSnapshot(), running))
     const open = useStore(store, s => s.panelVisible)
+    const fresh = useStore(store, s => s.fresh)
     return (
       <button
         type="button"
         className={cx('pd-portal', 'pd-entry', dot === 'busy' && 'pd-busy', dot === 'progress' && 'pd-has-progress')}
-        aria-label={running ? t('entryBusyLabel') : t('entryLabel')}
+        aria-label={running ? t('entryBusyLabel') : t('entryLabel') + (dot ? t(fresh ? 'entryFresh' : 'entryProgress') : '')}
         aria-expanded={open}
         aria-keyshortcuts={deps.keyshortcuts}
         title={t('entryLabel')}

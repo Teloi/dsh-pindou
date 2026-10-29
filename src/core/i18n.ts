@@ -18,6 +18,9 @@ export const APP_NAME_EN = 'Bead Break'
 const COPY = {
   appName: [APP_NAME_ZH, APP_NAME_EN],
   entryLabel: [`打开${APP_NAME_ZH}`, `Open ${APP_NAME_EN}`],
+  // the dot is aria-hidden: what it shows goes in the label (R3-5)
+  entryProgress: ['（有未完成的进度）', ' (in progress)'],
+  entryFresh: ['（生成完成）', ' (new pattern)'],
   entryBusyLabel: ['模型正在思考 — 来拼一会儿豆子？', 'The model is thinking — place a few beads?'],
   hintText: ['趁现在拼一个？', 'Quick bead break?'],
   hintGo: [`打开${APP_NAME_ZH}`, `Open ${APP_NAME_EN}`],
