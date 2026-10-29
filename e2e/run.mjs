@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers, toastLongLine } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
-import { dropFile, HEART, hostFileCards, NO_ASYNC_REQUIRE, pasteFile, png, storedFootprint } from './picture.mjs'
+import { decodePng } from './compare-shots.mjs'
+import { contrast, dropFile, HEART, hostFileCards, NO_ASYNC_REQUIRE, pasteFile, png, sliderLook, storedFootprint } from './picture.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DSH_SRC = process.env.DSH_SRC ?? '/home/box/src/deepseek-harness'
@@ -425,6 +426,20 @@ try {
     await q.keyboard.press('ArrowLeft')
     const zoom = Number(await q.locator('.pd-pic input[type=range]').inputValue())
     check('T1 + on the crop zooms in (1.25), arrows pan', Math.abs(zoom - 1.25) < 0.01, String(zoom))
+    // I2: the zoom slider has a visible track in both themes: 4px, ≥3:1 on the page; the zoomed share in accent; a 16px thumb
+    const range = q.locator('.pd-pic input[type=range]')
+    await range.evaluate(e => { e.closest('.pd-pic')?.querySelector('.pd-pic-crop')?.focus() })
+    for (const scheme of ['light', 'dark']) {
+      await q.emulateMedia({ colorScheme: scheme })
+      await q.waitForTimeout(350)
+      const geo = await range.evaluate(e => { const r = e.getBoundingClientRect(); return { w: r.width, accent: getComputedStyle(e).getPropertyValue('--pd-accent').trim() } })
+      const thumbX = 8 + (geo.w - 16) * (0.25 / 3)
+      const look = sliderLook(decodePng(await range.screenshot({ animations: 'disabled' })), 2, thumbX)
+      check(`T1 I2 zoom slider (${scheme}): track ≥3:1 on the page, the zoomed share in accent, a 16px thumb`, look.trackContrast >= 3 && contrast(look.filled, look.bg) >= 3 && Math.abs(look.thumbCss - 16) <= 1.5, JSON.stringify({ ...look, ...geo }))
+      if (scheme === 'dark') await outShot(q, 't1-zoom-slider-dark')
+    }
+    await q.emulateMedia({ colorScheme: 'light' })
+    await q.waitForTimeout(350)
     await q.keyboard.press('-')
     await q.locator('.pd-pic [aria-pressed]', { hasText: '24×24' }).click()
     await q.locator('.pd-pic [aria-pressed]', { hasText: '8 色' }).click()

@@ -99,3 +99,25 @@ export function hostFileCards(name) {
     .filter(e => !e.closest('.pd-root, .pd-portal'))
     .filter(e => e.getAttribute('alt') === name || (e.getAttribute('aria-label') ?? '').includes(name) || (e.childElementCount === 0 && e.textContent?.trim() === name)).length
 }
+
+const linear = v => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4 }
+const lum = ([r, g, b]) => 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+/** WCAG contrast of two RGB colours. */
+export function contrast(a, b) {
+  const x = Math.max(lum(a), lum(b)), y = Math.min(lum(a), lum(b))
+  return (x + 0.05) / (y + 0.05)
+}
+
+/**
+ * How the zoom slider looks (design I2), from a screenshot of the input at `dpr`:
+ * the page behind it (a corner), the unfilled track near the right end, the filled
+ * track near the left end, and the thumb's height in CSS px (accent-like rows in the
+ * column through `thumbX`, a CSS x).
+ */
+export function sliderLook({ width, height, data }, dpr, thumbX) {
+  const at = (x, y) => { const o = (Math.round(y) * width + Math.round(x)) * 4; return [data[o], data[o + 1], data[o + 2]] }
+  const mid = (height - 1) / 2, bg = at(width - 1, 0), track = at(width - 6 * dpr, mid), filled = at(3 * dpr, mid)
+  let thumb = 0
+  for (let y = 0; y < height; y++) if (contrast(at(thumbX * dpr, y), bg) >= 2 && Math.abs(at(thumbX * dpr, y)[2] - filled[2]) < 40) thumb++
+  return { bg, track, filled, trackContrast: Number(contrast(track, bg).toFixed(2)), thumbCss: thumb / dpr, heightCss: height / dpr }
+}

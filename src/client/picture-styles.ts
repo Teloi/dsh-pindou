@@ -23,7 +23,15 @@ export const PICTURE_CSS = `
 .pd-pic-crop canvas{width:100%;height:100%;display:block}
 .pd-pic-row{display:flex;align-items:center;gap:8px;min-height:32px;font-size:12.5px;color:var(--pd-text-2)}
 .pd-pic-row>span:first-child{flex:1;min-width:0}
-.pd-pic-row input[type=range]{flex:1;min-width:0;accent-color:var(--pd-accent)}
+/* the zoom slider (design I2): a 4px round track, the zoomed-in part in accent, a 16px thumb.
+   The unfilled track mixes the secondary label into the page so it is ≥3:1 on it in both themes
+   (--pd-border alone is ~1.3:1); --pd-v is the filled share, set inline. */
+.pd-pic-row input[type=range]{--pd-track:color-mix(in srgb,var(--pd-text-2) 72%,var(--pd-bg));flex:1;min-width:0;height:24px;padding:0;background:none;border:0;cursor:pointer;border-radius:var(--pd-radius-ctl)}
+.pd-pic-row input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(to right,var(--pd-accent) var(--pd-v,0%),var(--pd-track) 0)}
+.pd-pic-row input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:var(--pd-track)}
+.pd-pic-row input[type=range]::-moz-range-progress{height:4px;border-radius:2px;background:var(--pd-accent)}
+.pd-pic-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;margin-top:-6px;border:0;border-radius:50%;background:var(--pd-accent);box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.pd-pic-row input[type=range]::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;background:var(--pd-accent);box-shadow:0 1px 2px rgba(0,0,0,.2)}
 .pd-pic-prev{display:flex;align-items:center;gap:12px}
 .pd-pic-prev canvas{width:min(45%,200px);aspect-ratio:1;border-radius:12px;background:var(--pd-board);flex:none}
 .pd-pic-prev p{margin:0;font-size:12px;color:var(--pd-text-3)}

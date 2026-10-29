@@ -13,7 +13,7 @@
  * is dropped once decoded. Nothing is uploaded, written to disk, or stored; only
  * the quantised pattern leaves this module (through `onStart`).
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react'
 import { almostTransparent, decodeSize, MAX_SIDE, precheck, SNIFF_BYTES, type SniffError } from '../core/image-sniff.ts'
 import { beadCount, COLOR_LIMITS, DEFAULT_OPTIONS, MIN_BEADS, PICTURE_SIZES, quantize, type ColorLimit, type Crop, type PictureSize, type Pixels, type QuantizeOptions } from '../core/quantize.ts'
 import { PICTURE_CSS } from './picture-styles.ts'
@@ -335,7 +335,7 @@ export function PicturePage(props: PictureProps): ReactElement {
       {fileInput}
       <label className="pd-pic-row">
         <span>{t('zoom')}</span>
-        <input type="range" min={1} max={ZOOM_MAX} step={0.01} value={view.zoom}
+        <input type="range" min={1} max={ZOOM_MAX} step={0.01} value={view.zoom} style={{ '--pd-v': `${((view.zoom - 1) / (ZOOM_MAX - 1)) * 100}%` } as CSSProperties}
           onChange={(e) => { const z = Number(e.currentTarget.value); move(0, 0, z / view.zoom) }} />
       </label>
       <div className="pd-pic-prev">
