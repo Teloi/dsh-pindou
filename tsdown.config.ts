@@ -17,6 +17,7 @@ import { defineConfig, type UserConfig } from 'tsdown'
 import pkg from './package.json' with { type: 'json' }
 import { asyncChunksPlugin, registrationBanner } from './scripts/async-chunks.ts'
 import { shortenCssVars } from './scripts/css-vars.ts'
+import { aliasJsxRuntime } from './scripts/jsx-alias.ts'
 import { minifyCssModule } from './scripts/minify-css.ts'
 
 const NODE_BUILTINS = new Set([...builtinModules, ...builtinModules.map(id => `node:${id}`)])
@@ -78,6 +79,12 @@ const client: UserConfig = {
       if (!/\/src\/client\/[^?]*\.tsx?$/.test(id.replaceAll('\\', '/'))) return null
       const out = shortenCssVars(code)
       return out === code ? null : { code: out, map: null }
+    },
+  }, {
+    // `(0, rt.jsx)(…)` → a local alias the minifier shortens (scripts/jsx-alias.ts).
+    name: 'dsh-client-jsx-alias',
+    renderChunk(code: string, chunk: { fileName: string }) {
+      return { code: aliasJsxRuntime(code, chunk.fileName), map: null }
     },
   }, asyncChunksPlugin(), {
     name: 'dsh-client-bundle-purity',

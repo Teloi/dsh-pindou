@@ -152,6 +152,12 @@ describe('check:bundle on lazy chunks', () => {
     }
   })
 
+  it('a JSX runtime call left in the (0,x.jsx)(…) form fails (scripts/jsx-alias.ts)', () => {
+    const r = checkBundle(libWith({ 'client.js': entry('var r=require("react/jsx-runtime");(0,r.jsx)("b",{});') }))
+    expect(r.status).toBe(1)
+    expect(r.out).toMatch(/calls the JSX runtime as \(0,x\.jsx\)/)
+  })
+
   it('a first screen over v0.1 + 1.5 KB fails even below 90% of 40 KB', () => {
     // base64 of random bytes gzips to ~76%: grow until just over the cap
     const random = randomBytes(60_000).toString('base64')

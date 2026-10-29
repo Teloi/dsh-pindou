@@ -63,6 +63,7 @@ function checkScript(file, code, chunk) {
   }
   if (/\bbb-|--bb-/.test(code)) fail.push(`${file} contains a non-pd- class prefix`)
   if (/(?:^|\n)\s*import\s/.test(code)) fail.push(`${file} must be CJS (no import statements)`)
+  if (/\(0,\s*\w+\.jsxs?\)\(/.test(code)) fail.push(`${file} calls the JSX runtime as (0,x.jsx)(…); tsdown.config.ts dsh-client-jsx-alias must turn these into local aliases`)
   if (code.includes('__PURE__')) fail.push(`${file} ships /* @__PURE__ */ annotations; tsdown.config.ts output.comments.annotation must stay false`)
 }
 
