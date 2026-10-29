@@ -1,0 +1,8 @@
+node_modules/
+lib/
+coverage/
+*.log
+.DS_Store
+.pr-draft.md
+e2e/.out/
+e2e/.dsh-home/
