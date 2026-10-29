@@ -5,7 +5,7 @@
 import { useEffect, useId, useRef, type ReactElement } from 'react'
 import { MAX_PROMPT_CHARS } from '../../core/index.ts'
 import { AI_SIZES } from '../game-store.ts'
-import { useFocusReturn } from '../focus.ts'
+import { canFocus, focusLost, useFocusReturn } from '../focus.ts'
 import { IconAlert, IconSparkle } from '../icons.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 
@@ -33,6 +33,19 @@ export function AiView(): ReactElement {
   useFocusReturn(card, notConfigured)
   const opener = notConfigured ? (env.settings?.() ?? {}) : {}
   const off = loading || notConfigured
+
+  // A failed generation puts focus on 重试 (design N4), unless the user is busy elsewhere (e.g. the chat composer).
+  const retry = useRef<HTMLButtonElement>(null)
+  const failed = ai.phase === 'error' && ai.error !== undefined && ai.error !== 'not-configured' && ai.error !== 'empty'
+  // keyed on the error itself: a repeated failure (a new error object) refocuses 重试
+  useEffect(() => {
+    const btn = retry.current
+    if (!failed || !btn || ai.error === undefined) return
+    const doc = btn.ownerDocument
+    const root = btn.closest('.pd-root')
+    if (!focusLost(doc) && !(root?.contains(doc.activeElement) ?? false)) return
+    if (canFocus(btn)) btn.focus({ preventScroll: true })
+  }, [failed, ai.error])
 
   const submit = (): void => { void store.generate() }
   const examples = t('aiExamples').split('|')
@@ -114,7 +127,7 @@ export function AiView(): ReactElement {
             <p className="pd-t"><IconAlert />{t('aiErrTitle')}</p>
             <p>{t(ERR[ai.error])}</p>
             {ai.error !== 'empty'
-              ? <div className="pd-acts"><button type="button" className="pd-btn" onClick={submit}>{t('aiRetry')}</button></div>
+              ? <div className="pd-acts"><button ref={retry} type="button" className="pd-btn" data-primary onClick={submit}>{t('aiRetry')}</button></div>
               : null}
           </div>
         )

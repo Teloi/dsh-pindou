@@ -72,11 +72,49 @@ export function makeEntry(deps: EntryDeps): (props: SessionProps) => ReactElemen
   }
 }
 
-/** Per-session show counts, shared by every pill instance for the page's life. */
+/**
+ * Per-session show counts (design N5): kept in sessionStorage, so a reload
+ * doesn't hand out two more pills for the same conversation, and in memory as
+ * the fallback when storage is unavailable (private mode, quota, sandbox).
+ */
+export const HINTS_KEY = 'dsh-pindou:hints'
+const HINTS_KEPT = 50
 const shownCount = new Map<string, number>()
 
+function sessionStore(): Storage | undefined {
+  try { return typeof globalThis.sessionStorage === 'undefined' ? undefined : globalThis.sessionStorage } catch { return undefined }
+}
+
+function readCounts(): Record<string, number> {
+  try {
+    const raw = sessionStore()?.getItem(HINTS_KEY)
+    const v: unknown = raw ? JSON.parse(raw) : null
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>)
+      .filter((e): e is [string, number] => typeof e[1] === 'number' && Number.isInteger(e[1]) && e[1] >= 0))
+  } catch { return {} }
+}
+
+export function hintCount(key: string): number {
+  return Math.max(shownCount.get(key) ?? 0, readCounts()[key] ?? 0)
+}
+
+function noteHintShown(key: string, count: number): void {
+  shownCount.set(key, count)
+  try {
+    const all = { ...readCounts() }
+    delete all[key]
+    all[key] = count
+    const keep = Object.entries(all).slice(-HINTS_KEPT)
+    sessionStore()?.setItem(HINTS_KEY, JSON.stringify(Object.fromEntries(keep)))
+  } catch { /* memory count still applies */ }
+}
+
 /** Test hook: forget how often the pill was shown. */
-export function resetHintCounts(): void { shownCount.clear() }
+export function resetHintCounts(): void {
+  shownCount.clear()
+  try { sessionStore()?.removeItem(HINTS_KEY) } catch { /* nothing stored */ }
+}
 
 function useNarrow(): boolean {
   const get = (): boolean => typeof window !== 'undefined' && window.innerWidth < HINT_MIN_VIEWPORT
@@ -105,9 +143,9 @@ export function makeBusyPill(deps: EntryDeps): (props: SessionProps) => ReactEle
     useEffect(() => {
       if (!running) return
       const id = setTimeout(() => {
-        const count = shownCount.get(key) ?? 0
+        const count = hintCount(key)
         if (count >= HINTS_PER_SESSION || blockedRef.current) return
-        shownCount.set(key, count + 1)
+        noteHintShown(key, count + 1)
         setPhase('shown')
       }, HINT_DELAY_MS)
       return () => { clearTimeout(id) }

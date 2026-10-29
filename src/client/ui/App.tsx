@@ -4,8 +4,8 @@
  */
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { COLOR_COUNT, type MessageKey } from '../../core/index.ts'
-import type { ToastKey } from '../game-store.ts'
-import { useFocusGuard, useFocusReturn } from '../focus.ts'
+import type { GameState, ToastKey } from '../game-store.ts'
+import { focusBoard, useFocusGuard, useFocusReturn } from '../focus.ts'
 import { IconBack, IconMore } from '../icons.tsx'
 import { AiView } from './Ai.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
@@ -13,7 +13,7 @@ import { HomeView } from './Home.tsx'
 import { PlayView } from './Play.tsx'
 
 const TOAST_TEXT: Record<ToastKey, MessageKey> = {
-  cleared: 'toastCleared', locked: 'toastLocked', exported: 'toastExported', exportFailed: 'toastExportFailed',
+  cleared: 'toastCleared', newGame: 'toastNewGame', locked: 'toastLocked', exported: 'toastExported', exportFailed: 'toastExportFailed',
   copied: 'toastCopied', copyFailed: 'toastCopyFailed',
   storageUnavailable: 'storageUnavailable', storageRecovered: 'storageRecovered',
 }
@@ -74,20 +74,48 @@ function Menu({ onClose }: { readonly onClose: () => void }): ReactElement {
   )
 }
 
+/**
+ * Toast: 2.4 s, or 5 s with 撤销. Hovering or focusing it pauses the clock
+ * (the remaining time is kept, design N14). 撤销 puts focus on the board,
+ * where the change it undid is (design N4).
+ */
+const toastIds = new WeakMap<object, number>()
+let toastSeq = 0
 function Toast(): ReactElement | null {
-  const { store, t } = useEnv()
-  const s = useGame()
-  const toast = s.toast
-  useEffect(() => {
-    if (!toast) return
-    const id = setTimeout(() => { store.hideToast() }, toast.undo ? TOAST_UNDO_MS : TOAST_MS)
-    return () => { clearTimeout(id) }
-  }, [toast, store])
+  const toast = useGame().toast
   if (!toast) return null
+  let id = toastIds.get(toast)
+  if (id === undefined) { id = ++toastSeq; toastIds.set(toast, id) }
+  // keyed by the toast: a new toast starts with a fresh clock and no hold
+  return <ToastView key={id} toast={toast} />
+}
+
+function ToastView({ toast }: { toast: NonNullable<GameState['toast']> }): ReactElement {
+  const { store, t } = useEnv()
+  const [held, setHeld] = useState(0)
+  const left = useRef(toast.undo ? TOAST_UNDO_MS : TOAST_MS)
+  const started = useRef(0)
+  useEffect(() => {
+    if (held > 0) return
+    started.current = Date.now()
+    const id = setTimeout(() => { store.hideToast() }, left.current)
+    return () => { clearTimeout(id); left.current = Math.max(0, left.current - (Date.now() - started.current)) }
+  }, [held, store])
+  const hold = (on: boolean) => (): void => { setHeld(h => Math.max(0, h + (on ? 1 : -1))) }
   return (
-    <div className="pd-toast" role="status">
+    <div className="pd-toast" role="status" data-held={held > 0 || undefined}
+      onPointerEnter={hold(true)} onPointerLeave={hold(false)}
+      onFocus={hold(true)} onBlur={hold(false)}>
       <span>{t(TOAST_TEXT[toast.key], toast.params)}</span>
-      {toast.undo ? <button type="button" onClick={() => { store.undo(); store.hideToast() }}>{t('toastUndo')}</button> : null}
+      {toast.undo
+        ? (
+          <button type="button" onClick={(e) => {
+            const root = e.currentTarget.closest('.pd-root')
+            store.undoToast()
+            setTimeout(() => { focusBoard(root) }, 0)
+          }}>{t('toastUndo')}</button>
+        )
+        : null}
     </div>
   )
 }
@@ -109,26 +137,50 @@ function Preview(): ReactElement | null {
   )
 }
 
+/** Is the panel on screen right now? (Exported for tests.) */
+export function panelOnScreen(el: HTMLElement): boolean {
+  if (!el.isConnected || el.getClientRects().length === 0 || el.ownerDocument.visibilityState === 'hidden') return false
+  // The host hides a tab with [hidden]/display:none and a collapsed sidebar with inert + aria-hidden.
+  if (el.closest('[hidden],[inert],[aria-hidden="true"]')) return false
+  if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) return false
+  const view = el.ownerDocument.defaultView
+  if (!view || !view.innerWidth) return true
+  const r = el.getBoundingClientRect()
+  // A collapsed sidebar keeps its size but slides past the viewport edge.
+  return r.right > 0 && r.bottom > 0 && r.left < view.innerWidth && r.top < view.innerHeight
+}
+
 /**
- * Report whether the (kept-mounted) panel is on screen: the host hides tabs
- * with display:none or collapses the column with visibility:hidden, so both
- * size and computed visibility are checked, on resize and on a slow tick.
+ * Report whether the (kept-mounted) panel is on screen (spec §15.1-3). Event
+ * driven, so the report is never a tick late: size changes, viewport
+ * intersection, and the host's hide/collapse attributes on any ancestor; a
+ * slow tick stays as a safety net. The store also gets a live probe, so a
+ * result that lands between two reports is judged on the current state.
  */
 function usePanelVisibility(ref: { readonly current: HTMLElement | null }): void {
   const { store } = useEnv()
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const check = (): void => {
-      const visible = el.isConnected && el.getClientRects().length > 0
-        && (typeof el.checkVisibility !== 'function' || el.checkVisibility({ visibilityProperty: true }))
-      store.setPanelVisible(visible)
-    }
+    const doc = el.ownerDocument
+    const check = (): void => { store.setPanelVisible(panelOnScreen(el)) }
     check()
+    store.setVisibilityProbe(() => panelOnScreen(el))
+    const win = doc.defaultView
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(check) : undefined
     ro?.observe(el)
+    const io = win && typeof win.IntersectionObserver === 'function' ? new win.IntersectionObserver(check) : undefined
+    io?.observe(el)
+    const mo = win && typeof win.MutationObserver === 'function' ? new win.MutationObserver(check) : undefined
+    mo?.observe(doc.documentElement, { attributes: true, subtree: true, attributeFilter: ['hidden', 'inert', 'aria-hidden'] })
+    doc.addEventListener('visibilitychange', check)
     const id = setInterval(check, 1000)
-    return () => { ro?.disconnect(); clearInterval(id); store.setPanelVisible(false) }
+    return () => {
+      ro?.disconnect(); io?.disconnect(); mo?.disconnect(); clearInterval(id)
+      doc.removeEventListener('visibilitychange', check)
+      store.setVisibilityProbe(null)
+      store.setPanelVisible(false)
+    }
   }, [ref, store])
 }
 

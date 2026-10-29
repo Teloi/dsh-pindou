@@ -61,6 +61,14 @@ export function returnFocus(root: Element | null | undefined, prefer: readonly (
   return target ?? null
 }
 
+/** Put focus on the board (or the view's fallback) after an action that changed it, e.g. the toast's 撤销. */
+export function focusBoard(root: Element | null | undefined): HTMLElement | null {
+  if (!root?.isConnected) return null
+  const target = fallbackTarget(root)
+  target?.focus({ preventScroll: true })
+  return target ?? null
+}
+
 export function useFocusReturn(
   ref: Ref<HTMLElement>,
   open: string | boolean | null,
