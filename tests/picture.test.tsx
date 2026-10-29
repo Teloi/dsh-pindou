@@ -715,6 +715,32 @@ describe('drop and paste (spec §18.2)', () => {
     expect(host.querySelector('.pd-pic-crop')).not.toBeNull()
   })
 
+  it('audit R-4: on the start page a pasted non-image is ignored like a dropped one; with a picture beside it, the picture is taken', async () => {
+    const { rootEl, store } = await panel(ready())
+    const txt = (): File => file('hello', 'a.txt', 'text/plain')
+    for (const e of [pasteEvent([txt()]), dropEvent('drop', [txt()])]) {
+      await act(async () => { rootEl().dispatchEvent(e) })
+      await flush(20)
+      expect(store.getSnapshot().mode).toBe('home')
+      if (e.type === 'paste') expect(e.defaultPrevented).toBe(false) // the chat may have it
+    }
+    expect(host.querySelector('.pd-toast')).toBeNull()
+    expect(host.querySelector('[role=alert]')?.textContent ?? '').toBe('')
+    expect(bitmap).not.toHaveBeenCalled()
+    // as with a drop, the first picture among the files
+    const both = pasteEvent([txt(), file(pngHead(600, 400), 'x.png', 'image/png')])
+    await act(async () => { rootEl().dispatchEvent(both) })
+    expect(both.defaultPrevented).toBe(true)
+    await flush(20)
+    expect(store.getSnapshot().mode).toBe('picture')
+    expect(host.querySelector('.pd-pic-crop')).not.toBeNull()
+    // on the picture page any pasted file still gets its error there
+    const again = pasteEvent([txt()])
+    await act(async () => { rootEl().dispatchEvent(again) })
+    expect(again.defaultPrevented).toBe(true)
+    await vi.waitFor(() => { expect(host.querySelector('[role=alert]')?.textContent).toBe('这个文件不是图片') })
+  })
+
   it('a dropped non-image lands on the page with its error', async () => {
     const { rootEl } = await panel(ready())
     await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [svgFile()])) })

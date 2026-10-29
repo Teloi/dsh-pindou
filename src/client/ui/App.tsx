@@ -227,10 +227,13 @@ export function App(): ReactElement {
     setDropped(file)
     store.go('picture')
   }, [store])
-  // The first picture of a drop; on the picture page any file (it explains why it is not one);
-  // elsewhere a drop without a picture is ignored. Nothing when the chunk cannot load (§18.6).
-  const onFiles = useCallback((files: FileList): void => {
-    if (pictures) take([...files].find(f => f.type.startsWith('image/')) ?? (s.mode === 'picture' ? files[0] : undefined))
+  // The first picture of a drop or paste; on the picture page any file (it explains why it is not one);
+  // elsewhere one without a picture is ignored (audit R-4: paste too). Nothing when the chunk cannot
+  // load (§18.6). Returns the file taken: a paste then keeps it from the chat.
+  const onFiles = useCallback((files: FileList): File | false | undefined => {
+    const f = pictures && ([...files].find(x => x.type.startsWith('image/')) ?? (s.mode === 'picture' ? files[0] : undefined))
+    if (f) take(f)
+    return f
   }, [pictures, s.mode, take])
   const scroller = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
@@ -273,8 +276,7 @@ export function App(): ReactElement {
     <div ref={root} className={cx('pd-root', s.prefs.showCodes && 'pd-codes')} onKeyDown={onKeyDown} data-mode={s.mode}
       // only paste events from inside the panel reach here: the chat input is never touched
       onPaste={(e) => {
-        const f = e.clipboardData.files[0]
-        if (pictures && f && (s.mode === 'home' || s.mode === 'picture')) { e.preventDefault(); e.stopPropagation(); take(f) }
+        if ((s.mode === 'picture' || s.mode === 'home') && onFiles(e.clipboardData.files)) { e.preventDefault(); e.stopPropagation() }
       }}
       role="region" aria-label={t('appName')} tabIndex={-1}>
       <header className="pd-head">
