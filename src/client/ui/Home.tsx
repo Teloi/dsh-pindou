@@ -16,7 +16,7 @@ export function HomeView(): ReactElement {
   const s = useGame()
   const inProgress = !s.ironed && s.history.present.cells.some(c => c !== EMPTY)
   return (
-    <div className="pd-view">
+    <div className="pd-view pd-v-home">
       <div className="pd-start">
         <button type="button" className="pd-big" onClick={() => { store.startFree() }}>
           <span className="pd-ic" aria-hidden><IconGrid /></span>

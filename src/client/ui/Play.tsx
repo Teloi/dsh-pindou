@@ -3,8 +3,8 @@ import { useEffect, useRef, type CSSProperties, type ReactElement } from 'react'
 import {
   BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, PALETTE, remainingByColor, type Tool,
 } from '../../core/index.ts'
-import { IconBrush, IconEraser, IconFill, IconIron, IconPicker, IconRedo, IconSparkle, IconTrash, IconUndo, IconDownload } from '../icons.tsx'
-import { downloadPng } from '../render.ts'
+import { IconBrush, IconCopy, IconEraser, IconFill, IconIron, IconPicker, IconRedo, IconSparkle, IconTrash, IconUndo, IconDownload } from '../icons.tsx'
+import { canCopyImage, copyPng, downloadBlob, exportBlob, exportFileName, saveRoute } from '../render.ts'
 import { BoardView } from './Board.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 
@@ -15,11 +15,31 @@ const TOOLS: ReadonlyArray<{ tool: Tool; key: string; icon: typeof IconBrush; la
   { tool: 'fill', key: 'G', icon: IconFill, label: 'toolFill' },
 ]
 
+/** PNG export (spec §13): download, or the in-panel preview where downloads are unsupported. */
 export function exportBoard(env: ReturnType<typeof useEnv>): void {
   const s = env.store.getSnapshot()
-  void downloadPng(document, s.history.present, s.ironed, env.dark(), s.target).then((ok) => {
-    env.store.showToast(ok ? 'exported' : 'exportFailed')
+  const name = exportFileName(s.target, new Date())
+  void exportBlob(document, s.history.present, s.ironed, env.dark()).then((blob) => {
+    if (!blob) { env.store.showToast('exportFailed'); return }
+    if (saveRoute(document) === 'manual') { env.store.setPreview({ url: URL.createObjectURL(blob), name }); return }
+    if (downloadBlob(document, blob, name)) env.store.showToast('exported', false, { name })
+    else env.store.setPreview({ url: URL.createObjectURL(blob), name })
   })
+}
+
+/** "Copy image": PNG to the clipboard, so it can be pasted straight into the conversation. */
+export function copyBoard(env: ReturnType<typeof useEnv>): void {
+  const s = env.store.getSnapshot()
+  void copyPng(exportBlob(document, s.history.present, s.ironed, env.dark())).then((ok) => {
+    env.store.showToast(ok ? 'copied' : 'copyFailed')
+  })
+}
+
+/** Evaluated once: clipboard image support does not change during a page's life. */
+let copyable: boolean | undefined
+export function copySupported(): boolean {
+  copyable ??= canCopyImage(globalThis)
+  return copyable
 }
 
 function StatusLine(): ReactElement {
@@ -68,9 +88,11 @@ function StatusLine(): ReactElement {
 }
 
 function Toolbar(): ReactElement {
-  const { store, t } = useEnv()
+  const env = useEnv()
+  const { store, t } = env
   const s = useGame()
   const locked = s.ironed || s.ironingSince !== null
+  const empty = s.history.present.cells.every(c => c === EMPTY)
   return (
     <div className="pd-tools" role="toolbar" aria-label={t('toolsLabel')}>
       {TOOLS.map(({ tool, key, icon: Icon, label }) => (
@@ -88,7 +110,17 @@ function Toolbar(): ReactElement {
         disabled={!store.canRedo} onClick={() => { store.redo() }}><IconRedo /></button>
       <span className="pd-sep" aria-hidden />
       <button type="button" className="pd-tool" aria-label={t('clear')} title={t('clear')}
-        disabled={locked || s.history.present.cells.every(c => c === EMPTY)} onClick={() => { store.clear() }}><IconTrash /></button>
+        disabled={locked || empty} onClick={() => { store.clear() }}><IconTrash /></button>
+      {/* below 768px the host shows the sidebar full screen and the footer's iron / export move here (spec §3.2) */}
+      <span className="pd-sep pd-m-only" aria-hidden />
+      <button type="button" className="pd-tool pd-m-only" aria-label={t('iron')} title={t('iron')}
+        disabled={empty || locked} onClick={() => { store.iron() }}><IconIron /></button>
+      <button type="button" className="pd-tool pd-m-only" aria-label={t('exportPng')} title={t('exportPng')}
+        disabled={empty} onClick={() => { exportBoard(env) }}><IconDownload /></button>
+      {copySupported()
+        ? <button type="button" className="pd-tool pd-m-only" aria-label={t('copyImage')} title={t('copyImage')}
+          disabled={empty} onClick={() => { copyBoard(env) }}><IconCopy /></button>
+        : null}
     </div>
   )
 }
@@ -159,11 +191,14 @@ function Footer(): ReactElement {
       {isAi && !s.ironed
         ? <button type="button" className="pd-btn pd-ghost" disabled={ironing || s.celebrateAt !== null} onClick={() => { store.fillTarget() }}><IconSparkle />{t('fillBoard')}</button>
         : null}
-      <button type="button" className="pd-btn pd-warm pd-grow" disabled={empty || s.ironed || ironing} aria-busy={ironing}
+      <button type="button" className="pd-btn pd-warm pd-grow pd-io" disabled={empty || s.ironed || ironing} aria-busy={ironing}
         onClick={() => { store.iron() }}>
         <IconIron />{ironing ? t('ironing') : t('iron')}
       </button>
-      <button type="button" className="pd-btn" disabled={empty} onClick={() => { exportBoard(env) }}><IconDownload />{t('exportPng')}</button>
+      <button type="button" className="pd-btn pd-io" disabled={empty} onClick={() => { exportBoard(env) }}><IconDownload />{t('exportPng')}</button>
+      {copySupported()
+        ? <button type="button" className="pd-btn pd-io pd-icon-only" disabled={empty} aria-label={t('copyImage')} title={t('copyImage')} onClick={() => { copyBoard(env) }}><IconCopy /></button>
+        : null}
     </div>
   )
 }
@@ -203,6 +238,9 @@ function OverlayCard(): ReactElement | null {
           ? (<>
             <button type="button" className="pd-btn pd-ghost" onClick={() => { store.unIron() }}>{t('unIron')}</button>
             <button type="button" className="pd-btn" onClick={() => { store.again() }}>{t('again')}</button>
+            {copySupported()
+              ? <button type="button" className="pd-btn pd-icon-only" aria-label={t('copyImage')} title={t('copyImage')} onClick={() => { copyBoard(env) }}><IconCopy /></button>
+              : null}
             <button type="button" className="pd-btn pd-primary" data-primary onClick={() => { exportBoard(env) }}><IconDownload />{t('exportPng')}</button>
           </>)
           : null}

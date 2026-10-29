@@ -3,69 +3,88 @@
  * CSS isolation, so every class and custom property carries the `pd-` prefix
  * and every rule is scoped under `.pd-root` (or a `pd-` class for portals).
  *
- * Tokens follow the designer's spec (/workspace/bead-break/spec.md §12,
- * tokens.css), renamed from `--bb-*` to `--pd-*`. Only `--dsw-alias-*` host
- * aliases are read, each with a fallback; bead colours never change with theme.
+ * TOKENS is the designer's tokens.css (spec v1.3 §12.2) pasted verbatim.
+ * Only `--dsw-alias-*` host aliases are read, each with a fallback (danger /
+ * success use the host status colours, §15.2); bead colours never change with
+ * theme. Anything rendered into document.body carries `.pd-portal`.
  */
 export const STYLE_ID = 'dsh-pindou-styles'
 
 const TOKENS = `
 @property --pd-hole { syntax: '<percentage>'; inherits: true; initial-value: 20%; }
 @property --pd-hl   { syntax: '<number>';     inherits: true; initial-value: 0.6; }
-@property --pd-lt   { syntax: '<percentage>'; inherits: true; initial-value: 20%; }
-@property --pd-dk   { syntax: '<percentage>'; inherits: true; initial-value: 28%; }
+@property --pd-lt   { syntax: '<percentage>'; inherits: true; initial-value: 20%; } /* 受光面提亮 */
+@property --pd-dk   { syntax: '<percentage>'; inherits: true; initial-value: 28%; } /* 背光面压暗 */
 
 .pd-root, .pd-portal {
-  --pd-bg: var(--dsw-alias-bg-base, #FFFFFF);
-  --pd-surface: var(--dsw-alias-bg-module-platform, #F5F6F7);
-  --pd-surface-raised: var(--dsw-alias-bg-layer-1, #FFFFFF);
-  --pd-border: var(--dsw-alias-border-l2, rgba(0,0,0,.10));
+  /* —— 表面与文字（映射 DSH） —— */
+  --pd-bg:            var(--dsw-alias-bg-base, #FFFFFF);
+  --pd-surface:       var(--dsw-alias-bg-module-platform, #F5F6F7);
+  --pd-surface-raised:var(--dsw-alias-bg-layer-1, #FFFFFF);
+  --pd-border:        var(--dsw-alias-border-l2, rgba(0,0,0,.10));
   --pd-border-subtle: var(--dsw-alias-border-l1, rgba(0,0,0,.04));
-  --pd-text: var(--dsw-alias-label-primary, #0F1115);
-  --pd-text-2: var(--dsw-alias-label-secondary, #61666B);
-  --pd-text-3: var(--dsw-alias-label-tertiary, #81858C);
-  --pd-hover: var(--dsw-alias-interactive-bg-hover, rgba(38,49,72,.06));
-  --pd-active: var(--dsw-alias-interactive-bg-active, rgba(38,49,72,.10));
-  --pd-accent: var(--dsw-alias-state-business-primary, #4176E6);
-  --pd-accent-soft: var(--dsw-alias-state-business-tertiary, #E4EDFD);
-  --pd-primary-fill: var(--dsw-alias-button-primary-fill, #0F1115);
+  --pd-text:          var(--dsw-alias-label-primary, #0F1115);
+  --pd-text-2:        var(--dsw-alias-label-secondary, #61666B);
+  --pd-text-3:        var(--dsw-alias-label-tertiary, #81858C);
+  --pd-hover:         var(--dsw-alias-interactive-bg-hover, rgba(38,49,72,.06));
+  --pd-active:        var(--dsw-alias-interactive-bg-active, rgba(38,49,72,.10));
+  --pd-accent:        var(--dsw-alias-state-business-primary, #4176E6);
+  --pd-accent-soft:   var(--dsw-alias-state-business-tertiary, #E4EDFD);
+  --pd-primary-fill:  var(--dsw-alias-button-primary-fill, #0F1115);
   --pd-primary-label: var(--dsw-alias-label-primary-inverted, #FFFFFF);
-  --pd-toast-bg: var(--dsw-alias-toast-bg, #0F1115);
-  --pd-toast-label: var(--dsw-alias-toast-label, #FFFFFF);
-  --pd-danger: #E5484D;
-  --pd-success: #2BA24C;
-  --pd-warm: #F5A524;
-  --pd-board: #EEF0F3;
-  --pd-board-edge: rgba(0,0,0,.06);
-  --pd-peg: #D3D8DF;
-  --pd-ghost-alpha: .30;
-  --pd-ghost-hot: .62;
-  --pd-cursor: var(--pd-accent);
+  --pd-toast-bg:      var(--dsw-alias-toast-bg, #0F1115);
+  --pd-toast-label:   var(--dsw-alias-toast-label, #FFFFFF);
+  --pd-danger:        var(--dsw-alias-state-error-primary, #E5484D);
+  --pd-success:       var(--dsw-alias-state-success-primary, #2BA24C);
+  --pd-shadow-pop:    var(--dsw-elevation-soft, 0 4px 14px rgba(0,0,0,.08));
+  --pd-warm:          #F5A524;          /* 熨烫热光 */
+
+  /* —— 豆板 —— */
+  --pd-board:         #EEF0F3;          /* 豆板底 */
+  --pd-board-edge:    rgba(0,0,0,.06);  /* 豆板描边 */
+  --pd-peg:           #D3D8DF;          /* 空格钉 */
+  --pd-ghost-alpha:   .30;              /* 模板淡色引导不透明度 */
+  --pd-ghost-hot:     .62;              /* 选中色剩余格 */
+  --pd-cursor:        var(--pd-accent);
+
+  /* —— 尺寸 —— */
+  --pd-panel-min: 300px;            /* 宿主右栏最小宽度；面板宽度由宿主决定 */
+  --pd-board-max: 480px;            /* 豆板最大边长，宽面板时居中 */
   --pd-pad: 16px; --pd-gap: 12px;
   --pd-header-h: 44px; --pd-status-h: 36px; --pd-toolbar-h: 36px; --pd-footer-h: 40px;
-  --pd-swatch: 28px; --pd-swatch-gap: 8px; --pd-hit: 32px;
-  --pd-board-pad: 6px; --pd-bead-inset: 6%;
+  --pd-swatch: 28px; --pd-swatch-gap: 8px;
+  --pd-board-pad: 6px;              /* 豆板内边距 */
+  --pd-bead-inset: 6%;              /* 未熨烫豆与格子边距 */
   --pd-radius-board: var(--dsw-radius-md, 12px);
-  --pd-radius-card: var(--dsw-radius-md, 12px);
-  --pd-radius-ctl: var(--dsw-radius-sm, 8px);
-  --pd-entry: 32px;
-  --pd-ease: cubic-bezier(.4,0,.2,1);
+  --pd-radius-card:  var(--dsw-radius-md, 12px);
+  --pd-radius-ctl:   var(--dsw-radius-sm, 8px);
+  --pd-font-code: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+  --pd-hit: 32px;                   /* 工具按钮热区；触屏 36 */
+  --pd-entry: 32px;                 /* 标题栏入口按钮 */
+  --pd-hint-h: 28px;                /* 输入框上沿忙碌胶囊 */
+
+  /* —— 动效 —— */
+  --pd-ease: cubic-bezier(.4,0,.2,1);           /* = DSH --ds-ease-in-out */
   --pd-ease-spring: cubic-bezier(.34,1.56,.64,1);
   --pd-ease-out: cubic-bezier(.22,1,.36,1);
   --pd-t-fast: 100ms; --pd-t: 200ms; --pd-t-slow: 300ms;
   --pd-t-place: 120ms; --pd-t-erase: 90ms;
   --pd-t-iron-cell: 420ms; --pd-t-iron-total: 1200ms;
   --pd-t-celebrate: 1400ms; --pd-t-hint: 8000ms;
-  --pd-font-code: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+
+  /* —— 16 色豆（编码 0-9a-f，主题无关） —— */
   --pd-bead-0:#F6F4EE; --pd-bead-1:#F2DFA7; --pd-bead-2:#F7C531; --pd-bead-3:#F08A24;
   --pd-bead-4:#D7333B; --pd-bead-5:#F39DC1; --pd-bead-6:#8A5BB5; --pd-bead-7:#2D4FA0;
   --pd-bead-8:#62B6E9; --pd-bead-9:#24A79A; --pd-bead-a:#3E9C4A; --pd-bead-b:#A9D46A;
   --pd-bead-c:#87573A; --pd-bead-d:#D7A473; --pd-bead-e:#9DA1A8; --pd-bead-f:#26272B;
 }
 body[data-ds-dark-theme] .pd-root, body[data-ds-dark-theme] .pd-portal {
-  --pd-danger: #FF6369; --pd-success: #46C267;
-  --pd-board: #1C1D20; --pd-board-edge: rgba(255,255,255,.08); --pd-peg: #34373D;
-  --pd-ghost-alpha: .34; --pd-ghost-hot: .70;
+  /* danger / success 由宿主变量自动切换，这里只覆盖插件私有的豆板色 */
+  --pd-board:      #1C1D20;
+  --pd-board-edge: rgba(255,255,255,.08);
+  --pd-peg:        #34373D;
+  --pd-ghost-alpha: .34;
+  --pd-ghost-hot:   .70;
 }
 @media (pointer: coarse) { .pd-root { --pd-hit: 36px; } }
 `
@@ -77,30 +96,31 @@ const ENTRY = `
 .pd-entry:focus-visible{outline:2px solid var(--pd-accent);outline-offset:2px}
 .pd-entry svg{width:18px;height:18px}
 .pd-entry .pd-dot{position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--pd-warm);box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-1,#fff);opacity:0;transform:scale(.4);transition:opacity var(--pd-t),transform var(--pd-t)}
-.pd-entry.pd-has-progress .pd-dot,.pd-entry.pd-busy .pd-dot{opacity:1;transform:none}
-.pd-entry.pd-busy .pd-dot{animation:pd-breathe 1.4s var(--pd-ease) infinite}
-@keyframes pd-breathe{0%,100%{opacity:1}50%{opacity:.35}}
-.pd-hint{position:fixed;z-index:2147483000;white-space:nowrap;background:var(--pd-surface-raised);color:var(--pd-text);border:1px solid var(--pd-border);border-radius:12px;padding:6px 6px 6px 12px;display:flex;align-items:center;gap:6px;font-size:13px;line-height:1.4;font-family:inherit;box-shadow:0 6px 20px rgba(0,0,0,.10);animation:pd-hint-in var(--pd-t) var(--pd-ease)}
-.pd-hint::before{content:"";position:absolute;top:-5px;right:var(--pd-arrow,14px);width:9px;height:9px;background:inherit;border-left:1px solid var(--pd-border);border-top:1px solid var(--pd-border);transform:rotate(45deg)}
-@keyframes pd-hint-in{from{opacity:0;transform:translateY(-4px) scale(.98)}}
-.pd-hint .pd-mini{display:inline-flex;gap:2px}
-.pd-hint .pd-mini i{width:7px;height:7px;border-radius:50%;display:block}
-.pd-hint .pd-go{border:0;background:var(--pd-accent-soft);color:var(--pd-accent);border-radius:8px;padding:0 10px;height:28px;font:inherit;font-size:12.5px;cursor:pointer;font-weight:500}
-.pd-hint .pd-x{border:0;background:transparent;width:28px;height:28px;border-radius:6px;cursor:pointer;color:var(--pd-text-3);display:grid;place-items:center;padding:0}
-.pd-hint .pd-x:hover{background:var(--pd-hover)}
+.pd-entry.pd-has-progress .pd-dot,.pd-entry.pd-busy .pd-dot{background:var(--pd-accent);animation:pd-breathe 1.6s var(--pd-ease) infinite}
+@keyframes pd-breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
+/* Busy pill: rendered in conversation.input.overlay, a zero-height strip on the
+   composer card's top edge, so bottom:8px floats it just above the card. */
+.pd-pill{position:absolute;bottom:8px;right:12px;z-index:5;height:var(--pd-hint-h);display:flex;align-items:center;white-space:nowrap;background:var(--pd-surface-raised);color:var(--pd-text);border:1px solid var(--pd-border);border-radius:14px;box-shadow:var(--dsw-elevation-soft,0 4px 14px rgba(0,0,0,.08));font-size:12.5px;line-height:1;font-family:inherit;animation:pd-pill-in var(--pd-t) var(--pd-ease)}
+.pd-pill.pd-out{opacity:0;transform:translateY(4px);transition:opacity var(--pd-t) var(--pd-ease),transform var(--pd-t) var(--pd-ease);pointer-events:none}
+@keyframes pd-pill-in{from{opacity:0;transform:translateY(4px)}}
+.pd-pill button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:0}
+.pd-pill .pd-pill-go{height:26px;display:flex;align-items:center;gap:6px;padding:0 4px 0 10px;border-radius:13px 0 0 13px}
+.pd-pill .pd-pill-bead{width:12px;height:12px;border-radius:50%;flex:none;background:radial-gradient(circle,color-mix(in srgb,var(--pd-bead-3) 50%,#000) 0 22%,transparent 26%),radial-gradient(circle at 38% 34%,color-mix(in srgb,var(--pd-bead-3) 80%,#fff),var(--pd-bead-3) 55%,color-mix(in srgb,var(--pd-bead-3) 75%,#000))}
+.pd-pill .pd-pill-x{width:24px;height:26px;display:grid;place-items:center;padding:0;border-radius:0 13px 13px 0;color:var(--pd-text-3)}
+.pd-pill .pd-pill-x svg{width:12px;height:12px}
+@media (hover:hover){.pd-pill .pd-pill-go:hover,.pd-pill .pd-pill-x:hover{background:var(--pd-hover)}}
+@media (prefers-reduced-motion: reduce){.pd-entry.pd-busy .pd-dot{animation:none}@keyframes pd-pill-in{from{opacity:0}}.pd-pill.pd-out{transform:none}}
 `
 
 const PANEL = `
-.pd-root{container:pd/inline-size;position:relative;height:100%;min-height:0;display:flex;flex-direction:column;background:var(--pd-bg);color:var(--pd-text);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box}
+.pd-root{--pd-header-h:36px;container:pd/inline-size;position:relative;height:100%;min-height:0;display:flex;flex-direction:column;background:var(--pd-bg);color:var(--pd-text);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);box-sizing:border-box}
 .pd-root *,.pd-root *::before,.pd-root *::after,.pd-portal *{box-sizing:border-box}
 .pd-root button{font:inherit;color:inherit}
-.pd-root [hidden]{display:none!important}
+.pd-root [hidden]{display:none}
 .pd-root :focus-visible{outline:2px solid var(--pd-accent);outline-offset:2px}
-.pd-sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;margin:-1px}
+.pd-root .pd-sr,.pd-portal .pd-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;margin:-1px}
 .pd-head{height:var(--pd-header-h);flex:none;display:flex;align-items:center;gap:4px;padding:0 8px 0 12px;border-bottom:1px solid var(--pd-border-subtle)}
-.pd-head h2{font-size:14px;font-weight:600;margin:0;display:flex;align-items:center;gap:8px;flex:1;min-width:0;white-space:nowrap}
-.pd-head h2 .pd-logo{width:18px;height:18px;flex:none}
-.pd-head h2 small{font-weight:400;color:var(--pd-text-3);font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.pd-head .pd-spacer{flex:1}
 .pd-ib{width:var(--pd-hit);height:var(--pd-hit);border-radius:var(--pd-radius-ctl);border:0;background:transparent;display:grid;place-items:center;cursor:pointer;color:var(--pd-text-2);flex:none;padding:0;transition:background var(--pd-t-fast)}
 .pd-ib:hover{background:var(--pd-hover);color:var(--pd-text)}
 .pd-ib:disabled{opacity:.35;cursor:default;background:transparent}
@@ -170,7 +190,6 @@ const BOARD = `
   box-shadow:0 1px 1.5px rgba(0,0,0,.28),inset 0 0 0 .5px rgba(0,0,0,.14);
   animation:pd-place var(--pd-t-place) var(--pd-ease-spring);
   transition:inset var(--pd-t-iron-cell) var(--pd-ease-out) var(--pd-d,0ms),border-radius var(--pd-t-iron-cell) var(--pd-ease-out) var(--pd-d,0ms),--pd-hole var(--pd-t-iron-cell) var(--pd-ease-out) var(--pd-d,0ms),--pd-hl var(--pd-t-iron-cell) var(--pd-ease) var(--pd-d,0ms),--pd-lt var(--pd-t-iron-cell) var(--pd-ease) var(--pd-d,0ms),--pd-dk var(--pd-t-iron-cell) var(--pd-ease) var(--pd-d,0ms),box-shadow var(--pd-t-iron-cell) var(--pd-d,0ms),filter var(--pd-t-iron-cell) var(--pd-d,0ms)}
-.pd-bead.pd-still{animation:none}
 @keyframes pd-place{0%{transform:scale(.6)}100%{transform:scale(1)}}
 .pd-cell.pd-wrong .pd-bead{outline:1.5px dashed var(--pd-danger);outline-offset:-1px}
 .pd-board.pd-kbd:focus-visible .pd-cell.pd-cur{outline:2px solid var(--pd-cursor);outline-offset:0;border-radius:30%;z-index:3}
@@ -247,7 +266,7 @@ const CONTROLS = `
 .pd-card ol{margin:0;padding-left:18px}
 .pd-card p{margin:0}
 /* menu & toast */
-.pd-menu{position:absolute;top:40px;right:8px;z-index:30;min-width:220px;background:var(--pd-surface-raised);border:1px solid var(--pd-border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.14);padding:6px;animation:pd-pop .14s var(--pd-ease)}
+.pd-menu{position:absolute;top:calc(var(--pd-header-h) + 4px);right:8px;z-index:30;min-width:220px;background:var(--pd-surface-raised);border:1px solid var(--pd-border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.14);padding:6px;animation:pd-pop .14s var(--pd-ease)}
 @keyframes pd-pop{from{opacity:0;transform:translateY(-4px)}}
 .pd-mi{display:flex;align-items:center;gap:10px;padding:0 8px;min-height:var(--pd-hit);border-radius:8px;font-size:13px;cursor:pointer;width:100%;border:0;background:transparent;text-align:left}
 .pd-mi:hover,.pd-mi:focus-visible{background:var(--pd-hover)}
@@ -261,6 +280,9 @@ const CONTROLS = `
 @keyframes pd-toast-in{from{opacity:0;transform:translate(-50%,8px)}}
 .pd-toast button{border:0;background:rgb(255 255 255 / .14);color:inherit;border-radius:6px;padding:0 8px;min-height:28px;font-size:12px;cursor:pointer;font-weight:600}
 body[data-ds-dark-theme] .pd-toast button{background:rgb(0 0 0 / .08)}
+.pd-preview{position:absolute;inset:var(--pd-header-h) 0 0;z-index:35;background:var(--pd-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:var(--pd-pad);text-align:center}
+.pd-preview img{max-width:min(100%,480px);max-height:70%;object-fit:contain;image-rendering:pixelated;border-radius:var(--pd-radius-card);border:1px solid var(--pd-border-subtle)}
+.pd-root .pd-icon-only{padding:0;width:var(--pd-hit);justify-content:center}
 `
 
 const RESPONSIVE = `
@@ -270,14 +292,19 @@ const RESPONSIVE = `
   .pd-tools .pd-sep{margin:0 1px}
   .pd-tpls{gap:6px}
 }
-@container pd (min-width: 520px){
+/* wide sidebar (spec §3.1): 4 template columns, home max 640, play column max 480 */
+@container pd (min-width: 560px){
   .pd-tpls{grid-template-columns:repeat(4,1fr)}
-  .pd-view{max-width:520px}
+  .pd-view.pd-v-home{max-width:640px}
 }
-@container pd (min-width: 720px){
-  .pd-tpls{grid-template-columns:repeat(6,1fr)}
-  .pd-view.pd-wide{max-width:720px}
+/* host full-screen sidebar below 768px (spec §3.2): bigger swatches, iron/export move into the toolbar */
+@media (max-width: 767px){
+  .pd-root .pd-view{padding-bottom:max(16px,env(safe-area-inset-bottom,0px))}
+  .pd-root .pd-palette{--pd-swatch-gap:6px;--pd-swatch:32px}
+  .pd-root .pd-foot .pd-io{display:none}
+  .pd-root .pd-foot:not(:has(> :not(.pd-io))){display:none}
 }
+@media (min-width: 768px){ .pd-root .pd-m-only{display:none} }
 @media (prefers-reduced-motion: reduce){
   .pd-root *,.pd-portal *,.pd-root *::before,.pd-root *::after{animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important;transition-delay:0ms!important}
   .pd-confetti{display:none}

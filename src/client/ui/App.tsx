@@ -1,8 +1,11 @@
-/** Panel shell: inner header (back · logo + name · ⋯ menu), the current view, toast and live region. */
+/**
+ * Panel body. The host tab strip already shows the title and the close button,
+ * so the inner header carries only ‹ Back and ⋯ (spec §3.1/§14.3).
+ */
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { COLOR_COUNT, type MessageKey } from '../../core/index.ts'
 import type { ToastKey } from '../game-store.ts'
-import { IconBack, IconLogo, IconMore } from '../icons.tsx'
+import { IconBack, IconMore } from '../icons.tsx'
 import { AiView } from './Ai.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 import { HomeView } from './Home.tsx'
@@ -10,6 +13,7 @@ import { PlayView } from './Play.tsx'
 
 const TOAST_TEXT: Record<ToastKey, MessageKey> = {
   cleared: 'toastCleared', locked: 'toastLocked', exported: 'toastExported', exportFailed: 'toastExportFailed',
+  copied: 'toastCopied', copyFailed: 'toastCopyFailed',
   storageUnavailable: 'storageUnavailable', storageRecovered: 'storageRecovered',
 }
 const TOAST_MS = 2400
@@ -78,10 +82,50 @@ function Toast(): ReactElement | null {
   if (!toast) return null
   return (
     <div className="pd-toast" role="status">
-      <span>{t(TOAST_TEXT[toast.key])}</span>
+      <span>{t(TOAST_TEXT[toast.key], toast.params)}</span>
       {toast.undo ? <button type="button" onClick={() => { store.undo(); store.hideToast() }}>{t('toastUndo')}</button> : null}
     </div>
   )
+}
+
+/** Manual-save fallback: the exported PNG, shown in the panel (no popups in DSH desktop). */
+function Preview(): ReactElement | null {
+  const { store, t } = useEnv()
+  const preview = useGame().preview
+  const close = useRef<HTMLButtonElement>(null)
+  useEffect(() => { if (preview) close.current?.focus() }, [preview])
+  if (!preview) return null
+  return (
+    <div className="pd-preview" role="dialog" aria-modal="false" aria-label={t('exportPng')}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); store.setPreview(null) } }}>
+      <p className="pd-d">{t('previewTitle')}</p>
+      <img src={preview.url} alt={preview.name} />
+      <button ref={close} type="button" className="pd-btn" onClick={() => { store.setPreview(null) }}>{t('previewClose')}</button>
+    </div>
+  )
+}
+
+/**
+ * Report whether the (kept-mounted) panel is on screen: the host hides tabs
+ * with display:none or collapses the column with visibility:hidden, so both
+ * size and computed visibility are checked, on resize and on a slow tick.
+ */
+function usePanelVisibility(ref: { readonly current: HTMLElement | null }): void {
+  const { store } = useEnv()
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const check = (): void => {
+      const visible = el.isConnected && el.getClientRects().length > 0
+        && (typeof el.checkVisibility !== 'function' || el.checkVisibility({ visibilityProperty: true }))
+      store.setPanelVisible(visible)
+    }
+    check()
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(check) : undefined
+    ro?.observe(el)
+    const id = setInterval(check, 1000)
+    return () => { ro?.disconnect(); clearInterval(id); store.setPanelVisible(false) }
+  }, [ref, store])
 }
 
 export function App(): ReactElement {
@@ -89,6 +133,8 @@ export function App(): ReactElement {
   const s = useGame()
   const [menu, setMenu] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
+  const root = useRef<HTMLDivElement>(null)
+  usePanelVisibility(root)
   // oxlint-disable-next-line react/exhaustive-effect-dependencies -- scroll to top whenever the view changes
   useEffect(() => { scroller.current?.scrollTo?.({ top: 0 }) }, [s.mode])
 
@@ -122,12 +168,13 @@ export function App(): ReactElement {
 
   const live = s.celebrateAt !== null ? t('celebrate') : ''
   return (
-    <div className={cx('pd-root', s.prefs.showCodes && 'pd-codes')} onKeyDown={onKeyDown} data-mode={s.mode}>
+    <div ref={root} className={cx('pd-root', s.prefs.showCodes && 'pd-codes')} onKeyDown={onKeyDown} data-mode={s.mode}
+      role="region" aria-label={t('appName')}>
       <header className="pd-head">
         {s.mode !== 'home'
           ? <button type="button" className="pd-ib" aria-label={t('back')} title={t('back')} onClick={() => { store.go('home') }}><IconBack /></button>
           : null}
-        <h2><IconLogo className="pd-logo" />{t('appName')}</h2>
+        <span className="pd-spacer" />
         <button type="button" className="pd-ib" data-pd-menu-btn aria-label={t('settings')} title={t('settings')}
           aria-haspopup="menu" aria-expanded={menu} onClick={() => { setMenu(m => !m) }}><IconMore /></button>
       </header>
@@ -135,6 +182,7 @@ export function App(): ReactElement {
       <div className="pd-scroll" ref={scroller}>
         {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : <PlayView />}
       </div>
+      <Preview />
       <Toast />
       <div className="pd-sr" aria-live="polite" role="status">{live}</div>
     </div>

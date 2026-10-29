@@ -37,7 +37,7 @@ export interface AiState {
 }
 
 export type Overlay = 'coach' | 'done' | 'result' | null
-export type ToastKey = 'cleared' | 'locked' | 'exported' | 'exportFailed' | 'storageUnavailable' | 'storageRecovered'
+export type ToastKey = 'cleared' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered'
 
 export interface GameState {
   readonly history: History
@@ -52,12 +52,18 @@ export interface GameState {
   /** Set when a pattern is completed; drives the celebration. */
   readonly celebrateAt: number | null
   readonly overlay: Overlay
-  readonly toast: { readonly key: ToastKey; readonly undo: boolean; readonly at: number } | null
+  readonly toast: { readonly key: ToastKey; readonly undo: boolean; readonly at: number; readonly params?: Readonly<Record<string, string>> } | null
+  /** Fallback when downloads are unavailable: the PNG shown in the panel for manual saving. */
+  readonly preview: { readonly url: string; readonly name: string } | null
   readonly prefs: Prefs
   readonly done: readonly string[]
   readonly coached: boolean
   readonly storage: StorageStatus
   readonly ai: AiState
+  /** Whether the panel is on screen (reported by the mounted panel). */
+  readonly panelVisible: boolean
+  /** An AI pattern finished while the panel was hidden; cleared when it is shown. */
+  readonly fresh: boolean
 }
 
 export interface GameApi {
@@ -75,10 +81,10 @@ export interface GameDeps {
   readonly saveDelayMs?: number
 }
 
-/** Matches the designer's --bb-iron-total (the sweep and the staggered melt). */
+/** Matches the designer's --pd-t-iron-total (the sweep and the staggered melt). */
 export const IRON_MS = 1200
 /** Front-end spacing between real generations (spec §10: 5 s); cache hits are free. */
-export const AI_COOLDOWN_MS = 5000
+export const AI_COOLDOWN_MS = 1500
 
 export function resolveTarget(target: string | null): Board | null {
   if (target === null) return null
@@ -141,6 +147,9 @@ export class GameStore {
       coached: saved.coached,
       storage,
       ai: { phase: 'idle', prompt: '', size: 16 },
+      preview: null,
+      panelVisible: false,
+      fresh: false,
     }
   }
 
@@ -160,6 +169,12 @@ export class GameStore {
 
   private setAi(patch: Partial<AiState>): void {
     this.set({ ai: { ...this.state.ai, ...patch } }, false)
+  }
+
+  /** The panel reports its visibility; showing it clears the "fresh result" dot. */
+  setPanelVisible(visible: boolean): void {
+    if (visible === this.state.panelVisible) return
+    this.set({ panelVisible: visible, ...(visible ? { fresh: false } : {}) }, false)
   }
 
   // ── derived ───────────────────────────────────────────────────────
@@ -229,7 +244,15 @@ export class GameStore {
   /** Menu → "show the intro again": opens the coach card on the board. */
   showCoach(): void { this.set({ mode: 'play', overlay: 'coach' }, false) }
 
-  showToast(key: ToastKey, undoable = false): void { this.set({ toast: { key, undo: undoable, at: this.now() } }, false) }
+  showToast(key: ToastKey, undoable = false, params?: Readonly<Record<string, string>>): void {
+    this.set({ toast: params ? { key, undo: undoable, at: this.now(), params } : { key, undo: undoable, at: this.now() } }, false)
+  }
+  /** Show (or with null, close and release) the manual-save preview. */
+  setPreview(next: { readonly url: string; readonly name: string } | null): void {
+    const old = this.state.preview
+    if (old && old.url !== next?.url) { try { URL.revokeObjectURL(old.url) } catch { /* not a blob URL */ } }
+    this.set({ preview: next }, false)
+  }
   hideToast(): void { if (this.state.toast) this.set({ toast: null }, false) }
 
   // ── selection ─────────────────────────────────────────────────────
@@ -457,7 +480,22 @@ export class GameStore {
 
   /** A generated pattern becomes the faint guide on a fresh board, like a template. */
   private finishAi(result: AiResult): void {
-    this.setAi({ phase: 'done', error: undefined, result })
+    this.set({ ai: { ...this.state.ai, phase: 'done', error: undefined, result }, fresh: !this.state.panelVisible }, false)
     this.follow(`ai:${result.board.size}:${encode(result.board)}`)
   }
+}
+
+/**
+ * Entry-button dot (spec §2.1): `busy` while the model runs (breathing accent),
+ * (independent of the pill preference), otherwise `progress` (steady warm) when an AI result arrived while hidden or
+ * unfinished work sits in a closed panel; busy wins when both apply.
+ */
+export function entryDot(s: GameState, running: boolean): 'busy' | 'progress' | null {
+  if (running) return 'busy'
+  if (s.panelVisible) return null
+  if (s.fresh || s.ai.phase === 'loading') return s.fresh ? 'progress' : null
+  const board = s.history.present
+  const unfinished = s.mode === 'play' && !s.ironed && board.cells.some(c => c !== EMPTY)
+    && !(s.target !== null && s.done.includes(s.target))
+  return unfinished ? 'progress' : null
 }

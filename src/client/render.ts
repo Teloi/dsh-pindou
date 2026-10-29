@@ -112,21 +112,77 @@ export function exportFileName(target: string | null, at: Date): string {
   return `bead-break-${tag || 'free'}-${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}.png`
 }
 
-/** Download the board as PNG. Resolves false when the browser refuses. */
-export async function downloadPng(doc: Document, board: Board, ironed: boolean, dark: boolean, target: string | null, now = new Date()): Promise<boolean> {
+/** Encode the export canvas (spec §13) as a PNG blob; null when the canvas refuses. */
+export async function exportBlob(doc: Document, board: Board, ironed: boolean, dark: boolean): Promise<Blob | null> {
   try {
     const canvas = renderExport(doc, board, ironed, dark)
-    const blob = await new Promise<Blob | null>(resolve => { canvas.toBlob(resolve, 'image/png') })
-    if (!blob) return false
+    return await new Promise<Blob | null>(resolve => { canvas.toBlob(resolve, 'image/png') })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * How a PNG is handed to the user:
+ * - `download`: `<a download>` with a blob URL. Verified in the DSH desktop shell
+ *   (Electron 44, secure `dsh-app:` scheme): the click raises `will-download`
+ *   on the default session, which DSH leaves to Electron's native save dialog
+ *   (apps/desktop/src/main.ts only blocks downloads for browser guests).
+ * - `manual`: no download attribute support. `window.open` is not an option
+ *   (DSH desktop denies non-http popups), so the image is shown in the panel
+ *   for right-click / long-press saving.
+ */
+export type SaveRoute = 'download' | 'manual'
+
+export function saveRoute(doc: Document): SaveRoute {
+  const view = doc.defaultView
+  return view && 'download' in view.HTMLAnchorElement.prototype ? 'download' : 'manual'
+}
+
+/** Trigger the download; returns false when the browser throws. */
+export function downloadBlob(doc: Document, blob: Blob, name: string): boolean {
+  try {
     const url = URL.createObjectURL(blob)
     const a = doc.createElement('a')
     a.href = url
-    a.download = exportFileName(target, now)
+    a.download = name
     a.rel = 'noopener'
+    a.className = 'pd-portal'
+    a.hidden = true
     doc.body.append(a)
     a.click()
     a.remove()
     setTimeout(() => { URL.revokeObjectURL(url) }, 4000)
+    return true
+  } catch {
+    return false
+  }
+}
+
+interface ClipboardWindow {
+  readonly isSecureContext?: boolean
+  readonly navigator: { readonly clipboard?: { readonly write?: unknown } }
+  readonly ClipboardItem?: { new (items: Record<string, Blob | Promise<Blob>>): unknown; supports?(type: string): boolean }
+}
+
+/** Whether "Copy image" can work here: secure context + async clipboard + PNG ClipboardItem. */
+export function canCopyImage(view: unknown = globalThis): boolean {
+  const w = view as ClipboardWindow | undefined
+  if (!w || w.isSecureContext === false) return false
+  if (typeof w.ClipboardItem !== 'function' || typeof w.navigator?.clipboard?.write !== 'function') return false
+  try { return w.ClipboardItem.supports ? w.ClipboardItem.supports('image/png') : true } catch { return false }
+}
+
+/**
+ * Copy a PNG to the system clipboard. The blob is passed as a promise so
+ * Safari keeps the click's user activation while the canvas encodes.
+ */
+export async function copyPng(blob: Promise<Blob | null>, view: unknown = globalThis): Promise<boolean> {
+  if (!canCopyImage(view)) return false
+  const w = view as Required<ClipboardWindow> & { navigator: { clipboard: { write(items: unknown[]): Promise<void> } } }
+  try {
+    const png = blob.then((b) => { if (!b) throw new Error('no image'); return b })
+    await w.navigator.clipboard.write([new w.ClipboardItem({ 'image/png': png })])
     return true
   } catch {
     return false

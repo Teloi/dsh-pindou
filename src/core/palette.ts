@@ -1,6 +1,6 @@
 /**
  * The 16 bead colours. Index = position in the compact encoding (`0`–`9`, `a`–`f`).
- * Hex values follow the designer's tokens (bead-break/tokens.css, `--bb-bead-*`):
+ * Hex values follow the designer's tokens (bead-break/tokens.css, `--pd-bead-*`):
  * they are physical bead colours and do not change with the host theme.
  */
 export interface BeadColor {

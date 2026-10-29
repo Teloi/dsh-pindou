@@ -27,6 +27,7 @@ export const IconRedo = (p: P): ReactElement => <svg {...base} {...p}><path d="M
 export const IconTrash = (p: P): ReactElement => <svg {...base} {...p}><path d="M4 6h12" /><path d="M8 6V4.5h4V6" /><path d="M5.5 6l.8 9.6a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9L14.5 6" /></svg>
 export const IconSparkle = (p: P): ReactElement => <svg {...base} {...p}><path d="M10 3v3M10 14v3M3 10h3M14 10h3" /><path d="M10 6.5 11 9l2.5 1L11 11l-1 2.5L9 11l-2.5-1L9 9z" fill="currentColor" /></svg>
 export const IconGrid = (p: P): ReactElement => <svg {...base} {...p}><rect x="3.5" y="3.5" width="13" height="13" rx="2.5" /><path d="M3.5 10h13M10 3.5v13" /></svg>
+export const IconCopy = (p: P): ReactElement => <svg {...base} {...p}><rect x="7" y="7" width="9.5" height="9.5" rx="2" /><path d="M13 7V5a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 4 5v6a1.5 1.5 0 0 0 1.5 1.5H7" /></svg>
 export const IconDownload = (p: P): ReactElement => <svg {...base} {...p}><path d="M10 3.5v9M6 9l4 4 4-4" /><path d="M4 16.5h12" /></svg>
 export const IconIron = (p: P): ReactElement => <svg {...base} {...p}><path d="M3 14.5h13.5V12a5 5 0 0 0-5-5H6" /><path d="M6 7v-2h6" /><path d="M3 14.5 5 9.5" /></svg>
 export const IconCheck = (p: P): ReactElement => <svg {...base} strokeWidth={2.4} {...p}><path d="M4.5 10.5 8.5 14.5 15.5 6" /></svg>

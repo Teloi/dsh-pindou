@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createBoard, EMPTY, encode, findTemplate, getCell, SafeStore, setCell, STORAGE_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
-import { AI_COOLDOWN_MS, GameStore, IRON_MS, resolveTarget, type GameApi } from '../src/client/game-store.ts'
+import { AI_COOLDOWN_MS, entryDot, GameStore, IRON_MS, resolveTarget, type GameApi } from '../src/client/game-store.ts'
 
 function mem(): StorageLike & { data: Map<string, string> } {
   const data = new Map<string, string>()
@@ -137,6 +137,39 @@ describe('GameStore', () => {
 describe('GameStore AI', () => {
   const board = setCell(setCell(createBoard(12), 1, 1, 2), 2, 2, 4)
   const ok: GenerateResponse = { ok: true, size: 12, flat: encode(board), issues: [], repaired: true, usage: { input: 10, output: 20 }, model: 'm', finish: 'stop' } as GenerateResponse
+
+  it('entry dot: busy while running, warm for unfinished work or a fresh AI result left unseen', async () => {
+    const generate = vi.fn(async () => ok)
+    const { store } = make({ api: { generate, status: async () => ({ configured: true, route: 'host' }) } })
+    expect(entryDot(store.getSnapshot(), true)).toBe('busy')
+    store.setPrefs({ busyHint: false })
+    expect(entryDot(store.getSnapshot(), true)).toBe('busy')
+    expect(entryDot(store.getSnapshot(), false)).toBeNull()
+    // tab closed during generation: the result lands as fresh
+    store.setAiSize(12); store.setAiPrompt('猫')
+    await store.generate()
+    expect(store.getSnapshot().fresh).toBe(true)
+    expect(entryDot(store.getSnapshot(), false)).toBe('progress')
+    store.setPanelVisible(true)
+    expect(store.getSnapshot().fresh).toBe(false)
+    expect(entryDot(store.getSnapshot(), false)).toBeNull()
+    store.setPanelVisible(false)
+    // free play with beads on the board counts as unfinished
+    store.startFree(); store.applyAt(0, 0)
+    expect(entryDot(store.getSnapshot(), false)).toBe('progress')
+  })
+
+  it('shows toasts with parameters and replaces the manual-save preview', () => {
+    const { store } = make()
+    store.showToast('exported', false, { name: 'a.png' })
+    expect(store.getSnapshot().toast).toMatchObject({ key: 'exported', params: { name: 'a.png' } })
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    store.setPreview({ url: 'blob:1', name: 'a.png' })
+    store.setPreview(null)
+    expect(revoke).toHaveBeenCalledWith('blob:1')
+    expect(store.getSnapshot().preview).toBeNull()
+    revoke.mockRestore()
+  })
 
   it('generates, caches, and enforces the front-end cooldown', async () => {
     const generate = vi.fn(async () => ok)

@@ -3,13 +3,21 @@
  * shared by both dictionaries; the host's locale service substitutes `{name}`
  * parameters, and `translate` below does the same outside the host.
  */
+/**
+ * Product names, single source for the UI copy (package.json `displayName` /
+ * `description` carry the same names for the plugin manager and listings).
+ */
+export const APP_NAME_ZH = '拼豆小憩'
+export const APP_NAME_EN = 'Bead Break'
+
 export const zh = {
-  appName: '拼豆小憩',
-  entryLabel: '拼豆小憩',
-  entryBusyLabel: '拼豆小憩 — 模型正在忙，来拼一会儿？',
+  appName: APP_NAME_ZH,
+  entryLabel: `打开${APP_NAME_ZH}`,
+  entryBusyLabel: '模型正在思考 — 来拼一会儿豆子？',
   hintText: '趁现在拼一个？',
-  hintGo: '打开',
+  hintGo: `打开${APP_NAME_ZH}`,
   hintClose: '关闭提示',
+  shortcutToggle: `打开或收起${APP_NAME_ZH}`,
   guideDesc: '模型忙的时候，拼几颗豆子',
   back: '返回',
   settings: '设置',
@@ -69,7 +77,12 @@ export const zh = {
   toastCleared: '已清空',
   toastUndo: '撤销',
   toastLocked: '已定型，先「撤销熨烫」再改',
-  toastExported: '已导出 PNG',
+  toastExported: '已导出 {name}',
+  toastCopied: '图片已复制，可以直接粘贴到对话里',
+  toastCopyFailed: '复制失败，可以改用导出',
+  copyImage: '复制图片',
+  previewTitle: '右键或长按图片另存为',
+  previewClose: '关闭',
   toastExportFailed: '导出失败',
   storageUnavailable: '浏览器存储不可用，进度不会保存',
   storageRecovered: '本地存档损坏，已重置',
@@ -113,12 +126,13 @@ export const zh = {
 export type MessageKey = keyof typeof zh
 
 export const en: Record<MessageKey, string> = {
-  appName: 'Bead Break',
-  entryLabel: 'Bead Break',
-  entryBusyLabel: 'Bead Break — the model is busy, play for a bit?',
+  appName: APP_NAME_EN,
+  entryLabel: `Open ${APP_NAME_EN}`,
+  entryBusyLabel: 'The model is thinking — place a few beads?',
   hintText: 'Quick bead break?',
-  hintGo: 'Open',
+  hintGo: `Open ${APP_NAME_EN}`,
   hintClose: 'Dismiss hint',
+  shortcutToggle: `Toggle ${APP_NAME_EN}`,
   guideDesc: 'Place a few beads while the model works',
   back: 'Back',
   settings: 'Settings',
@@ -178,7 +192,12 @@ export const en: Record<MessageKey, string> = {
   toastCleared: 'Board cleared',
   toastUndo: 'Undo',
   toastLocked: 'Fused — un-iron first to edit',
-  toastExported: 'PNG exported',
+  toastExported: 'Saved {name}',
+  toastCopied: 'Image copied — paste it into the chat',
+  toastCopyFailed: 'Copy failed — try Export instead',
+  copyImage: 'Copy image',
+  previewTitle: 'Right-click or long-press the image to save it',
+  previewClose: 'Close',
   toastExportFailed: 'Export failed',
   storageUnavailable: 'Browser storage unavailable — progress will not be saved',
   storageRecovered: 'Saved data was corrupt and has been reset',
