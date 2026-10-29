@@ -839,6 +839,20 @@ describe('spec 00:58: refused drops and failed loads', () => {
     expect(host.querySelector('.pd-pic-crop')).not.toBeNull()
   })
 
+  it('b1 S6: the zoom slider says a percentage and moves in 5 % steps (1 → 4 in 60 key presses, not 300)', async () => {
+    const { rootEl } = await panel(ready())
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-crop')).not.toBeNull() })
+    const zoom = host.querySelector<HTMLInputElement>('.pd-pic input[type=range]')!
+    expect(zoom.step).toBe('0.05')
+    expect(zoom.getAttribute('aria-valuetext')).toBe('100%')
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(zoom, '1.25')
+      zoom.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(host.querySelector('.pd-pic input[type=range]')!.getAttribute('aria-valuetext')).toBe('125%')
+  })
+
   it('spec 03:30: the refusal goes as soon as the crop frame moves, the zoom or the size changes, or a new picture loads', async () => {
     const { rootEl } = await panel(ready())
     await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })

@@ -364,7 +364,7 @@ export function PicturePage(props: PictureProps): ReactElement {
       <p id="pd-pic-err" className="pd-pic-err" role="alert">{saying ? t(saying) : ''}</p>
       <label className="pd-pic-row">
         <span>{t('zoom')}</span>
-        <input type="range" min={1} max={ZOOM_MAX} step={0.01} value={view.zoom} style={{ '--pd-v': `${((view.zoom - 1) / (ZOOM_MAX - 1)) * 100}%` } as CSSProperties}
+        <input type="range" min={1} max={ZOOM_MAX} step={0.05} value={view.zoom} aria-valuetext={`${Math.round(view.zoom * 100)}%`} style={{ '--pd-v': `${((view.zoom - 1) / (ZOOM_MAX - 1)) * 100}%` } as CSSProperties}
           onChange={(e) => { const z = Number(e.currentTarget.value); move(0, 0, z / view.zoom) }} />
       </label>
       <div className="pd-pic-prev">
