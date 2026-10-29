@@ -709,6 +709,102 @@ describe('drop and paste (spec §18.2)', () => {
   })
 })
 
+describe('b2 D-I1: a picture loaded from a drop or paste (I4, the other path)', () => {
+  const crop = (): HTMLElement | null => host.querySelector('.pd-pic-crop')
+  /** The page's status line: empty at once, 「已载入图片」 once rewritten. */
+  const status = (): string => host.querySelector('.pd-pic > [role=status]')?.textContent ?? ''
+  const png = (name = 'p.png'): File => file(pngHead(600, 400), name, 'image/png')
+  const expectCropFocused = (): void => {
+    expect(document.activeElement).toBe(crop())
+    expect(document.activeElement?.classList.contains('pd-pic-file')).toBe(false)
+  }
+
+  it('dropped on the start page (zh): focus on the crop frame, then 「已载入图片」 is said', async () => {
+    const { rootEl } = await panel(ready())
+    host.querySelector<HTMLButtonElement>('.pd-tpl, .pd-start .pd-big')!.focus()
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    await vi.waitFor(() => { expect(crop()).not.toBeNull() })
+    await flush(5)
+    expectCropFocused()
+    expect(status()).toBe('')
+    await flush(chunk.ANNOUNCE_MS + 20)
+    expect(status()).toBe('已载入图片')
+  })
+
+  it('pasted on the start page (en): focus on the crop frame, then “Image loaded”', async () => {
+    const { card, rootEl } = await panel(ready(), 'en')
+    card().focus()
+    await act(async () => { rootEl().dispatchEvent(pasteEvent([png()])) })
+    await vi.waitFor(() => { expect(crop()).not.toBeNull() })
+    await flush(chunk.ANNOUNCE_MS + 20)
+    expectCropFocused()
+    expect(status()).toBe('Image loaded')
+  })
+
+  it('dropped while playing: focus leaves the (gone) board for the crop frame', async () => {
+    const { rootEl, store } = await panel(ready())
+    await act(async () => { store.startFree() })
+    host.querySelector<HTMLElement>('[role=grid]')!.focus()
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    await vi.waitFor(() => { expect(crop()).not.toBeNull() })
+    await flush(chunk.ANNOUNCE_MS + 20)
+    expectCropFocused()
+    expect(status()).toBe('已载入图片')
+  })
+
+  it('a second picture replacing the first: focus back on the crop frame, the status emptied and said again', async () => {
+    const { rootEl } = await panel(ready())
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png('a.png')])) })
+    await vi.waitFor(() => { expect(crop()).not.toBeNull() })
+    await flush(chunk.ANNOUNCE_MS + 20)
+    const node = host.querySelector('.pd-pic > [role=status]')
+    host.querySelector<HTMLButtonElement>('.pd-pic-acts .pd-btn')!.focus()
+    await act(async () => { rootEl().dispatchEvent(pasteEvent([png('b.png')])) })
+    await flush(5)
+    expect(status()).toBe('')
+    await flush(chunk.ANNOUNCE_MS + 20)
+    expect(status()).toBe('已载入图片')
+    expectCropFocused()
+    // one live node for the whole page: it was there before it spoke
+    expect(host.querySelector('.pd-pic > [role=status]')).toBe(node)
+    expect(bitmap).toHaveBeenCalledTimes(2)
+  })
+
+  it('the status node is the same one in the empty and loaded states (live before it speaks)', async () => {
+    const { card } = await panel(ready())
+    await act(async () => { card().click() })
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-drop')).not.toBeNull() })
+    const node = host.querySelector('.pd-pic > [role=status]')
+    expect(node?.classList.contains('pd-sr')).toBe(true)
+    await choose(png())
+    await flush(chunk.ANNOUNCE_MS + 20)
+    expect(host.querySelector('.pd-pic > [role=status]')).toBe(node)
+    expect(status()).toBe('已载入图片')
+    expectCropFocused() // chosen with the picker: the zone it was opened from is gone
+  })
+
+  it('dropped from outside while the chat has focus: the chat keeps it; the load is still said', async () => {
+    const { rootEl } = await panel(ready())
+    const chat = document.createElement('textarea')
+    document.body.append(chat)
+    chat.focus()
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    await vi.waitFor(() => { expect(crop()).not.toBeNull() })
+    await flush(chunk.ANNOUNCE_MS + 20)
+    expect(document.activeElement).toBe(chat)
+    expect(status()).toBe('已载入图片')
+  })
+
+  it('a refused file says nothing in the status line (the alert explains it) and focus stays put', async () => {
+    const { card } = await panel(ready())
+    await act(async () => { card().click() })
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-drop')).not.toBeNull() })
+    await choose(svgFile())
+    expect(await alertSays()).toBe('暂不支持 SVG，换成 PNG 或 JPG 试试')
+    expect(status()).toBe('')
+  })
+})
+
 describe('b2 D-C1: in both degraded states a pasted picture is ignored like a dropped one', () => {
   it('load failed: paste on the start page and on the failed page does nothing and loads nothing', async () => {
     const { mod, calls } = gate()

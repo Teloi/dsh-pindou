@@ -25,7 +25,7 @@ const STRINGS = {
     svg: '暂不支持 SVG，换成 PNG 或 JPG 试试', transparent: '这张图几乎是透明的，换一张试试',
     tooSimple: '图案太简单了，试试关掉去背景', start: '开始拼', another: '换一张',
     crop: '裁剪框：拖动或用方向键移动，+ / - 缩放', zoom: '缩放', size: '尺寸', colors: '颜色数',
-    all: '全部 16 色', some: '{n} 色', dither: '抖动', removeBg: '去掉背景', preview: '{n}×{n} 预览，共 {beads} 颗豆',
+    all: '全部 16 色', some: '{n} 色', dither: '抖动', removeBg: '去掉背景', preview: '{n}×{n} 预览，共 {beads} 颗豆', loaded: '已载入图片',
   },
   en: {
     drop: 'Drop, paste or choose a picture', choose: 'Choose a picture', note: 'Your picture never leaves this device',
@@ -33,7 +33,7 @@ const STRINGS = {
     svg: 'SVG isn\'t supported yet. Try a PNG or JPG.', transparent: 'This image is almost fully transparent. Try another one.',
     tooSimple: 'Too simple — try turning off Remove background', start: 'Start beading', another: 'Choose another',
     crop: 'Crop: drag or use the arrow keys to move, + / - to zoom', zoom: 'Zoom', size: 'Size', colors: 'Colours',
-    all: 'All 16', some: '{n} colours', dither: 'Dithering', removeBg: 'Remove background', preview: '{n}×{n} preview, {beads} beads',
+    all: 'All 16', some: '{n} colours', dither: 'Dithering', removeBg: 'Remove background', preview: '{n}×{n} preview, {beads} beads', loaded: 'Image loaded',
   },
 } as const
 type Key = keyof typeof STRINGS.zh
@@ -161,6 +161,15 @@ export function PicturePage(props: PictureProps): ReactElement {
     return () => { clearTimeout(id) }
   }, [error, tries])
   const saying = error && said?.n === tries ? said.error : null
+  // Each picture that loads (dropped, pasted or chosen, anywhere): `loads` counts them, and the
+  // status line says 「已载入图片」 a moment after it was emptied, so a second one is read again.
+  const [loads, setLoads] = useState(0)
+  const [told, setTold] = useState(0)
+  useEffect(() => {
+    if (!loads) return
+    const id = setTimeout(setTold, ANNOUNCE_MS, loads)
+    return () => { clearTimeout(id) }
+  }, [loads])
   const [shake, setShake] = useState(false)
   const [over, setOver] = useState(false)
   const input = useRef<HTMLInputElement>(null)
@@ -200,6 +209,7 @@ export function PicturePage(props: PictureProps): ReactElement {
     setPic(r)
     setShown(null)
     setView({ cx: w / 2, cy: h / 2, zoom: 1 })
+    setLoads(n => n + 1)
   }, [])
 
   // Opened from the card (keyboard or pointer): focus the drop zone, the page's one action
@@ -209,6 +219,15 @@ export function PicturePage(props: PictureProps): ReactElement {
     const z = zone.current
     if (empty.current && z?.closest('.pd-root')?.contains(z.ownerDocument.activeElement)) z.focus({ preventScroll: true })
   }, [])
+
+  // A picture loaded: focus the crop frame, the page's next step (design b2 D-I1), never the
+  // hidden file input. Only when focus is in the panel or was lost with the drop zone; a drop
+  // from the chat leaves the chat's focus alone.
+  useEffect(() => {
+    const c = crop.current
+    const a = c?.ownerDocument.activeElement
+    if (loads && c && (!a || a === c.ownerDocument.body || c.closest('.pd-root')?.contains(a))) c.focus({ preventScroll: true })
+  }, [loads])
 
   // a picture dropped or pasted on the panel: take it over (the entry then lets go of it)
   useEffect(() => {
@@ -311,7 +330,8 @@ export function PicturePage(props: PictureProps): ReactElement {
   if (!pic) {
     return (
       <div className="pd-pic">
-        <div ref={zone} className={`pd-pic-zone pd-pic-drop${shake ? ' pd-shake' : ''}`} role="button" tabIndex={0}
+        <p className="pd-sr" role="status">{told === loads && loads ? t('loaded') : ''}</p>
+        <div key="z" ref={zone} className={`pd-pic-zone pd-pic-drop${shake ? ' pd-shake' : ''}`} role="button" tabIndex={0}
           aria-label={t('drop')} aria-describedby="pd-pic-err pd-pic-note" data-error={error ?? undefined} data-over={over || undefined}
           onClick={pick}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick() } }}
@@ -330,8 +350,10 @@ export function PicturePage(props: PictureProps): ReactElement {
   const n = opts.size
   return (
     <div className="pd-pic">
+      {/* the same status node in both states, so it is live before it speaks */}
+      <p className="pd-sr" role="status">{told === loads && loads ? t('loaded') : ''}</p>
       {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a pan/zoom surface: focusable for the arrow and +/- keys its label announces */}
-      <div ref={crop} className="pd-pic-zone pd-pic-crop" role="group" tabIndex={0} aria-label={t('crop')}
+      <div key="c" ref={crop} className="pd-pic-zone pd-pic-crop" role="group" tabIndex={0} aria-label={t('crop')}
         onKeyDown={onCropKey} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
         <canvas ref={cropCanvas} aria-hidden />
       </div>

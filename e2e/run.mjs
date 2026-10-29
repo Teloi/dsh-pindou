@@ -290,15 +290,42 @@ const allOk = r => r.normal.length === 16 && r.hot.length === 16 && [...r.normal
 const bad = r => JSON.stringify([...r.normal, ...r.hot].filter(x => !x.ok).slice(0, 4))
 /** The third start card: picture to pattern (spec §18.1). */
 const pictureCard = p => p.locator('.pd-start .pd-big').nth(2)
+/**
+ * b2 D-I1: after a picture loads from a drop or paste, where focus is and what the page's status
+ * line said (it is emptied, then written ~60 ms later).
+ */
+async function loadedState(p, want) {
+  const said = await p.waitForFunction(w => document.querySelector('.pd-pic > [role=status]')?.textContent === w, want, { timeout: 3000 }).then(() => true, () => false)
+  return {
+    said,
+    ...await p.evaluate(() => {
+      const a = document.activeElement
+      const st = document.querySelector('.pd-pic > [role=status]')
+      return { crop: a?.classList.contains('pd-pic-crop') ?? false, file: a?.classList.contains('pd-pic-file') ?? false, on: a ? `${a.tagName}.${a.className}` : null, live: st?.getAttribute('role') === 'status' && st.classList.contains('pd-sr') }
+    }),
+  }
+}
+const loadedOk = st => st.said && st.crop && !st.file && st.live
 /** How many rendered lines an element's text takes (evaluated in the page). */
 function lines(el) { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top))).size }
-/** The three start cards as laid out now (`lineCount` is `lines`, passed in: both run in the page): size, title and description lines, what is cut (design I1/C1). */
-const startCards = lineCount => [...document.querySelectorAll('.pd-start .pd-big')].map((c) => {
+/** The words of an element's text that are split over two lines (evaluated in the page): wrapping only at spaces leaves none (C1). */
+function splitWords(el) {
+  const out = [], w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    for (const m of n.data.matchAll(/\S+/g)) {
+      const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length)
+      if (new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top))).size > 1) out.push(m[0])
+    }
+  }
+  return out
+}
+/** The three start cards as laid out now (`lineCount` is `lines`, `split` is `splitWords`, passed in: all run in the page): size, title and description lines, what is cut (design I1/C1). */
+const startCards = (lineCount, split) => [...document.querySelectorAll('.pd-start .pd-big')].map((c) => {
   const b = c.querySelector('b'), d = c.querySelector('b + span'), box = c.getBoundingClientRect()
   const lh = d.getClientRects()[0] ? d.scrollHeight / Math.max(1, lineCount(d)) : 16
   return {
     w: Math.round(box.width), h: Math.round(box.height), top: Math.round(box.top), title: b.textContent, sub: d.textContent, status: d.classList.contains('pd-st'),
-    titleLines: lineCount(b), titleCut: b.scrollWidth > b.clientWidth + 1 || b.scrollHeight > b.clientHeight + 1,
+    titleLines: lineCount(b), titleSplit: split(b), titleCut: b.scrollWidth > b.clientWidth + 1 || b.scrollHeight > b.clientHeight + 1,
     subLines: lineCount(d), subShown: Math.round(d.clientHeight / lh), subCut: d.scrollHeight > d.clientHeight + 1 || d.scrollWidth > d.clientWidth + 1,
     clamp: getComputedStyle(d).webkitLineClamp,
   }
@@ -313,14 +340,14 @@ async function cardsFit(p, label, widths = [300, 360, 420, 640, 900], shots = []
   for (const px of widths) {
     await p.evaluate(v => { document.querySelector('.pd-root').style.width = `${v}px` }, px)
     await p.waitForTimeout(350)
-    const cards = await p.evaluate(`(${startCards})(${lines})`)
+    const cards = await p.evaluate(`(${startCards})(${lines}, ${splitWords})`)
     const hs = cards.map(c => c.h), ws = cards.map(c => c.w)
     const min = px < 480 ? 72 : 64
-    const cut = cards.filter(c => c.titleCut || (label.startsWith('zh') && c.titleLines !== 1) || c.titleLines > 2
+    const cut = cards.filter(c => c.titleCut || c.titleSplit.length > 0 || (label.startsWith('zh') && c.titleLines !== 1) || c.titleLines > 2
       || (c.status ? c.subCut : c.subShown > 2 || (c.subCut && c.clamp !== '2')))
     const ok = cards.length === 3 && cut.length === 0 && Math.max(...hs) - Math.min(...hs) <= 1 && Math.max(...ws) - Math.min(...ws) <= 1
       && Math.min(...hs) >= min && new Set(cards.map(c => c.top)).size === 1
-    check(`I1/C1 (${label}) panel ${px}px: card titles whole, status line whole, descriptions ≤ 2 lines, three equal cards ≥ ${min}px`, ok, JSON.stringify(cut.length ? cut : cards.map(c => [c.w, c.h, c.titleLines, c.subLines, c.subShown])))
+    check(`I1/C1 (${label}) panel ${px}px: card titles whole (wrapped only at spaces), status line whole, descriptions ≤ 2 lines, three equal cards ≥ ${min}px`, ok, JSON.stringify(cut.length ? cut : cards.map(c => [c.w, c.h, c.titleLines, c.subLines, c.subShown])))
     all.push({ px, cards })
     if (shots.includes(px)) await outShot(p, `c1-home-${label}-${px}`, { clip: await p.locator('.pd-start').boundingBox() })
   }
@@ -612,16 +639,36 @@ try {
     check('T1 storage holds only the pattern: no picture in localStorage, no IndexedDB or Cache Storage from the plugin', !foot.picture && foot.bytes < 8 * 1024 && !foot.dbs.some(n => /pindou/i.test(n ?? '')) && !foot.caches.some(n => /pindou/i.test(n)), JSON.stringify(foot))
     // drop anywhere on the panel (here: on the board) and paste on the start page
     const small = png(320, 320, (x, y) => ((x - 160) ** 2 + (y - 160) ** 2 < 110 ** 2 ? [98, 182, 233, 255] : [250, 249, 245, 255]))
+    await q.locator('.pd-root [role=grid]').first().focus()
     const dropped = await q.evaluate(dropFile, ['.pd-board', b64(small), 'ball.png', 'image/png'])
     await q.locator('.pd-pic-crop').waitFor({ timeout: 5000 })
+    const dropLoaded = await loadedState(q, '已载入图片')
+    check('b2 D-I1 (zh) dropped while playing: focus on the crop frame (not the hidden file input), 「已载入图片」 in the status line', loadedOk(dropLoaded), JSON.stringify(dropLoaded))
+    await outShot(q, 'b2-drop-loaded-zh')
     await q.waitForTimeout(800) // DSH adds a dropped file's card within a frame or two; give it far longer
     const panelCards = await q.evaluate(hostFileCards, 'ball.png')
     check('T1 a picture dropped on the panel (on the board) opens the page with it; the host never sees the drop (no DSH attachment)', dropped.dropPrevented && dropped.overPrevented && dropped.hostSaw.length === 0 && panelCards === 0, JSON.stringify({ ...dropped, panelCards }))
     await q.locator('.pd-head .pd-ib').first().click()
     await q.locator('.pd-v-home').waitFor()
-    const pasted = await q.evaluate(pasteFile, ['.pd-root', b64(small), 'ball.png', 'image/png'])
+    await pictureCard(q).focus()
+    const pasted = await q.evaluate(pasteFile, [':focus', b64(small), 'ball.png', 'image/png'])
     await q.locator('.pd-pic-crop').waitFor({ timeout: 5000 })
     check('T1 a picture pasted on the start page opens the page with it', pasted)
+    const pasteLoaded = await loadedState(q, '已载入图片')
+    check('b2 D-I1 (zh) pasted on the start page: focus on the crop frame, 「已载入图片」 said', loadedOk(pasteLoaded), JSON.stringify(pasteLoaded))
+    // a second picture replacing the first, focus on 换一张's neighbour: back on the crop frame, said again
+    await q.locator('.pd-pic-acts .pd-btn').first().focus()
+    // record every text the status line shows (the image decodes asynchronously, so poll-free)
+    await q.evaluate(() => {
+      const el = document.querySelector('.pd-pic > [role=status]')
+      const seen = (window.pdSaid = [])
+      new MutationObserver(() => { seen.push(el?.textContent ?? null) }).observe(el, { childList: true, characterData: true, subtree: true })
+    })
+    await q.evaluate(pasteFile, [':focus', b64(png(200, 120, () => [215, 51, 59, 255])), 'red.png', 'image/png'])
+    await q.waitForFunction(() => window.pdSaid.at(-1) === '已载入图片', null, { timeout: 5000 }).catch(() => {})
+    const texts = await q.evaluate(() => window.pdSaid)
+    const again = await loadedState(q, '已载入图片')
+    check('b2 D-I1 (zh) a pasted replacement: status emptied then said again, focus on the crop frame', texts.indexOf('') >= 0 && texts.lastIndexOf('已载入图片') > texts.indexOf('') && loadedOk(again), JSON.stringify({ texts, ...again }))
     // paste in the chat input is DSH's, untouched
     await q.locator('.pd-head .pd-ib').first().click()
     const editor = q.locator('[contenteditable=true]').first()
@@ -649,6 +696,26 @@ try {
     const afterCard = await q.waitForFunction(hostFileCards, 'chat-after-close.png', { timeout: 8000 }).then(() => true, () => false)
     check('T1 panel closed (tab closed, plugin unmounted): a file dropped on the chat input becomes a DSH attachment', tabClose !== null && goneRoots === 0 && afterCard && closedAfter.hostSaw.includes('drop'), JSON.stringify({ tabClose, goneRoots, afterCard, ...closedAfter }))
     await q.context().close()
+
+    // ── b2 D-I1 in English (dark): drop on the start page, paste on the start page ──
+    const qe = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'dark' }, 'en')
+    await startSession(qe, 'Hello', 'en')
+    await openPanel(qe)
+    const ball = b64(png(320, 320, (x, y) => ((x - 160) ** 2 + (y - 160) ** 2 < 110 ** 2 ? [98, 182, 233, 255] : [30, 32, 36, 255])))
+    await pictureCard(qe).focus()
+    await qe.evaluate(dropFile, ['.pd-v-home', ball, 'ball.png', 'image/png'])
+    await qe.locator('.pd-pic-crop').waitFor({ timeout: 10000 })
+    const enDrop = await loadedState(qe, 'Image loaded')
+    check('b2 D-I1 (en) dropped on the start page: focus on the crop frame, “Image loaded” said', loadedOk(enDrop), JSON.stringify(enDrop))
+    await outShot(qe, 'b2-drop-loaded-en-dark')
+    await qe.locator('.pd-head .pd-ib').first().click()
+    await qe.locator('.pd-v-home').waitFor()
+    await pictureCard(qe).focus()
+    const enPasted = await qe.evaluate(pasteFile, [':focus', ball, 'ball.png', 'image/png'])
+    await qe.locator('.pd-pic-crop').waitFor({ timeout: 5000 })
+    const enPaste = await loadedState(qe, 'Image loaded')
+    check('b2 D-I1 (en) pasted on the start page: focus on the crop frame, “Image loaded” said', enPasted && loadedOk(enPaste), JSON.stringify(enPaste))
+    await qe.context().close()
 
     // ── load failure: in-page retry, Enter and Space, no toast; skeleton after 150 ms ──
     const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
