@@ -1,7 +1,7 @@
 {
   "name": "dsh-pindou",
   "version": "0.1.0",
-  "description": "拼豆小憩 Pindou Break — a tiny perler-bead game in the DSH (DeepSeek Harness) right sidebar for idle moments while the model is busy.",
+  "description": "拼豆小憩 Bead Break — 等模型思考时拼一会儿的像素拼豆小游戏 · a tiny perler-bead pixel game for DeepSeek Harness (DSH) while the model is busy",
   "type": "module",
   "license": "MIT",
   "author": "Teloi",
