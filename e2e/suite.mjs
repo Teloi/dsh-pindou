@@ -592,6 +592,8 @@ async function worksSection() {
     await f.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
     const back = await f.evaluate(worksRow)
     check('W Enter on the retry loads the row (same height, 3 thumbnails)', fetches === 3 && back.thumbs === 3 && back.h === failed.h, JSON.stringify({ fetches, back }))
+    const landed = await f.evaluate(() => { const a = document.activeElement; return { first: a === document.querySelector('.pd-v-home .pd-wt'), label: a?.getAttribute('aria-label') ?? a?.textContent ?? null } })
+    check('b4 重要 3 after the retry loads the row, focus is on the first thumbnail (not 自由拼)', landed.first, JSON.stringify(landed))
     await f.context().close()
     const caused = pageErrors.splice(errorsBefore)
     check('W the only errors during the failure run are the aborted chunk loads', caused.every(e => /client\.works\.js|ERR_INTERNET_DISCONNECTED|Failed to fetch|net::/i.test(e)), caused.slice(0, 3).join(' | '))

@@ -122,7 +122,7 @@ function Piece({ kit, w, css }: { readonly kit: WorksKit; readonly w: Work; read
 let openOnArrival: number | null = null
 
 /** Home section (spec §18.4): 「我的作品 · N」, 全部 ›, and as many thumbnails as fit on one line, newest first. */
-export function WorksRow(props: WorksProps & { readonly fade: boolean }): ReactElement {
+export function WorksRow(props: WorksProps & { readonly fade: boolean, readonly focus?: boolean }): ReactElement {
   const { env, kit, fade } = props
   useStyles()
   const wall = useWorks(props)
@@ -138,9 +138,20 @@ export function WorksRow(props: WorksProps & { readonly fade: boolean }): ReactE
     return () => { ro?.disconnect() }
   }, [])
   const shown = wall.slice(-fit).toReversed()
+  // arrived after the retry button had the focus (b4 重要 3): the first thumbnail takes it, or
+  // the heading when there is none; once, and only while focus is in the panel or was lost
+  const title = useRef<HTMLHeadingElement>(null)
+  const focused = useRef(!props.focus)
+  useEffect(() => {
+    const h = title.current
+    const a = h?.ownerDocument.activeElement
+    if (focused.current || !fit || !h || (a && a !== h.ownerDocument.body && !h.closest('.pd-root')?.contains(a))) return
+    focused.current = true
+    ;(ref.current?.querySelector<HTMLElement>('.pd-wt') ?? h).focus({ preventScroll: true })
+  }, [fit])
   return (
     <section className="pd-works">
-      <h3 className="pd-sec">
+      <h3 ref={title} className="pd-sec" tabIndex={-1}>
         <span>{env.t('homeWorks')} · {wall.length}</span>
         <button type="button" className="pd-link" onClick={() => { env.store.go('works') }}>{STRINGS[env.lang].all}</button>
       </h3>

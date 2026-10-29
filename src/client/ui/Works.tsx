@@ -33,19 +33,21 @@ export function HomeWorks(): ReactElement | null {
   const n = wall.length
   // the thumbnails fade in only when they arrive while the row is on screen
   const [fade] = useState(status !== 'ready')
+  // the retry button goes when the row arrives: the row then takes the focus (b4 重要 3)
+  const [retried, setRetried] = useState(false)
   useEffect(() => { if (n && status === 'idle') void mod?.load() }, [n, status, mod])
   const m = mod?.value()
   // loaded: the chunk draws the whole section (title, 全部 ›, thumbnails) in the same box
   return !n
     ? null
     : m
-      ? <m.WorksRow env={env} kit={kit} wall={wall} fade={fade} />
+      ? <m.WorksRow env={env} kit={kit} wall={wall} fade={fade} focus={retried} />
       : (
         <section className="pd-works">
           <h3 className="pd-sec">{t('homeWorks')} · {n}</h3>
           <div className="pd-wrow">
             {status === 'failed'
-              ? <button type="button" className="pd-link" onClick={() => { void mod?.load() }}>{t('loadRetry')}</button>
+              ? <button type="button" className="pd-link" onClick={() => { setRetried(true); void mod?.load() }}>{t('loadRetry')}</button>
               : status === 'unsupported' ? t('needNewerDsh') : null}
           </div>
         </section>
