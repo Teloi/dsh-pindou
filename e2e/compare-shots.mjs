@@ -3,7 +3,7 @@
 // pixel, e.g. two runs of one build (must be identical) or a baseline and a refactor that must
 // not change how anything looks:
 //
-//   node e2e/compare-shots.mjs <runA> <runB>     (each an e2e/.out or E2E_SELFCHECK_DIR)
+//   node e2e/compare-shots.mjs <runA> <runB>     (each a run's E2E_OUT or E2E_SELFCHECK_DIR)
 //
 // Each PNG is decoded to RGBA (bytes are not compared: equal pixels may be encoded differently),
 // and a differing crop is listed with its size, the number of differing pixels, the largest

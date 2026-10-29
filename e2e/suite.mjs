@@ -1,21 +1,24 @@
 // End-to-end run against DSH Web started from source.
 //
-//   node e2e/run.mjs                   # everything into e2e/.out (screenshots in e2e/.out/assets)
+//   node e2e/run.mjs                   # everything into $TMPDIR/pindou-e2e-out (E2E_OUT; screenshots in its assets/)
 //   node e2e/run.mjs --update-assets   # also refresh the README screenshots + GIF in docs/assets
 //                                      # (same as E2E_UPDATE_ASSETS=1)
 //
 // Needs a DeepSeek Harness checkout (DSH_SRC, default /home/box/src/deepseek-harness,
 // built with `pnpm build`) and a Chrome/Chromium (CHROME, default /usr/bin/google-chrome).
-// Everything runs in throwaway dirs under the OS temp dir: DSH_HOME, the workspace,
-// and a fake Messages-API LLM (e2e/fake-llm.mjs). No real API key is used.
+// Everything runs in throwaway dirs under the OS temp dir (e2e/run-dirs.mjs): the output, DSH_HOME,
+// the workspace, and a fake Messages-API LLM (e2e/fake-llm.mjs) on a free port. No real API key is used.
+// Give each concurrent run its own TMPDIR (or E2E_OUT, E2E_DSH_HOME, E2E_WS): a second run on the
+// same dirs stops at once.
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from 'playwright-core'
 import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers, toastLongLine } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
+import { claimOut, freshHome, runDirs } from './run-dirs.mjs'
 import { decodePng, diffPng } from './compare-shots.mjs'
 import { longNames } from './classes-hook.mjs'
 import CSS_VARS from '../scripts/css-vars.json' with { type: 'json' }
@@ -27,9 +30,8 @@ const DSH_BIN = join(DSH_SRC, 'apps/cli/lib/bin.js')
 /** A custom property as it ships (the one short-name table, scripts/css-vars.ts). */
 const cssVar = (name) => { const v = CSS_VARS[name]; if (!v) throw new Error(`${name} is not in scripts/css-vars.json`); return v }
 const CHROME = process.env.CHROME ?? '/usr/bin/google-chrome'
-const DSH_HOME = process.env.E2E_DSH_HOME ?? join(tmpdir(), 'pindou-e2e-home')
-const WS = join(tmpdir(), 'pindou-e2e-ws')
-const OUT = join(REPO, 'e2e/.out')
+const DIRS = runDirs()
+const { home: DSH_HOME, ws: WS, out: OUT } = DIRS
 const UPDATE_ASSETS = process.argv.includes('--update-assets') || process.env.E2E_UPDATE_ASSETS === '1'
 const ASSETS = UPDATE_ASSETS ? join(REPO, 'docs/assets') : join(OUT, 'assets')
 const FFMPEG = process.env.FFMPEG ?? 'ffmpeg'
@@ -61,48 +63,14 @@ function check(name, ok, detail = '') {
   log(ok ? '  ✓' : '  ✗', name, detail)
 }
 
-mkdirSync(OUT, { recursive: true })
+const releaseOut = claimOut(OUT)
+log('output:', OUT)
+await freshHome({ home: DSH_HOME, ws: WS, bin: DSH_BIN, log })
 mkdirSync(join(OUT, 'audit'), { recursive: true })
 mkdirSync(ASSETS, { recursive: true })
-mkdirSync(WS, { recursive: true })
-if (!existsSync(join(WS, 'README.md'))) writeFileSync(join(WS, 'README.md'), '# e2e workspace\n')
-
-// SIGTERM/SIGINT are fine (Playwright closes the browser, the pending wait throws, `finally` stops
-// DSH: checked 06:18, run kr-old-killed). A run killed before its `finally` (SIGKILL, a crash) leaves its DSH server running on this
-// DSH_HOME; a rerun on the same home would share its sessions and files. Stop only such a server:
-// a DSH whose DSH_HOME is exactly this run's (never another checkout's or another person's).
-const leftovers = []
-for (const pid of existsSync('/proc') ? readdirSync('/proc').filter(d => /^\d+$/.test(d)) : []) {
-  try {
-    const env = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')
-    const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
-    if (cmd.includes(DSH_BIN) && env.includes(`DSH_HOME=${DSH_HOME}`)) leftovers.push(Number(pid))
-  } catch { /* gone, or not ours to read */ }
-}
-// and wait until it has exited
-for (const pid of leftovers) {
-  log('stopping a leftover DSH server on this home, pid', pid)
-  process.kill(pid, 'SIGTERM')
-  for (let i = 0; existsSync(`/proc/${pid}`); i++) {
-    if (i === 100) throw new Error(`leftover DSH server ${pid} on ${DSH_HOME} did not exit in 10 s`)
-    await new Promise(r => { setTimeout(r, 100) })
-  }
-}
-// What that run left behind can break this one: killed while making its first session, it left a
-// draft without a workspace and the next run never got a chat input (runs k9-rerun, k9b-rerun,
-// k9c-rerun, 06:25–06:34, 3 of 3). Set that home aside (kept, not deleted) and start from a fresh one.
-if (leftovers.length) {
-  const aside = `${DSH_HOME}.killed-${Date.now()}`
-  renameSync(DSH_HOME, aside)
-  log('set the killed run\'s home aside:', aside)
-}
 
 // 1. install the plugin into an isolated Web profile from this checkout
-const profilePkg = join(DSH_HOME, 'profiles/web/package.json')
-// the default home is shared by every checkout on this machine: never test another checkout's build
-const linked = existsSync(profilePkg) ? /"dsh-pindou":\s*"link:([^"]+)"/.exec(readFileSync(profilePkg, 'utf8'))?.[1] : undefined
-if (linked && resolve(linked) !== REPO) throw new Error(`${DSH_HOME} runs the plugin from ${linked}, not ${REPO}: set E2E_DSH_HOME (or TMPDIR) to a home of this checkout's own`)
-if (!existsSync(profilePkg) || !readFileSync(profilePkg, 'utf8').includes('"dsh-pindou"')) {
+{ // into the fresh home (freshHome)
   log('installing plugin into', DSH_HOME)
   const r = spawnSync(process.execPath, [DSH_BIN, 'plugin', '--profile', 'web', 'add', `link:${REPO}`],
     { cwd: WS, env: { ...process.env, DSH_HOME }, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })
@@ -111,14 +79,14 @@ if (!existsSync(profilePkg) || !readFileSync(profilePkg, 'utf8').includes('"dsh-
 }
 
 // 2. fake LLM + DSH Web
-const llm = await startFakeLlm({ chatMs: Number(process.env.FAKE_LLM_CHAT_MS ?? 30000) })
+const llm = await startFakeLlm({ port: DIRS.llmPort, chatMs: Number(process.env.FAKE_LLM_CHAT_MS ?? 30000) })
 const CLOCK_FILE = join(tmpdir(), `pindou-e2e-clock-${process.pid}`)
 const serverClockEnv = FIXED_NOW ? {
   NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${pathToFileURL(join(REPO, 'e2e/server-clock.mjs')).href}`.trim(),
   E2E_FIXED_NOW: String(FIXED_NOW.getTime()),
   E2E_CLOCK_FILE: CLOCK_FILE,
 } : {}
-const dsh = spawn(process.execPath, [DSH_BIN, '--profile', 'web', '--no-open', '--host', '127.0.0.1', '--port', '0'], {
+const dsh = spawn(process.execPath, [DSH_BIN, '--profile', 'web', '--no-open', '--host', '127.0.0.1', '--port', String(DIRS.dshPort)], {
   cwd: WS,
   env: { ...process.env, DSH_HOME, DEEPSEEK_BASE_URL: llm.url, DEEPSEEK_API_KEY: 'e2e-placeholder', ...serverClockEnv },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -253,7 +221,7 @@ const shot = async (p, name, opts, dir = ASSETS, auditOpts = {}) => {
   await pluginShot(p, name)
 }
 /**
- * Settled crops of just the plugin, one per .pd-root / top-level .pd-portal (name.png, name.1.png…), in e2e/.out/plugin/, for
+ * Settled crops of just the plugin, one per .pd-root / top-level .pd-portal (name.png, name.1.png…), in OUT/plugin/, for
  * run-to-run comparison with `node e2e/compare-shots.mjs <runA> <runB>`. The full-page shots
  * above also carry host clocks and streamed text, and can catch a bead mid-animation, so they
  * differ between two runs of the same build; these crops wait for the plugin's finite
@@ -2031,6 +1999,7 @@ try {
   dsh.kill('SIGTERM')
   rmSync(CLOCK_FILE, { force: true })
   await llm.close()
+  releaseOut()
 }
 const failed = checks.filter(c => !c.ok)
 log(failed.length ? `\n${failed.length} check(s) failed` : `\nall ${checks.length} checks passed`)

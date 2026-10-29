@@ -90,7 +90,7 @@ All keys are optional. Unknown keys or invalid values make the plugin fail to lo
 ```bash
 pnpm install
 pnpm run check      # lint + typecheck + tests + build + bundle-shape check
-pnpm run e2e        # start DSH Web from source and drive it with Playwright; screenshots go to e2e/.out (add -- --update-assets to refresh docs/assets)
+pnpm run e2e        # start DSH Web from source and drive it with Playwright; screenshots go to $TMPDIR/pindou-e2e-out (add -- --update-assets to refresh docs/assets)
 ```
 
 Three layers: `src/core` (pure logic: board, templates, pattern validation and repair, cache; no DOM), `src/client` (React UI and DSH client glue), `src/host` (DSH server side: the model call). DSH UI constraints and design decisions are in [docs/dsh-ui-constraints.md](docs/dsh-ui-constraints.md) (Chinese).

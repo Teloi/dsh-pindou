@@ -88,7 +88,7 @@ npx @deepseek-ai/dsh plugin --profile web remove dsh-pindou
 ```bash
 pnpm install
 pnpm run check      # lint + typecheck + 测试 + 构建 + bundle 形状检查
-pnpm run e2e        # 从源码启动 DSH Web，用 Playwright 跑一遍，截图写进 e2e/.out（加 -- --update-assets 才会刷新 docs/assets）
+pnpm run e2e        # 从源码启动 DSH Web，用 Playwright 跑一遍，截图写进 $TMPDIR/pindou-e2e-out（加 -- --update-assets 才会刷新 docs/assets）
 ```
 
 代码分三层：`src/core`（纯逻辑：豆板、模板、图纸校验修复、缓存，无 DOM）、`src/client`（React 界面与 DSH 客户端胶水）、`src/host`（DSH 服务端：模型调用）。DSH 的界面约束和设计决定记在 [docs/dsh-ui-constraints.md](docs/dsh-ui-constraints.md)。
