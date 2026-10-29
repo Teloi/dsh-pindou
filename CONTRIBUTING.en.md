@@ -22,6 +22,7 @@ pnpm run check          # all of the above
 pnpm run e2e            # end-to-end: DSH Web from source + a fake model server; screenshots and logs go to e2e/.out (ignored)
 pnpm run e2e -- --update-assets   # same, and refresh the README images in docs/assets (or E2E_UPDATE_ASSETS=1)
 E2E_SELFCHECK_DIR=/some/dir pnpm run e2e   # also copy screenshots, checks.json and style-leaks.json there
+node e2e/compare-shots.mjs <runA> <runB>  # compare the plugin crops (plugin/: settled, host left out) of two E2E runs; a change that must not alter the look keeps them all identical
 ```
 
 ## Conventions

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- **Guide dots on the light board are visible for every colour (spec §18.5, O3; was planned for 0.1.1).** The per-colour ring that the dark theme already draws (N10) now has a light-board table too: each colour is darkened toward ink until it stands out, then faded back to just 3.2:1 against the board, and drawn as a 1px inner ring, which stays under the selected-colour halo so selected guides keep ≥ 3:1 as well (R3-1: before, only Black passed when selected). White and Cream were the ones reported, but measured on the light board Yellow, Lime, Pink, Tan, Sky, Orange, Gray and Teal also fell short of 3:1 even at full strength, so all 16 get a ring. Unit tests recompute both tables and check all 16 colours × light/dark × normal/selected; the E2E run seeds a pattern with every colour and measures the computed ring against the real board in light and dark, normal and selected.
+
 ### Planned for 0.1.1
 
 These review suggestions were left out of 0.1.0 on purpose:
@@ -11,7 +15,6 @@ These review suggestions were left out of 0.1.0 on purpose:
 - **"Thinking" board while the model runs (design S4)**: a new idle state that needs its own design pass and copy; out of scope for a fix round.
 - **Wrap the stylesheet in `@scope (.pd-root, .pd-portal)` (design S12)**: nothing leaks out today (a unit test rejects any selector without the `pd-` prefix), and host styles leaking in are now handled by the isolation layer. `@scope` would change cascade proximity for all ~260 rules, so it needs its own visual pass on every screen rather than a late fix.
 - **Coach card placement (design N11)**: the card covers the bottom two rows of the board. Spec §4.2 places it exactly there ("卡片覆盖豆板下部，不遮挡调色盘"), so moving it above the board or before the first template needs the spec changed first; left as specified.
-- **Light-mode ghost dots for White and Cream**: the dark-theme rings (N10) bring every colour to ≥ 3:1 on the dark board. On the light board White and Cream ghosts stay below 3:1 as designed (a guide, not content); a light-mode ring needs a design decision.
 - **Replaced games survive a reload** (known limitation of 0.1.0, see below): persist the games kept for undo after switching patterns (N1), so that undo still reaches them after a reload. This changes the storage format.
 - **Pin GitHub Actions to commit SHAs**: CI uses major-version tags (`actions/checkout@v4` and so on). Pinning needs a Renovate/Dependabot rule to keep the SHAs current; otherwise they go stale.
 

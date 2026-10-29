@@ -181,3 +181,38 @@ export function auditPanel() {
     icons, round, wraps, contrast,
   }
 }
+
+// Spec §18.5 / O3: the ring of every guide dot (`.pd-cell.pd-g::after`, first box-shadow)
+// against the board it sits on, one cell per colour code, in the normal (`hot` false) or the
+// selected-colour state (`hot` true). Same self-contained rule as above.
+export function guideRings([codes, hot]) {
+  const rgb = s => (/rgba?\(([^)]+)\)/.exec(s)?.[1] ?? '').split(',').map(Number)
+  const lum = ([r, g, b]) => { const f = x => { const v = x / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b) }
+  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+  const board = rgb(getComputedStyle(document.querySelector('.pd-board')).backgroundColor)
+  return [...codes].map((code) => {
+    const cell = document.querySelector(`.pd-board .pd-cell.pd-g${hot ? '.pd-hot' : ':not(.pd-hot)'}[data-code="${code}"]`)
+    if (!cell) return { code, hot, missing: true, ok: false }
+    // first shadow, e.g. "rgb(133, 133, 132) 0px 0px 0px 1px inset": the 4th length is the ring width
+    const first = getComputedStyle(cell, '::after').boxShadow.split(/,(?![^(]*\))/)[0] ?? ''
+    const ring = rgb(first)
+    const width = /inset/.test(first) ? Number(first.match(/[\d.]+px/g)?.[3]?.slice(0, -2) ?? 0) : 0
+    const alpha = ring.length === 4 ? ring[3] : 1
+    const r = ratio(ring, board)
+    return { code, hot, ring: first, ratio: Math.round(r * 100) / 100, width, ok: alpha === 1 && width >= 1 && r >= 3 }
+  })
+}
+
+// Wait for the plugin's finite animations (beads landing, toasts sliding in) and two frames,
+// then return the box around .pd-root and any .pd-portal, or null when none is on screen.
+export async function settlePlugin() {
+  const ours = el => !!el && !!(el instanceof Element ? el : null)?.closest('.pd-root, .pd-portal')
+  const finite = document.getAnimations().filter(a => ours(a.effect?.target) && Number.isFinite(a.effect?.getComputedTiming().endTime))
+  await Promise.race([Promise.allSettled(finite.map(a => a.finished)), new Promise(r => { setTimeout(r, 2000) })])
+  await new Promise(r => { requestAnimationFrame(() => { requestAnimationFrame(r) }) })
+  const rects = [...document.querySelectorAll('.pd-root, .pd-portal')].map(e => e.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0)
+  if (!rects.length) return null
+  const x = Math.max(0, Math.floor(Math.min(...rects.map(r => r.left)))), y = Math.max(0, Math.floor(Math.min(...rects.map(r => r.top))))
+  const right = Math.min(innerWidth, Math.ceil(Math.max(...rects.map(r => r.right)))), bottom = Math.min(innerHeight, Math.ceil(Math.max(...rects.map(r => r.bottom))))
+  return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : null
+}

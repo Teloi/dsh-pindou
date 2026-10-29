@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
-import { auditPanel } from './audit.mjs'
+import { auditPanel, guideRings, settlePlugin } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -172,6 +172,22 @@ const shot = async (p, name, opts, dir = ASSETS, auditOpts = {}) => {
   log('  📷', relative(REPO, join(dir, `${name}.png`)))
   if (SELFCHECK) { mkdirSync(SELFCHECK, { recursive: true }); copyFileSync(join(dir, `${name}.png`), join(SELFCHECK, `${name}.png`)) }
   await audit(p, name, auditOpts)
+  await pluginShot(p, name)
+}
+/**
+ * A settled crop of just the plugin (.pd-root plus any .pd-portal) in e2e/.out/plugin/, for
+ * run-to-run comparison with `node e2e/compare-shots.mjs <runA> <runB>`. The full-page shots
+ * above also carry host clocks and streamed text, and can catch a bead mid-animation, so they
+ * differ between two runs of the same build; these crops wait for the plugin's finite
+ * animations first and leave the host out.
+ */
+async function pluginShot(p, name) {
+  const box = await p.evaluate(settlePlugin)
+  if (!box) return
+  const dir = join(OUT, 'plugin')
+  mkdirSync(dir, { recursive: true })
+  await p.screenshot({ path: join(dir, `${name}.png`), clip: box })
+  if (SELFCHECK) { mkdirSync(join(SELFCHECK, 'plugin'), { recursive: true }); copyFileSync(join(dir, `${name}.png`), join(SELFCHECK, 'plugin', `${name}.png`)) }
 }
 const outShot = (p, name, opts, auditOpts) => shot(p, name, opts, OUT, auditOpts)
 /** Is focus somewhere real (not <body>) — design I2 */
@@ -236,6 +252,10 @@ const hitBox = (p, sel) => p.evaluate((q) => {
 }, sel)
 const big = b => !!b && b.w >= 32 && b.h >= 32
 const progressText = p => p.locator('.pd-status .pd-r').first().textContent()
+/** O3 ring measurements ({ normal, hot } from guideRings): lowest ratio, all ≥ 3:1, the failures. */
+const minOf = r => Math.min(...[...r.normal, ...r.hot].map(x => x.ratio ?? 0))
+const allOk = r => r.normal.length === 16 && r.hot.length === 16 && [...r.normal, ...r.hot].every(x => x.ok)
+const bad = r => JSON.stringify([...r.normal, ...r.hot].filter(x => !x.ok).slice(0, 4))
 /** Place `n` correct beads by following the ghost guide. */
 async function placeBeads(p, n) {
   let placed = 0
@@ -832,6 +852,45 @@ try {
     await j.waitForTimeout(300)
   }
   await j.context().close()
+
+  // ── K. O3 / §18.5: every colour's guide ring measured on the real page, light and dark ──
+  log('K. guide rings (spec §18.5)')
+  {
+    const CODES = '0123456789abcdef'
+    // a followed pattern with all 16 colours (one column each, rows 2–13) on an empty board
+    const pattern = Array.from({ length: 16 }, (_, y) => (y >= 2 && y <= 13 ? CODES : '.'.repeat(16))).join('')
+    const seed = JSON.stringify({ v: 2, size: 16, board: '.'.repeat(256), color: 4, tool: 'paint', mode: 'play', target: 'board:o3', pattern, ironed: false, prefs: { busyHint: true, showGuide: true, showCodes: false }, done: [], coached: true })
+    const k = await newPage({ viewport: { width: 1280, height: 900 }, colorScheme: 'light' }, 'zh',
+      `if (!sessionStorage.getItem('o3')) { sessionStorage.setItem('o3', '1'); localStorage.setItem('dsh-pindou:v1', ${JSON.stringify(seed)}) }`)
+    await startSession(k, '解释一下 package.json')
+    await openPanel(k)
+    await k.locator('.pd-board .pd-cell.pd-g').first().waitFor()
+    // normal state: every colour once while another colour is selected; selected state: pick each colour in turn
+    const swk = k.locator('.pd-palette .pd-sw')
+    const pick = async (i) => { await swk.nth(i).click(); await k.waitForTimeout(80) }
+    const measure = async () => {
+      await pick(5)
+      const normal = (await k.evaluate(guideRings, [CODES.replace('5', ''), false]))
+      await pick(4)
+      normal.splice(5, 0, ...await k.evaluate(guideRings, ['5', false]))
+      const hot = []
+      for (let i = 0; i < 16; i++) { await pick(i); hot.push(...await k.evaluate(guideRings, [CODES[i], true])) }
+      await pick(4)
+      return { normal, hot }
+    }
+    check('O3 setup: 16 palette swatches and a ghost for every colour', await swk.count() === 16 && await k.locator('.pd-board .pd-cell.pd-g').count() === 16 * 12)
+    const light = await measure()
+    check(`O3/R3-1 light: 16 guide rings ≥ 3:1 on the real board, normal and selected (min ${minOf(light)})`, allOk(light), bad(light))
+    await outShot(k, 'o3-rings-light', { clip: await k.locator('.pd-board').boundingBox() }, { text: false })
+    await k.emulateMedia({ colorScheme: 'dark' })
+    await k.waitForTimeout(600)
+    const dark = await measure()
+    check(`O3/N10 dark: 16 guide rings ≥ 3:1 on the real board, normal and selected (min ${minOf(dark)})`, allOk(dark) && await k.evaluate(() => document.body.hasAttribute('data-ds-dark-theme')), bad(dark))
+    await outShot(k, 'o3-rings-dark', { clip: await k.locator('.pd-board').boundingBox() }, { text: false })
+    writeFileSync(join(OUT, 'audit', 'o3-rings.json'), `${JSON.stringify({ light, dark }, null, 2)}\n`)
+    if (SELFCHECK) copyFileSync(join(OUT, 'audit', 'o3-rings.json'), join(SELFCHECK, 'o3-rings.json'))
+    await k.context().close()
+  }
 
   check('no page errors from the plugin', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
   // ::-webkit-scrollbar parts: the host scrollbar theme is meant to apply to .pd-scroll too

@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import * as icons from '../src/client/icons.tsx'
 import { CSS } from '../src/client/styles.ts'
-import { contrast as coreContrast, DARK_BOARD, GHOST_RING_TARGET, GHOST_RINGS, ghostRing, mix as coreMix, PALETTE } from '../src/core/index.ts'
+import { contrast as coreContrast, DARK_BOARD, GHOST_RING_TARGET, GHOST_RINGS, GHOST_RINGS_LIGHT, ghostRing, LIGHT_BOARD, mix as coreMix, PALETTE } from '../src/core/index.ts'
 
 const hex = (h: string): [number, number, number] => {
   const v = h.replace('#', '')
@@ -24,6 +24,8 @@ const contrast = (a: string, b: string): number => {
   const x = lum(hex(a)), y = lum(hex(b))
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }
+/** A plain number token (first definition, i.e. the light theme). */
+const numberToken = (name: string): number => Number(new RegExp(`${name}:\\s*([\\d.]+)`).exec(CSS)![1])
 /** The literal a token falls back to when the host does not define it. */
 const token = (name: string, block = CSS.slice(0, CSS.indexOf('body[data-ds-dark-theme]'))): string => {
   const m = new RegExp(`${name}:\\s*(?:var\\([^,]+,\\s*)?(#[0-9A-Fa-f]{6})`).exec(block)
@@ -84,6 +86,71 @@ describe('N10: target ghost dots on the dark board reach 3:1 for all 16 colours'
   })
   it('ghostRing keeps hue and never returns below target', () => {
     for (const h of ['#000000', '#26272B', '#1C1D20', '#FFFFFF', '#2D4FA0']) expect(contrast(ghostRing(h), DARK_BOARD)).toBeGreaterThanOrEqual(GHOST_RING_TARGET)
+  })
+})
+
+describe('O3 (spec §18.5): target ghost dots on the light board reach 3:1 for all 16 colours', () => {
+  it('the core board constant is the light --pd-board token', () => {
+    expect(token('--pd-board')).toBe(LIGHT_BOARD)
+  })
+  it('the shipped light ring table is exactly what ghostRing() computes for the palette', () => {
+    expect(GHOST_RINGS_LIGHT).toEqual(PALETTE.map(c => ghostRing(c.hex, LIGHT_BOARD)))
+  })
+  it('the light rings are needed: even the full colour falls short for white, cream and the pastels', () => {
+    const short = PALETTE.filter(c => contrast(c.hex, LIGHT_BOARD) < 3).map(c => c.en)
+    expect(short).toEqual(expect.arrayContaining(['White', 'Cream', 'Yellow', 'Lime']))
+    // the §18.5 draft recipe (28% ink over the board, white and cream only) measures well below 3:1
+    expect(contrast(coreMix(LIGHT_BOARD, '#0F1115', 0.28), LIGHT_BOARD)).toBeLessThan(3)
+  })
+  it('the light theme draws a 1px ring at full strength, also on the selected colour', () => {
+    expect(/\.pd-cell\.pd-g::after\{[^}]*\}/.exec(CSS)![0]).toContain('box-shadow:inset 0 0 0 1px var(--pd-grl)')
+    expect(CSS).toContain('.pd-cell.pd-g.pd-hot::after{box-shadow:inset 0 0 0 1px var(--pd-grl),')
+  })
+  it('ghostRing on a light board darkens (toward ink), never lightens', () => {
+    for (const h of ['#FFFFFF', '#F6F4EE', '#EEF0F3', '#F7C531', '#000000']) {
+      const r = ghostRing(h, LIGHT_BOARD)
+      expect(contrast(r, LIGHT_BOARD)).toBeGreaterThanOrEqual(GHOST_RING_TARGET)
+      expect(coreContrast(r, '#FFFFFF')).toBeGreaterThan(coreContrast(LIGHT_BOARD, '#FFFFFF'))
+    }
+  })
+})
+
+describe('§18.5 acceptance (design R3-1): 16 colours × light/dark × normal/selected, every guide ring ≥ 3:1 on its board', () => {
+  const dark = CSS.slice(CSS.indexOf('body[data-ds-dark-theme] .pd-root, body[data-ds-dark-theme] .pd-portal {'))
+  const RING_TABLES: Record<string, readonly string[]> = { '--pd-grl': GHOST_RINGS_LIGHT, '--pd-gr': GHOST_RINGS }
+  /** The ring a rule draws: its first box-shadow must be an opaque `inset 0 0 0 <w>px var(--table)`. */
+  const ringOf = (selector: string): { width: number; table: readonly string[] } => {
+    const esc = selector.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const rule = new RegExp(`(?:^|[}\\n])${esc}\\{([^}]*)\\}`).exec(CSS)
+    if (!rule) throw new Error(`no rule ${selector}`)
+    const m = /box-shadow:inset 0 0 0 ([\d.]+)px var\((--pd-grl?)\)/.exec(rule[1]!)
+    if (!m) throw new Error(`${selector} draws no ring first: ${rule[1]}`)
+    return { width: Number(m[1]), table: RING_TABLES[m[2]!]! }
+  }
+  const cases = [
+    ['light', 'normal', token('--pd-board'), '.pd-cell.pd-g::after'],
+    ['light', 'selected', token('--pd-board'), '.pd-cell.pd-g.pd-hot::after'],
+    ['dark', 'normal', token('--pd-board', dark), 'body[data-ds-dark-theme] .pd-root .pd-cell.pd-g::after'],
+    ['dark', 'selected', token('--pd-board', dark), 'body[data-ds-dark-theme] .pd-root .pd-cell.pd-g.pd-hot::after'],
+  ] as const
+  for (const [theme, state, board, selector] of cases) {
+    describe(`${theme}, ${state}`, () => {
+      const { width, table } = ringOf(selector)
+      it('ring is at least 1px wide and covers all 16 colours', () => {
+        expect(width).toBeGreaterThanOrEqual(1)
+        expect(table).toHaveLength(PALETTE.length)
+      })
+      for (const [i, c] of PALETTE.entries()) {
+        it(`${c.code} ${c.en} ${c.hex}: ring ${table[i]} ≥ 3:1 on ${board}`, () => {
+          expect(contrast(table[i]!, board)).toBeGreaterThanOrEqual(3)
+        })
+      }
+    })
+  }
+  it('without the rings no colour would pass on the light board (R3-1 measured 1.01–1.84 normal; selected only black)', () => {
+    const board = token('--pd-board')
+    expect(PALETTE.filter(c => contrast(coreMix(board, c.hex, numberToken('--pd-ghost-alpha')), board) >= 3)).toHaveLength(0)
+    expect(PALETTE.filter(c => contrast(coreMix(board, c.hex, numberToken('--pd-ghost-hot')), board) >= 3).map(c => c.en)).toEqual(['Black'])
   })
 })
 

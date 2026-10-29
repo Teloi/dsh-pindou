@@ -22,6 +22,7 @@ pnpm run check          # 以上全部
 pnpm run e2e            # 端到端：从源码启动 DSH Web + 假模型服务；截图和日志只写进 e2e/.out（已忽略）
 pnpm run e2e -- --update-assets   # 同上，并刷新 README 用的 docs/assets（或 E2E_UPDATE_ASSETS=1）
 E2E_SELFCHECK_DIR=/some/dir pnpm run e2e   # 另外把截图、checks.json 和 style-leaks.json 复制到这个目录
+node e2e/compare-shots.mjs <runA> <runB>  # 比较两次 E2E 的插件截图（plugin/，等动画结束、不含宿主），不该改外观的改动要全部相同
 ```
 
 ## 约定
