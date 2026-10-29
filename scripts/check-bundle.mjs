@@ -5,12 +5,15 @@
 // - package.json declares what awesome-dsh-hub and `dsh plugin add` need;
 // - no stray class prefixes or unscoped names leak into the shipped CSS.
 // - lib/client.js stays within the spec's size budget: 40 KB = 40,960 bytes
-//   gzip (zlib default level, which is what CDNs and `gzip` ship).
+//   gzip (zlib default level, which is what CDNs and `gzip` ship), and below 90% of
+//   it so there is always headroom for the next change.
 import { readFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
 
 /** Spec §10: the client bundle must stay at or below 40 KB gzip. */
 export const GZIP_BUDGET = 40 * 1024
+/** Project rule on top of the spec: stay at or below 90% so a feature can't silently use up the last few KB. */
+export const GZIP_HEADROOM = 0.9
 const PLATFORM = new Set(['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client'])
 const fail = []
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
@@ -26,6 +29,7 @@ if (/\bbb-|--bb-/.test(client)) fail.push('lib/client.js contains a non-pd- clas
 if (/(?:^|\n)\s*import\s/.test(client)) fail.push('lib/client.js must be CJS (no import statements)')
 const gz = gzipSync(client).length
 if (gz > GZIP_BUDGET) fail.push(`lib/client.js is ${gz} B gzip, over the ${GZIP_BUDGET} B budget`)
+else if (gz > GZIP_BUDGET * GZIP_HEADROOM) fail.push(`lib/client.js is ${gz} B gzip, above ${GZIP_HEADROOM * 100}% of the ${GZIP_BUDGET} B budget; trim before adding more`)
 if (!host.includes('export')) fail.push('lib/index.js must be an ES module')
 
 if (!pkg.dsh?.bundle?.patch) fail.push('package.json dsh.bundle.patch is required (awesome-dsh-hub listing rule)')

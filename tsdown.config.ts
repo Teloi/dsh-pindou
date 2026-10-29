@@ -13,6 +13,7 @@
 import { builtinModules } from 'node:module'
 import { defineConfig, type UserConfig } from 'tsdown'
 import pkg from './package.json' with { type: 'json' }
+import { minifyCssModule } from './scripts/minify-css.ts'
 
 const NODE_BUILTINS = new Set([...builtinModules, ...builtinModules.map(id => `node:${id}`)])
 
@@ -57,6 +58,12 @@ const client: UserConfig = {
   },
   define: { 'process.env.NODE_ENV': JSON.stringify(mode) },
   plugins: [{
+    // Comments and whitespace in the stylesheet stay in the source only (scripts/minify-css.ts).
+    name: 'dsh-client-css-minify',
+    transform(code: string, id: string) {
+      return id.replaceAll('\\', '/').endsWith('/src/client/styles.ts') ? { code: minifyCssModule(code), map: null } : null
+    },
+  }, {
     name: 'dsh-client-bundle-purity',
     resolveId(source: string) {
       if (NODE_BUILTINS.has(source)) {
