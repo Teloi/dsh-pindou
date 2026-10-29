@@ -9,7 +9,7 @@
 // Everything runs in throwaway dirs under the OS temp dir: DSH_HOME, the workspace,
 // and a fake Messages-API LLM (e2e/fake-llm.mjs). No real API key is used.
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -68,6 +68,36 @@ mkdirSync(ASSETS, { recursive: true })
 mkdirSync(WS, { recursive: true })
 if (!existsSync(join(WS, 'README.md'))) writeFileSync(join(WS, 'README.md'), '# e2e workspace\n')
 
+// SIGTERM/SIGINT are fine (Playwright closes the browser, the pending wait throws, `finally` stops
+// DSH: checked 06:18, run kr-old-killed). A run killed before its `finally` (SIGKILL, a crash) leaves its DSH server running on this
+// DSH_HOME; a rerun on the same home would share its sessions and files. Stop only such a server:
+// a DSH whose DSH_HOME is exactly this run's (never another checkout's or another person's).
+const leftovers = []
+for (const pid of existsSync('/proc') ? readdirSync('/proc').filter(d => /^\d+$/.test(d)) : []) {
+  try {
+    const env = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')
+    const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+    if (cmd.includes(DSH_BIN) && env.includes(`DSH_HOME=${DSH_HOME}`)) leftovers.push(Number(pid))
+  } catch { /* gone, or not ours to read */ }
+}
+// and wait until it has exited
+for (const pid of leftovers) {
+  log('stopping a leftover DSH server on this home, pid', pid)
+  process.kill(pid, 'SIGTERM')
+  for (let i = 0; existsSync(`/proc/${pid}`); i++) {
+    if (i === 100) throw new Error(`leftover DSH server ${pid} on ${DSH_HOME} did not exit in 10 s`)
+    await new Promise(r => { setTimeout(r, 100) })
+  }
+}
+// What that run left behind can break this one: killed while making its first session, it left a
+// draft without a workspace and the next run never got a chat input (runs k9-rerun, k9b-rerun,
+// k9c-rerun, 06:25–06:34, 3 of 3). Set that home aside (kept, not deleted) and start from a fresh one.
+if (leftovers.length) {
+  const aside = `${DSH_HOME}.killed-${Date.now()}`
+  renameSync(DSH_HOME, aside)
+  log('set the killed run\'s home aside:', aside)
+}
+
 // 1. install the plugin into an isolated Web profile from this checkout
 const profilePkg = join(DSH_HOME, 'profiles/web/package.json')
 // the default home is shared by every checkout on this machine: never test another checkout's build
@@ -82,17 +112,6 @@ if (!existsSync(profilePkg) || !readFileSync(profilePkg, 'utf8').includes('"dsh-
 }
 
 // 2. fake LLM + DSH Web
-// SIGTERM/SIGINT are fine (Playwright closes the browser, the pending wait throws, `finally` stops
-// DSH: checked 06:18, run kr-old-killed). A run killed before its `finally` (SIGKILL, a crash) leaves its DSH server running on this
-// DSH_HOME; a rerun on the same home would share its sessions and files. Stop only such a server:
-// a DSH whose DSH_HOME is exactly this run's (never another checkout's or another person's).
-for (const pid of existsSync('/proc') ? readdirSync('/proc').filter(d => /^\d+$/.test(d)) : []) {
-  try {
-    const env = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')
-    const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
-    if (cmd.includes(DSH_BIN) && env.includes(`DSH_HOME=${DSH_HOME}`)) { log('stopping a leftover DSH server on this home, pid', pid); process.kill(Number(pid), 'SIGTERM') }
-  } catch { /* gone, or not ours to read */ }
-}
 const llm = await startFakeLlm({ chatMs: Number(process.env.FAKE_LLM_CHAT_MS ?? 30000) })
 const CLOCK_FILE = join(tmpdir(), `pindou-e2e-clock-${process.pid}`)
 const serverClockEnv = FIXED_NOW ? {
