@@ -14,20 +14,38 @@
 export interface ShortcutBinding {
   readonly code: string
   readonly modifiers: readonly string[]
+  readonly secondCode?: string
 }
 export interface ShortcutsFace {
   readonly runtime?: string
   readonly platform?: string
-  readonly catalog?: { getSnapshot(): ReadonlyArray<{ readonly id: string; readonly keys?: string; readonly aria?: string; readonly binding?: ShortcutBinding | null }> }
+  readonly catalog?: { getSnapshot(): ReadonlyArray<{ readonly id: string; readonly keys?: string | readonly string[]; readonly aria?: string; readonly binding?: ShortcutBinding | null }> }
 }
 
 export const SETTINGS_SHORTCUT = 'settings.open'
 
 export interface SettingsOpener {
-  /** The keycap text DSH shows for the shortcut, e.g. "⌘ ," (for the written steps). */
+  /** The shortcut as text for the written steps, e.g. 「⌥⌘,」 or 「Ctrl+Alt+,」 (see formatKeys). */
   readonly keys?: string | undefined
   /** Fire the shortcut; undefined when a synthetic key event cannot work here. */
   readonly open?: (() => void) | undefined
+}
+
+/**
+ * The catalog's keycaps as one string. DSH (`presentBinding`) gives an array:
+ * macOS symbols `['⌥', '⌘', ',']` → 「⌥⌘,」; Windows with separator tokens
+ * `['Ctrl', '+', 'Alt', '+', ',']` → 「Ctrl+Alt+,」; Linux `['Ctrl', 'Alt', ',']`
+ * → 「Ctrl+Alt+,」. A chord's second key comes last and is set off by a space.
+ */
+export function formatKeys(keys: unknown, platform: string | undefined, chord = false): string | undefined {
+  if (typeof keys === 'string') return keys.trim() || undefined
+  if (!Array.isArray(keys)) return undefined
+  const caps = keys.filter((k, i): k is string => typeof k === 'string' && k !== ''
+    && !(platform === 'windows' && k === '+' && i % 2 === 1))
+  if (caps.length === 0) return undefined
+  const tail = chord && caps.length > 1 ? caps.pop() : undefined
+  const head = caps.join(platform === 'macos' ? '' : '+')
+  return tail === undefined ? head : `${head} ${tail}`
 }
 
 function keyOf(code: string): string {
@@ -42,7 +60,7 @@ export function settingsOpener(shortcuts: ShortcutsFace | undefined, win: Window
   try { entry = shortcuts?.catalog?.getSnapshot().find(e => e.id === SETTINGS_SHORTCUT) } catch { return {} }
   const binding = entry?.binding
   if (!entry || !binding || !binding.code) return {}
-  const keys = entry.keys || undefined
+  const keys = formatKeys(entry.keys, shortcuts?.platform, binding.secondCode !== undefined)
   const domAdapter = shortcuts?.runtime === 'web' || shortcuts?.platform === 'linux'
   if (!domAdapter || !win) return { keys }
   const has = (m: string): boolean => binding.modifiers.includes(m)
