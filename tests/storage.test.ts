@@ -22,11 +22,11 @@ const throwing: StorageLike = {
 
 describe('storage', () => {
   it('round-trips state', () => {
-    const s = { ...defaultState(), board: setCell(createBoard(24), 1, 2, 9), color: 9, tool: 'erase' as const, target: 'heart' }
+    const s = { ...defaultState(), board: setCell(createBoard(24), 1, 2, 9), color: 9, tool: 'erase' as const, target: 'template:heart' }
     const { state, corrupt } = parseState(serializeState(s))
     expect(corrupt).toBe(false)
     expect(encode(state.board)).toBe(encode(s.board))
-    expect(state).toMatchObject({ color: 9, tool: 'erase', target: 'heart' })
+    expect(state).toMatchObject({ color: 9, tool: 'erase', target: 'template:heart', pattern: null })
   })
 
   it('recovers from corrupt or tampered data field by field', () => {

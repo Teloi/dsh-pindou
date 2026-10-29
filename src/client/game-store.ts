@@ -6,9 +6,9 @@
 import {
   type Board, type BoardSize, begin, canRedo, canUndo, clearBoard, commit, completion, createBoard, createHistory,
   decode, EMPTY, encode, findTemplate, floodFill, GenerationCache, type GenerateResponse, getCell, type History,
-  inBounds, isBoardSize, isColorIndex, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
+  inBounds, isColorIndex, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
   remainingByColor, resizeBoard, SafeStore, type SavedState, sanitizePrompt, setCell, type StatusResponse,
-  type StorageStatus, type Tool, type TokenUsageInfo, undo,
+  type StorageStatus, templateIdOf, templateKey, type Tool, type TokenUsageInfo, undo,
 } from '../core/index.ts'
 
 export type AiSize = 12 | 16
@@ -72,10 +72,10 @@ export interface GameState {
 
 /**
  * One game: the board with its own undo history and what it follows. The
- * source identity is `target`: a template id, `ai:<size>:<full encoding>` for
- * a generated pattern (content identity: the same pattern is the same game,
- * a different one never is), or null for free play. Template ids never start
- * with `ai:`, so a template click can't match a generated or free board.
+ * source key is `target` (spec v1.6 §4.3): `template:<id>`, `board:<id>` with
+ * a fresh id for every generated pattern (generating the same picture again is
+ * a new game), or null for free play. Only `template:<id>` can match a
+ * template card, so generated boards are reached through 继续上次 only.
  */
 export interface GameSnap {
   readonly history: History
@@ -112,15 +112,12 @@ export const DONE_DELAY_MS = 260
 /** Front-end spacing between real generations (spec §10: 5 s); cache hits are free. */
 export const AI_COOLDOWN_MS = 1500
 
-export function resolveTarget(target: string | null): Board | null {
-  if (target === null) return null
-  const template = findTemplate(target)
-  if (template) return template.board
-  const m = /^ai:(\d+):([.0-9a-f]+)$/.exec(target)
-  if (!m) return null
-  const size = Number(m[1])
-  if (!isBoardSize(size)) return null
-  const decoded = decode(m[2]!, size)
+/** The pattern a saved source key follows: the template's, or the saved `board:` pattern. */
+export function resolveTarget(target: string | null, pattern: string | null, size: BoardSize): Board | null {
+  const id = templateIdOf(target)
+  if (id !== null) return findTemplate(id)?.board ?? null
+  if (!target?.startsWith('board:') || pattern === null) return null
+  const decoded = decode(pattern, size)
   return decoded.ok ? decoded.board : null
 }
 
@@ -150,6 +147,7 @@ export class GameStore {
   private lastGenAt = Number.NEGATIVE_INFINITY
   /** Games replaced by a new one, newest last: undo past a game's first step brings them back. */
   private prevGames: GameSnap[] = []
+  private boardSeq = 0
   /** Games left by undoing a switch, for redo; any edit drops them. */
   private nextGames: GameSnap[] = []
   /** Live visibility of the panel (set by the mounted panel), read when a result lands. */
@@ -161,7 +159,7 @@ export class GameStore {
     this.ct = deps.clearTimeout ?? (h => { clearTimeout(h as ReturnType<typeof setTimeout>) })
     this.cache = new GenerationCache(deps.store)
     const saved = deps.store.loadState()
-    let targetBoard = resolveTarget(saved.target)
+    let targetBoard = resolveTarget(saved.target, saved.pattern, saved.board.size)
     let target = targetBoard ? saved.target : null
     if (targetBoard && targetBoard.size !== saved.board.size) { target = null; targetBoard = null }
     const storage = deps.store.status
@@ -241,6 +239,7 @@ export class GameStore {
     const s = this.state
     return {
       board: s.history.present, color: s.color, tool: s.tool, mode: s.mode, target: s.target,
+      pattern: s.target?.startsWith('board:') && s.targetBoard ? encode(s.targetBoard) : null,
       ironed: s.ironed || s.ironingSince !== null, prefs: s.prefs, done: s.done, coached: s.coached,
     }
   }
@@ -281,7 +280,8 @@ export class GameStore {
     const s = this.state
     if (this.resumable(null)) {
       this.last = null
-      this.set({ mode: 'play', overlay: s.coached ? null : 'coach', ...this.dropUndoToast() })
+      // the toast (and what its 撤销 restores) belongs to this game: keep it (spec v1.6 §4.3)
+      this.set({ mode: 'play', overlay: s.coached ? null : 'coach' })
       return
     }
     this.switchGame({
@@ -514,15 +514,23 @@ export class GameStore {
    * its board and history untouched. Otherwise a fresh board of its size; the
    * replaced game stays one undo step away.
    */
-  follow(target: string): void {
-    const board = resolveTarget(target)
+  follow(templateId: string): void {
+    const board = findTemplate(templateId)?.board
     if (!board) return
     const s = this.state
-    if (this.resumable(target)) {
+    const key = templateKey(templateId)
+    if (this.resumable(key)) {
       this.last = null
-      this.set({ mode: 'play', overlay: s.complete ? 'done' : s.coached ? null : 'coach', ...this.dropUndoToast() })
+      // undo history and the undo toast stay with the game (spec v1.6 §4.3)
+      this.set({ mode: 'play', overlay: s.complete ? 'done' : s.coached ? null : 'coach' })
       return
     }
+    this.startPattern(key, board)
+  }
+
+  /** A new game following `board`; the replaced game stays one undo step away. */
+  private startPattern(target: string, board: Board): void {
+    const s = this.state
     const fresh = createBoard(board.size)
     this.switchGame({
       history: createHistory(fresh), target, targetBoard: board, ironed: false, complete: false,
@@ -556,8 +564,9 @@ export class GameStore {
   private finishIron(): void {
     this.ironHandle = null
     const t = this.state.target
-    const done = t !== null && findTemplate(t) !== undefined && this.state.complete && !this.state.done.includes(t)
-      ? [...this.state.done, t] : this.state.done
+    const id = templateIdOf(t)
+    const done = id !== null && findTemplate(id) !== undefined && this.state.complete && !this.state.done.includes(id)
+      ? [...this.state.done, id] : this.state.done
     this.set({ ironed: true, ironingSince: null, overlay: 'result', done, celebrateAt: this.now() })
   }
 
@@ -661,7 +670,8 @@ export class GameStore {
   /** A generated pattern becomes the faint guide on a fresh board, like a template. */
   private finishAi(result: AiResult): void {
     this.set({ ai: { ...this.state.ai, phase: 'done', error: undefined, result }, fresh: !this.panelOnScreen() }, false)
-    this.follow(`ai:${result.board.size}:${encode(result.board)}`)
+    // every generation is its own board, even when the picture is the same (spec v1.6 §4.3)
+    this.startPattern(`board:${this.now().toString(36)}${(++this.boardSeq).toString(36)}`, result.board)
   }
 }
 
@@ -676,6 +686,6 @@ export function entryDot(s: GameState, running: boolean): 'busy' | 'progress' | 
   if (s.fresh || s.ai.phase === 'loading') return s.fresh ? 'progress' : null
   const board = s.history.present
   const unfinished = s.mode === 'play' && !s.ironed && board.cells.some(c => c !== EMPTY)
-    && !(s.target !== null && s.done.includes(s.target))
+    && !s.done.includes(templateIdOf(s.target) ?? '')
   return unfinished ? 'progress' : null
 }

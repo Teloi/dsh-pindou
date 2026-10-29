@@ -29,8 +29,13 @@ export interface SavedState {
   readonly color: number
   readonly tool: Tool
   readonly mode: Mode
-  /** Built-in template id, or `ai:<size>:<flat>` for a generated pattern. */
+  /**
+   * Source key of the board (spec v1.6 §4.3): `template:<id>`, `board:<board id>`
+   * for a generated or imported pattern, or null for free play.
+   */
   readonly target: string | null
+  /** The followed pattern of a `board:` source, encoded like `board` (same size). */
+  readonly pattern: string | null
   readonly ironed: boolean
   readonly prefs: Prefs
   /** Built-in templates finished at least once. */
@@ -42,12 +47,32 @@ export interface SavedState {
 export const DEFAULT_PREFS: Prefs = { busyHint: true, showGuide: true, showCodes: false }
 
 export function defaultState(size: BoardSize = DEFAULT_SIZE): SavedState {
-  return { board: createBoard(size), color: 4, tool: 'paint', mode: 'home', target: null, ironed: false, prefs: DEFAULT_PREFS, done: [], coached: false }
+  return { board: createBoard(size), color: 4, tool: 'paint', mode: 'home', target: null, pattern: null, ironed: false, prefs: DEFAULT_PREFS, done: [], coached: false }
 }
 
 const TOOLS: readonly Tool[] = ['paint', 'erase', 'pick', 'fill']
 const MODES: readonly Mode[] = ['home', 'play', 'ai']
 const ID_RE = /^[a-z0-9-]{1,32}$/
+
+/** Source key of a built-in template (spec v1.6 §4.3). */
+export const templateKey = (id: string): string => `template:${id}`
+/** The template id of a source key, or null for `board:` sources and free play. */
+export const templateIdOf = (key: string | null): string | null => key?.startsWith('template:') ? key.slice(9) : null
+
+/**
+ * Source key and pattern from saved data. Data written before v1.6 keeps a
+ * bare template id (→ `template:<id>`) or a content key `ai:<size>:<flat>`
+ * (→ `board:legacy` with that pattern; a size mismatch fails to decode later).
+ */
+function parseSource(raw: unknown, pattern: unknown): { target: string | null; pattern: string | null } {
+  const t = typeof raw === 'string' ? raw : ''
+  const p = typeof pattern === 'string' && pattern.length <= 700 ? pattern : null
+  if (ID_RE.test(t)) return { target: templateKey(t), pattern: null }
+  const m = /^(template|board):[a-z0-9-]{1,32}$/.exec(t)
+  if (m) return { target: m[1] === 'board' && p === null ? null : t, pattern: m[1] === 'board' ? p : null }
+  const legacy = /^ai:\d+:([.0-9a-f]{1,700})$/.exec(t)
+  return { target: legacy ? 'board:legacy' : null, pattern: legacy?.[1] ?? null }
+}
 
 /** Parse untrusted JSON into a state; anything invalid falls back field by field. */
 export function parseState(json: string | null): { state: SavedState; corrupt: boolean } {
@@ -72,7 +97,7 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
     color: isColorIndex(r['color']) ? r['color'] : fallback.color,
     tool: TOOLS.includes(r['tool'] as Tool) ? (r['tool'] as Tool) : fallback.tool,
     mode: MODES.includes(r['mode'] as Mode) ? (r['mode'] as Mode) : fallback.mode,
-    target: typeof r['target'] === 'string' && r['target'].length <= 700 ? r['target'] : null,
+    ...parseSource(r['target'], r['pattern']),
     ironed: r['ironed'] === true,
     prefs: {
       busyHint: typeof prefsRaw['busyHint'] === 'boolean' ? prefsRaw['busyHint'] : DEFAULT_PREFS.busyHint,
@@ -89,13 +114,14 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
 
 export function serializeState(state: SavedState): string {
   return JSON.stringify({
-    v: 1,
+    v: 2,
     size: state.board.size,
     board: encode(state.board),
     color: state.color,
     tool: state.tool,
     mode: state.mode,
     target: state.target,
+    pattern: state.pattern,
     ironed: state.ironed,
     prefs: state.prefs,
     done: state.done,

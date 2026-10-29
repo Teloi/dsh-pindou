@@ -112,7 +112,7 @@ describe('client apply', () => {
     expect(host.querySelector('.pd-root')?.getAttribute('aria-label')).toBe('Bead Break')
     await act(async () => { root.unmount() })
     f.dispose()
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).target).toBe('heart')
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).target).toBe('template:heart')
   })
 
   it('header entry shows a quiet busy dot and opens the tab, surviving a missing session surface', async () => {
@@ -303,7 +303,7 @@ describe('design walkthrough fixes', () => {
     const heart = findTemplate('heart')!
     // the stray bead sits on an empty corner of the pattern
     const board = setCell(heart.board, 0, 0, 4)
-    localStorage.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board, target: 'heart', mode: 'play', coached: true }))
+    localStorage.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board, target: 'template:heart', mode: 'play', coached: true }))
     const f = fakeCtx()
     apply(f.ctx)
     const Body = f.slots[0]!.component as ComponentType
@@ -368,9 +368,9 @@ describe('client helpers', () => {
   it('maps locales and names exports', () => {
     expect(langOf('zh-TW')).toBe('zh')
     expect(langOf('ja')).toBe('en')
-    expect(exportFileName('ai:12:..', new Date(2026, 9, 29, 7, 5))).toBe('bead-break-ai-20261029-0705.png')
+    expect(exportFileName('board:k1', new Date(2026, 9, 29, 7, 5))).toBe('bead-break-ai-20261029-0705.png')
     expect(exportFileName(null, new Date(2026, 0, 2, 13, 45))).toBe('bead-break-free-20260102-1345.png')
-    expect(exportFileName('heart', new Date(2026, 0, 2, 13, 45))).toBe('bead-break-heart-20260102-1345.png')
+    expect(exportFileName('template:heart', new Date(2026, 0, 2, 13, 45))).toBe('bead-break-heart-20260102-1345.png')
   })
 
   it('feature-detects image copy and the download route', async () => {
@@ -469,7 +469,7 @@ describe('design walkthrough round 2 fixes (r3)', () => {
     // an ironed, finished heart restored from storage shows the result card
     await done()
     const heart = findTemplate('heart')!
-    localStorage.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board: heart.board, target: 'heart', mode: 'play', coached: true, ironed: true }))
+    localStorage.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board: heart.board, target: 'template:heart', mode: 'play', coached: true, ironed: true }))
     const again = await mount()
     const u = host.querySelector('.pd-under')!
     expect(u.classList.contains('pd-swapped')).toBe(true)

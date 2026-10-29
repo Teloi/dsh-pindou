@@ -2,7 +2,7 @@
  * Canvas drawing for the two places the design uses bitmaps: the start-page
  * thumbnails and PNG export (spec §13). The board itself is DOM.
  */
-import { EMPTY, PALETTE, type Board } from '../core/index.ts'
+import { EMPTY, PALETTE, templateIdOf, type Board } from '../core/index.ts'
 
 /** Ironed export: a cell's corner rounds only when both orthogonal neighbours along it are empty. */
 export function cornerRadii(board: Board, x: number, y: number): [boolean, boolean, boolean, boolean] {
@@ -117,7 +117,7 @@ const p = (v: number): string => String(v).padStart(2, '0')
 
 /** `bead-break-<id|ai|free>-YYYYMMDD-HHmm.png` */
 export function exportFileName(target: string | null, at: Date): string {
-  const tag = target === null ? 'free' : target.startsWith('ai:') ? 'ai' : target.replaceAll(/[^a-z0-9-]/g, '')
+  const tag = target === null ? 'free' : (templateIdOf(target) ?? 'ai').replaceAll(/[^a-z0-9-]/g, '')
   return `bead-break-${tag || 'free'}-${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}.png`
 }
 

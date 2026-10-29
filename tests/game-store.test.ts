@@ -75,7 +75,7 @@ describe('GameStore', () => {
     const { store, advance } = make()
     store.follow('heart')
     const tpl = findTemplate('heart')!
-    expect(store.getSnapshot()).toMatchObject({ mode: 'play', target: 'heart', overlay: 'coach' })
+    expect(store.getSnapshot()).toMatchObject({ mode: 'play', target: 'template:heart', overlay: 'coach' })
     store.dismissOverlay()
     expect(store.getSnapshot().coached).toBe(true)
     store.fillTarget()
@@ -175,12 +175,15 @@ describe('GameStore', () => {
     expect(again.store.getSnapshot()).toMatchObject({ storage: 'recovered', toast: { key: 'storageRecovered' } })
   })
 
-  it('resolves AI targets strictly', () => {
+  it('resolves saved sources strictly', () => {
     const b = setCell(createBoard(12), 0, 0, 3)
-    expect(resolveTarget(`ai:12:${encode(b)}`)?.size).toBe(12)
-    expect(resolveTarget('ai:12:zz')).toBeNull()
-    expect(resolveTarget('ai:13:...')).toBeNull()
-    expect(resolveTarget('nope')).toBeNull()
+    expect(resolveTarget('board:x1', encode(b), 12)?.size).toBe(12)
+    expect(resolveTarget('board:x1', 'zz', 12)).toBeNull()
+    expect(resolveTarget('board:x1', encode(b), 16)).toBeNull()
+    expect(resolveTarget('board:x1', null, 12)).toBeNull()
+    expect(resolveTarget('template:heart', null, 16)).toBe(findTemplate('heart')!.board)
+    expect(resolveTarget('heart', null, 24)).toBeNull()
+    expect(resolveTarget('template:nope', null, 24)).toBeNull()
   })
 })
 
@@ -228,7 +231,7 @@ describe('GameStore AI', () => {
     store.setAiPrompt('猫')
     await store.generate()
     expect(store.getSnapshot()).toMatchObject({ mode: 'play', ai: { phase: 'done', result: { repaired: true, cached: false } } })
-    expect(store.getSnapshot().target).toMatch(/^ai:12:/)
+    expect(store.getSnapshot().target).toMatch(/^board:[a-z0-9]+$/)
     store.setAiPrompt('猫')
     await store.generate()
     expect(generate).toHaveBeenCalledTimes(1)
@@ -327,7 +330,7 @@ describe('N1 games (spec §4.3): picking a pattern never loses work', () => {
     const before = store.board
     store.go('home')
     store.follow('heart')
-    expect(store.getSnapshot()).toMatchObject({ mode: 'play', target: 'heart', toast: null })
+    expect(store.getSnapshot()).toMatchObject({ mode: 'play', target: 'template:heart', toast: null })
     expect(store.board).toBe(before)
     expect(progress(store)).toBe(10)
     // the undo history is the game's own and still intact
@@ -345,11 +348,11 @@ describe('N1 games (spec §4.3): picking a pattern never loses work', () => {
     const ironed = store.board
     store.go('home')
     store.follow('heart')
-    expect(store.getSnapshot()).toMatchObject({ mode: 'play', target: 'heart', ironed: false, toast: null })
+    expect(store.getSnapshot()).toMatchObject({ mode: 'play', target: 'template:heart', ironed: false, toast: null })
     expect(progress(store)).toBe(0)
     expect(store.canUndo).toBe(true)
     store.undo()
-    expect(store.getSnapshot()).toMatchObject({ target: 'heart', ironed: true, overlay: 'result' })
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:heart', ironed: true, overlay: 'result' })
     expect(store.board).toBe(ironed)
     store.redo()
     expect(store.getSnapshot()).toMatchObject({ ironed: false })
@@ -362,57 +365,37 @@ describe('N1 games (spec §4.3): picking a pattern never loses work', () => {
     placeCorrect(store, 10)
     store.go('home')
     store.follow('whale')
-    expect(store.getSnapshot()).toMatchObject({ target: 'whale', toast: { key: 'newGame', undo: true } })
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:whale', toast: { key: 'newGame', undo: true } })
     store.undoToast()
-    expect(store.getSnapshot()).toMatchObject({ target: 'heart', mode: 'play', toast: null })
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:heart', mode: 'play', toast: null })
     expect(progress(store)).toBe(10)
     // the same through plain undo (Ctrl+Z), and redo goes forward again
     store.follow('whale')
     store.undo()
-    expect(store.getSnapshot().target).toBe('heart')
+    expect(store.getSnapshot().target).toBe('template:heart')
     store.redo()
-    expect(store.getSnapshot().target).toBe('whale')
+    expect(store.getSnapshot().target).toBe('template:whale')
     // a new edit drops the redo branch, never the kept games
     store.undo(); placeCorrect(store, 11)
     expect(store.canRedo).toBe(false)
     expect(progress(store)).toBe(11)
   })
 
-  it('(a) generated and free boards: a stable source key; a template never matches a board without an id', () => {
-    expect(TEMPLATES.every(t => !t.id.startsWith('ai:'))).toBe(true)
-    const ai = setCell(setCell(createBoard(12), 1, 1, 2), 2, 2, 4)
-    const other = setCell(createBoard(12), 5, 5, 3)
-    const key = `ai:12:${encode(ai)}`
+  it('(a) free boards: a template click is a new game; 自由拼 resumes the free board, never a template one', () => {
     const { store } = make()
-    // free board in progress (no id): a template click is a new game, never a resume
     store.startFree(); store.dismissOverlay(); store.applyAt(0, 0)
     store.follow('heart')
-    expect(store.getSnapshot()).toMatchObject({ target: 'heart', toast: { key: 'newGame' } })
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:heart', toast: { key: 'newGame' } })
     expect(store.board.cells.every(c => c === EMPTY)).toBe(true)
     store.undo()
     expect(store.getSnapshot().target).toBeNull()
-    expect(getCell(store.board, 0, 0)).not.toBe(EMPTY)
-    // the same generated pattern (same content key) resumes; a different one is a new game
-    store.follow(key); store.applyAt(1, 1)
-    const aiBoard = store.board
-    store.go('home')
-    store.follow(key)
-    expect(store.board).toBe(aiBoard)
-    expect(store.getSnapshot().toast).toBeNull()
-    store.follow(`ai:12:${encode(other)}`)
-    expect(store.getSnapshot()).toMatchObject({ toast: { key: 'newGame' } })
-    expect(store.board.cells.every(c => c === EMPTY)).toBe(true)
-    // a template click while a generated board is open never resumes it
-    store.undo()
-    expect(store.board).toBe(aiBoard)
-    store.follow('heart')
-    expect(store.getSnapshot().target).toBe('heart')
-    expect(store.board).not.toBe(aiBoard)
-    // free play after a generated board: a new free board (the ids differ), the generated one undoable
-    store.undo(); store.startFree()
+    const free = store.board
+    expect(getCell(free, 0, 0)).not.toBe(EMPTY)
+    store.go('home'); store.startFree()
+    expect(store.board).toBe(free)
+    store.follow('heart'); store.go('home'); store.startFree()
     expect(store.getSnapshot().target).toBeNull()
-    store.undo()
-    expect(store.board).toBe(aiBoard)
+    expect(store.board).not.toBe(free)
   })
 
   it('(b) cleared board with history: same template resumes and undo restores the beads; ironed with history: new game, nothing lost', () => {
@@ -430,7 +413,7 @@ describe('N1 games (spec §4.3): picking a pattern never loses work', () => {
     store.follow('whale')
     expect(store.getSnapshot().toast).toBeNull() // nothing visible replaced; the stale 已清空 toast retires
     store.undo()
-    expect(store.getSnapshot().target).toBe('heart')
+    expect(store.getSnapshot().target).toBe('template:heart')
     store.undo()
     expect(progress(store)).toBe(10)
     // ironed, with history below it: same template is a new game; undo → the ironed piece → un-iron → its history
@@ -450,11 +433,11 @@ describe('N1 games (spec §4.3): picking a pattern never loses work', () => {
     store.iron()
     expect(store.getSnapshot().ironingSince).not.toBeNull()
     store.follow('whale')
-    expect(store.getSnapshot()).toMatchObject({ target: 'whale', ironed: false, ironingSince: null })
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:whale', ironed: false, ironingSince: null })
     advance(IRON_MS * 2)
-    expect(store.getSnapshot()).toMatchObject({ target: 'whale', ironed: false })
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:whale', ironed: false })
     store.undo()
-    expect(store.getSnapshot()).toMatchObject({ target: 'heart', ironed: true })
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:heart', ironed: true })
   })
 
   it('after a reload the same template still resumes (saved board, target, ironed)', () => {
@@ -466,7 +449,7 @@ describe('N1 games (spec §4.3): picking a pattern never loses work', () => {
     const again = make({ backend })
     again.store.follow('heart')
     expect(progress(again.store)).toBe(10)
-    expect(again.store.getSnapshot().target).toBe('heart')
+    expect(again.store.getSnapshot().target).toBe('template:heart')
   })
 
   it('free play resumes a free board in progress and starts fresh after ironing', () => {
@@ -516,5 +499,107 @@ describe('N9 entry dot uses the live panel visibility', () => {
     expect(store.getSnapshot().ai.phase).toBe('done')
     expect(store.getSnapshot().fresh).toBe(false)
     store.setVisibilityProbe(null)
+  })
+})
+
+describe('v1.6 §4.3 source keys', () => {
+  const pic = setCell(setCell(createBoard(12), 1, 1, 2), 2, 2, 4)
+  const ok = { ok: true, size: 12, flat: encode(pic), issues: [], repaired: false, usage: { input: 1, output: 1 }, model: 'm', finish: 'stop' } as GenerateResponse
+  const ai = () => make({ api: { generate: async () => ok, status: async () => ({ configured: true, route: 'host' }) } })
+
+  it('every generation is its own board, even for the same picture; template cards never pick one up', async () => {
+    const { store, advance } = ai()
+    store.setAiSize(12); store.setAiPrompt('猫')
+    await store.generate()
+    const first = store.getSnapshot().target!
+    expect(first).toMatch(/^board:[a-z0-9]+$/)
+    store.dismissOverlay(); store.applyAt(1, 1)
+    const drawn = store.board
+    advance(AI_COOLDOWN_MS)
+    store.setAiPrompt('猫')
+    await store.generate() // cache hit: same picture, still a new board
+    const second = store.getSnapshot()
+    expect(second.ai.result?.cached).toBe(true)
+    expect(second.target).toMatch(/^board:/)
+    expect(second.target).not.toBe(first)
+    expect(second.toast).toMatchObject({ key: 'newGame' })
+    expect(store.board.cells.every(c => c === EMPTY)).toBe(true)
+    store.undo()
+    expect(store.getSnapshot().target).toBe(first)
+    expect(store.board).toBe(drawn)
+    // a template card never resumes a generated board, only 继续上次 does
+    store.go('home'); store.go('play')
+    expect(store.board).toBe(drawn)
+    store.go('home'); store.follow('heart')
+    expect(store.getSnapshot().target).toBe('template:heart')
+    expect(store.board).not.toBe(drawn)
+  })
+
+  it('a generated board survives a reload with its own pattern', async () => {
+    const backend = mem()
+    const first = make({ backend, api: { generate: async () => ok, status: async () => ({ configured: true, route: 'host' }) } })
+    first.store.setAiSize(12); first.store.setAiPrompt('猫')
+    await first.store.generate()
+    first.store.applyAt(1, 1)
+    first.advance(400)
+    const saved = JSON.parse(backend.data.get(STORAGE_KEY)!)
+    expect(saved).toMatchObject({ v: 2, target: first.store.getSnapshot().target, pattern: encode(pic) })
+    const again = make({ backend })
+    expect(again.store.getSnapshot().target).toBe(first.store.getSnapshot().target)
+    expect(again.store.getSnapshot().targetBoard?.cells).toEqual(pic.cells)
+  })
+
+  it('migrates pre-v1.6 saves: template id → template:<id>, ai:<size>:<flat> → board:<id> with the pattern', () => {
+    const tpl = mem()
+    tpl.data.set(STORAGE_KEY, JSON.stringify({ v: 1, size: 16, board: encode(createBoard(16)), mode: 'play', target: 'heart', coached: true }))
+    const a = make({ backend: tpl })
+    expect(a.store.getSnapshot()).toMatchObject({ target: 'template:heart', targetBoard: findTemplate('heart')!.board })
+    a.store.go('home'); a.store.applyAt(0, 0)
+    a.store.follow('heart')
+    expect(a.store.getSnapshot().toast).toBeNull() // resumed, not replaced
+    const old = mem()
+    old.data.set(STORAGE_KEY, JSON.stringify({ v: 1, size: 12, board: encode(createBoard(12)), mode: 'play', target: `ai:12:${encode(pic)}` }))
+    const b = make({ backend: old })
+    expect(b.store.getSnapshot().target).toMatch(/^board:[a-z0-9-]+$/)
+    expect(b.store.getSnapshot().targetBoard?.cells).toEqual(pic.cells)
+    b.advance(400); b.store.applyAt(1, 1); b.advance(400)
+    expect(JSON.parse(old.data.get(STORAGE_KEY)!)).toMatchObject({ target: b.store.getSnapshot().target, pattern: encode(pic) })
+    const bad = mem()
+    bad.data.set(STORAGE_KEY, JSON.stringify({ v: 1, size: 16, board: encode(createBoard(16)), target: `ai:12:${encode(pic)}` }))
+    expect(make({ backend: bad }).store.getSnapshot()).toMatchObject({ target: null, targetBoard: null })
+  })
+
+  it('resuming the same game keeps the undo toast, and its 撤销 still works', () => {
+    const { store } = make()
+    store.follow('heart'); store.dismissOverlay()
+    placeCorrect(store, 4)
+    store.clear()
+    const toast = store.getSnapshot().toast
+    expect(toast).toMatchObject({ key: 'cleared', undo: true })
+    store.go('home'); store.follow('heart')
+    expect(store.getSnapshot().toast).toBe(toast)
+    store.undoToast()
+    expect(progress(store)).toBe(4)
+    // free play too
+    store.startFree(); store.dismissOverlay(); store.applyAt(0, 0); store.clear()
+    const freeToast = store.getSnapshot().toast
+    store.go('home'); store.startFree()
+    expect(store.getSnapshot().toast).toBe(freeToast)
+    store.undoToast()
+    expect(getCell(store.board, 0, 0)).not.toBe(EMPTY)
+  })
+
+  it('mid-iron the same template is a new game; the ironing finishes on the old one', () => {
+    const { store, advance } = make()
+    store.follow('heart'); store.dismissOverlay()
+    placeCorrect(store, 3)
+    store.iron()
+    store.go('home'); store.follow('heart')
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:heart', ironed: false, ironingSince: null })
+    expect(progress(store)).toBe(0)
+    advance(IRON_MS)
+    store.undo()
+    expect(store.getSnapshot()).toMatchObject({ target: 'template:heart', ironed: true })
+    expect(progress(store)).toBe(3)
   })
 })

@@ -1,7 +1,7 @@
 /** The play view: status line, board, toolbar, palette, footer and the under-board cards. */
 import { useRef, type CSSProperties, type ReactElement } from 'react'
 import {
-  BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, PALETTE, remainingByColor, type Tool,
+  BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, PALETTE, remainingByColor, templateIdOf, type Tool,
 } from '../../core/index.ts'
 import { IconBrush, IconCopy, IconEraser, IconFill, IconIron, IconPicker, IconRedo, IconSparkle, IconTrash, IconUndo, IconDownload } from '../icons.tsx'
 import { canCopyImage, copyPng, downloadBlob, exportBlob, exportFileName, saveRoute } from '../render.ts'
@@ -48,8 +48,8 @@ function StatusLine(): ReactElement {
   const s = useGame()
   const board = s.history.present
   const target = s.targetBoard
-  const tpl = s.target ? findTemplate(s.target) : undefined
-  const isAi = s.target?.startsWith('ai:') ?? false
+  const tpl = findTemplate(templateIdOf(s.target) ?? '')
+  const isAi = s.target?.startsWith('board:') ?? false
   const ai = isAi ? s.ai.result : undefined
   const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : isAi ? (ai?.prompt ?? t('homeAi')) : t('playFree')
   const beads = board.cells.filter(c => c !== EMPTY).length
@@ -188,7 +188,7 @@ function Footer(): ReactElement {
   const s = useGame()
   const empty = s.history.present.cells.every(c => c === EMPTY)
   const ironing = s.ironingSince !== null
-  const isAi = s.target?.startsWith('ai:') ?? false
+  const isAi = s.target?.startsWith('board:') ?? false
   // The result card carries export / copy itself; don't show them twice (spec §4.6).
   const dup = s.overlay === 'result'
   return (
