@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GameStore } from '../src/client/game-store.ts'
 import { renderExport } from '../src/client/render.ts'
 import type { Env } from '../src/client/ui/context.tsx'
-import { DAILY_DEFS, dailyDay, dailyIndex } from '../src/core/daily.ts'
+import { DAILY_DEFS, dailyCounts, dailyDay, dailyDayOf, dailyIndex } from '../src/core/daily.ts'
 import { decode, defaultState, encode, findTemplate, makeTranslate, parseState, SafeStore, serializeState, STORAGE_KEY, WORKS_KEY, type StoredWork } from '../src/core/index.ts'
 import { cleanWorks } from '../src/core/works.ts'
 import { App } from '../src/client/ui/App.tsx'
@@ -48,8 +48,10 @@ const env = (lang: 'zh' | 'en' = 'zh', reduced = true): Env => ({
 })
 const today = DAILY_DEFS[2]!
 const pattern = (def = today): string => def.rows.join('')
-/** A daily work of the given date (ironed at noon that day). */
-const daily = (date: string, at = Date.parse(`${date}T04:00:00Z`)): StoredWork => ({ i: at, n: 16, b: pattern(), s: `daily:${date}`, p: pattern() })
+/** The pattern of a daily date. */
+const defOf = (date: string): typeof today => DAILY_DEFS[dailyIndex(dailyDayOf(date))]!
+/** A finished daily work of the given date (ironed at noon that day, the day's pattern exactly). */
+const daily = (date: string, at = Date.parse(`${date}T04:00:00Z`), b = pattern(defOf(date))): StoredWork => ({ i: at, n: 16, b, s: `daily:${date}`, p: pattern(defOf(date)) })
 const tpl = (i: number): StoredWork => ({ i, n: 16, b: encode(findTemplate('heart')!.board), s: 'template:heart' })
 const card = (): HTMLButtonElement => host.querySelector<HTMLButtonElement>('.pd-wdaily')!
 const mount = async (e: Env, wall: readonly StoredWork[]): Promise<void> => {
@@ -209,5 +211,54 @@ describe('F1: the spec key daily:<YYYY-MM-DD> (spec §18.3), kept by the entry',
     expect(host.querySelector('.pd-status')!.textContent).toContain('我的图纸')
     expect(host.querySelector('.pd-status')!.textContent).not.toContain('自由拼')
     expect([...host.querySelectorAll('button')].some(b => b.textContent?.includes('一键铺满'))).toBe(false)
+  })
+})
+
+describe('F1: only finished dailies ironed on their own day make the streak (spec §18.3)', () => {
+  /** The day's pattern with one bead missing. */
+  const partial = (date: string): string => { const p = pattern(defOf(date)); const i = p.search(/[^.]/); return `${p.slice(0, i)}.${p.slice(i + 1)}` }
+  /** The day's pattern with one extra bead. */
+  const extra = (date: string): string => { const p = pattern(defOf(date)); const i = p.indexOf('.'); return `${p.slice(0, i)}1${p.slice(i + 1)}` }
+
+  it('dailyCounts: exact pattern, same local day', () => {
+    const at = Date.parse('2026-10-29T04:00:00Z')
+    expect(dailyCounts('2026-10-29', daily('2026-10-29'))).toBe(true)
+    expect(dailyCounts('2026-10-29', { i: at, b: partial('2026-10-29') })).toBe(false)
+    expect(dailyCounts('2026-10-29', { i: at, b: extra('2026-10-29') })).toBe(false)
+    expect(dailyCounts('2026-10-29', { i: at, b: pattern(defOf('2026-10-28')) })).toBe(false)
+    // 补拼: yesterday's pattern ironed today
+    expect(dailyCounts('2026-10-29', { i: NOW, b: pattern(defOf('2026-10-29')) })).toBe(false)
+    // past midnight: 23:59 counts, 00:01 the next day does not
+    expect(dailyCounts('2026-10-29', { i: new Date(2026, 9, 29, 23, 59).getTime(), b: pattern(defOf('2026-10-29')) })).toBe(true)
+    expect(dailyCounts('2026-10-29', { i: new Date(2026, 9, 30, 0, 1).getTime(), b: pattern(defOf('2026-10-29')) })).toBe(false)
+    expect(dailyCounts('x', daily('2026-10-29'))).toBe(false)
+  })
+
+  it('an unfinished daily on the wall makes no streak day', async () => {
+    await mount(env(), [daily('2026-10-28'), daily('2026-10-29', undefined, partial('2026-10-29'))])
+    expect(card().textContent).toBe(`今日一拼 · ${today.zh}开始`)
+    await mount(env(), [daily('2026-10-28'), daily('2026-10-29', undefined, extra('2026-10-29'))])
+    expect(card().textContent).toBe(`今日一拼 · ${today.zh}开始`)
+  })
+
+  it('a 补拼 of yesterday\'s daily done today does not fill the gap', async () => {
+    await mount(env(), [daily('2026-10-28'), daily('2026-10-29', NOW - 60_000)])
+    expect(card().textContent).toBe(`今日一拼 · ${today.zh}开始`)
+  })
+
+  it('through the real store: ironing today\'s daily half done keeps the streak where it was', async () => {
+    const e = env()
+    e.store.setWall([daily('2026-10-29')])
+    await mount(e, e.store.works())
+    await act(async () => { card().click() })
+    const t = e.store.getSnapshot().targetBoard!
+    const i = t.cells.findIndex(c => c >= 0)
+    e.store.setColor(t.cells[i]!)
+    e.store.applyAt(i % 16, Math.floor(i / 16), 'paint')
+    e.store.iron()
+    expect(e.store.works().at(-1)?.s).toBe('daily:2026-10-30')
+    e.store.go('works')
+    await mount(e, e.store.works())
+    expect(card().textContent).toBe(`今日一拼 · ${today.zh}连续 1 天开始`)
   })
 })
