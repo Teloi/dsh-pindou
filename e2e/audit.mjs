@@ -139,19 +139,22 @@ export function auditPanel() {
   }
   const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
   const backdrop = (el) => {
-    // Compose backgrounds from the page root down to el; give up on images/gradients.
+    // Compose backgrounds from the page root down to el. An image or gradient makes the
+    // backdrop unknown, until an opaque background further down paints over it (the
+    // pill sits on the host composer's gradient but has its own solid surface).
     const chain = []
     for (let e = el; e; e = e.parentElement) chain.unshift(e)
     let bg = [255, 255, 255, 1]
     let opacity = 1
+    let image = false
     for (const e of chain) {
       const cs = getComputedStyle(e)
-      if (cs.backgroundImage !== 'none' && e !== document.body && e !== document.documentElement) return { image: true }
       const c = parse(cs.backgroundColor)
-      if (c && c[3] > 0) bg = over(c, bg)
+      if (c && c[3] >= 1) { bg = c; image = false } else if (c && c[3] > 0) bg = over(c, bg)
+      if (cs.backgroundImage !== 'none' && e !== document.body && e !== document.documentElement) image = true
       opacity *= parseFloat(cs.opacity)
     }
-    return { bg, opacity }
+    return image ? { image } : { bg, opacity }
   }
   const contrast = []
   for (const el of ours) {

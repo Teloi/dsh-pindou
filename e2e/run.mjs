@@ -146,7 +146,8 @@ const ACCEPTED_LEAKS = {
 }
 const leaksSeen = new Map()
 const audits = []
-async function audit(p, label) {
+/** `text: false` only for scenes with no plugin text by design (icon-only entry); their text is audited where it appears. */
+async function audit(p, label, { text = true } = {}) {
   if (!await p.locator('.pd-root, .pd-portal').count()) return
   const a = await p.evaluate(auditPanel)
   mkdirSync(join(OUT, 'audit'), { recursive: true })
@@ -163,15 +164,16 @@ async function audit(p, label) {
   check(`[${label}] icons carry .pd-i and stay within 8–24 px (${a.icons.length})`, badIcons.length === 0, JSON.stringify(badIcons.slice(0, 3)))
   check(`[${label}] circles keep corner-shape round (${a.round.length})`, badRound.length === 0, JSON.stringify(badRound.slice(0, 3)))
   check(`[${label}] no text squeezed to one character per line, no wrapped button labels`, a.wraps.length === 0, JSON.stringify(a.wraps.slice(0, 3)))
-  check(`[${label}] text contrast ≥ 4.5:1 (3:1 large) (${a.contrast.length} texts, min ${Math.min(...a.contrast.map(c => c.ratio))})`, badContrast.length === 0, JSON.stringify(badContrast.slice(0, 4)))
+  // a pass needs at least one measured text: 0 texts means the audit looked at nothing
+  if (text) check(`[${label}] text contrast ≥ 4.5:1 (3:1 large) (${a.contrast.length} texts, min ${Math.min(...a.contrast.map(c => c.ratio))})`, a.contrast.length > 0 && badContrast.length === 0, a.contrast.length ? JSON.stringify(badContrast.slice(0, 4)) : 'no text measured')
 }
-const shot = async (p, name, opts, dir = ASSETS) => {
+const shot = async (p, name, opts, dir = ASSETS, auditOpts = {}) => {
   await p.screenshot({ path: join(dir, `${name}.png`), ...opts })
   log('  📷', relative(REPO, join(dir, `${name}.png`)))
   if (SELFCHECK) { mkdirSync(SELFCHECK, { recursive: true }); copyFileSync(join(dir, `${name}.png`), join(SELFCHECK, `${name}.png`)) }
-  await audit(p, name)
+  await audit(p, name, auditOpts)
 }
-const outShot = (p, name, opts) => shot(p, name, opts, OUT)
+const outShot = (p, name, opts, auditOpts) => shot(p, name, opts, OUT, auditOpts)
 /** Is focus somewhere real (not <body>) — design I2 */
 const focusDesc = p => p.evaluate(() => {
   const a = document.activeElement
@@ -819,10 +821,12 @@ try {
     const lit = await j.locator('.pd-entry.pd-has-progress').count()
     const entryCls = await j.locator('.pd-entry').getAttribute('class')
     check(`N9 (${how}) result lands while the panel is ${how === 'close' ? 'closed' : 'collapsed'} → entry dot lit`, lit === 1, `dot=${lit} ${entryCls}`)
-    await outShot(j, `n9-${how}-dot`, { clip: await j.locator('.pd-entry').boundingBox().then(b => ({ x: Math.max(0, b.x - 120), y: Math.max(0, b.y - 20), width: 280, height: b.height + 40 })) })
+    await outShot(j, `n9-${how}-dot`, { clip: await j.locator('.pd-entry').boundingBox().then(b => ({ x: Math.max(0, b.x - 120), y: Math.max(0, b.y - 20), width: 280, height: b.height + 40 })) }, { text: false })
     await j.locator('.pd-entry').click()
     await j.locator('.pd-root').waitFor()
     await j.waitForTimeout(600)
+    // the dot scene is icon-only; the text it leads to is the opened panel with the new board
+    await audit(j, `n9-${how}-opened`)
     check(`N9 (${how}) opening the panel clears the dot and shows the new board`, await j.locator('.pd-entry.pd-has-progress').count() === 0 && await j.locator('.pd-board').count() === 1)
     await j.locator('.pd-head .pd-ib').first().click()
     await j.waitForTimeout(300)
