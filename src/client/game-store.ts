@@ -123,11 +123,11 @@ export const DONE_DELAY_MS = 260
 /** Front-end spacing between real generations (spec §10: 5 s); cache hits are free. */
 export const AI_COOLDOWN_MS = 1500
 
-/** The pattern a saved source key follows: the template's, or the saved `board:` pattern. */
+/** The pattern a saved source key follows: the template's, or the saved pattern of any other key (`board:`, `daily:`). */
 export function resolveTarget(target: string | null, pattern: string | null, size: BoardSize): Board | null {
   const id = templateIdOf(target)
   if (id !== null) return findTemplate(id)?.board ?? null
-  if (!target?.startsWith('board:') || pattern === null) return null
+  if (target === null || pattern === null) return null
   const decoded = decode(pattern, size)
   return decoded.ok ? decoded.board : null
 }
@@ -272,7 +272,7 @@ export class GameStore {
     const s = this.state
     return {
       board: s.history.present, color: s.color, tool: s.tool, mode: s.mode === 'play' || s.mode === 'ai' ? s.mode : 'home', target: s.target,
-      pattern: s.target?.startsWith('board:') && s.targetBoard ? encode(s.targetBoard) : null,
+      pattern: !s.target?.startsWith('template:') && s.targetBoard ? encode(s.targetBoard) : null,
       ironed: s.ironed || s.ironingSince !== null, prefs: s.prefs, done: s.done, coached: s.coached, work: s.work,
     }
   }
@@ -562,8 +562,8 @@ export class GameStore {
     this.startPattern(key, board)
   }
 
-  /** A new game following `board`; the replaced game stays one undo step away. */
-  private startPattern(target: string, board: Board): void {
+  /** A new game following `board` under source key `target` (the wall chunk's `daily:` games too); the replaced game stays one undo step away. */
+  startPattern(target: string, board: Board): void {
     const s = this.state
     const fresh = createBoard(board.size)
     this.switchGame({
@@ -620,7 +620,7 @@ export class GameStore {
 
   /**
    * The ironed piece goes on the wall, the oldest leaves past 60. Its id is the
-   * ironing time, kept past the newest id. A `board:` source up to 16×16 keeps
+   * ironing time, kept past the newest id. A non-template source up to 16×16 keeps
    * its pattern too (still under 1 KB), so 再拼一次 can follow it again.
    */
   private collect(): void {
@@ -628,7 +628,7 @@ export class GameStore {
     const b = s.history.present
     const w: StoredWork = {
       i: Math.max(this.now(), (this.wall.at(-1)?.i ?? 0) + 1), n: b.size, b: encode(b), s: s.target,
-      ...(s.target?.startsWith('board:') && s.targetBoard && b.size < 24 ? { p: encode(s.targetBoard) } : {}),
+      ...(!s.target?.startsWith('template:') && s.targetBoard && b.size < 24 ? { p: encode(s.targetBoard) } : {}),
     }
     this.setWall([...this.wall, w].slice(-MAX_WORKS))
     this.set({ work: w.i })

@@ -31,10 +31,11 @@ export interface SavedState {
   readonly mode: Mode
   /**
    * Source key of the board (spec v1.6 §4.3): `template:<id>`, `board:<board id>`
-   * for a generated or imported pattern, or null for free play.
+   * for a generated or imported pattern, `daily:<YYYY-MM-DD>` for F1's daily (spec §18.3), or null
+   * for free play. Any non-template key keeps its pattern.
    */
   readonly target: string | null
-  /** The followed pattern of a `board:` source, encoded like `board` (same size). */
+  /** The followed pattern of a `board:` or `daily:` source, encoded like `board` (same size). */
   readonly pattern: string | null
   readonly ironed: boolean
   readonly prefs: Prefs
@@ -86,8 +87,8 @@ function parseSource(raw: unknown, pattern: unknown): { target: string | null; p
   const t = typeof raw === 'string' ? raw : ''
   const p = typeof pattern === 'string' && pattern.length <= 700 ? pattern : null
   if (ID_RE.test(t)) return { target: templateKey(t), pattern: null }
-  const m = /^(template|board):[a-z0-9-]{1,32}$/.exec(t)
-  if (m) return { target: m[1] === 'board' && p === null ? null : t, pattern: m[1] === 'board' ? p : null }
+  const m = /^(?:(template)|board|daily):[a-z0-9-]{1,32}$/.exec(t)
+  if (m) return { target: m[1] || p !== null ? t : null, pattern: m[1] ? null : p }
   const legacy = /^ai:\d+:([.0-9a-f]{1,700})$/.exec(t)
   return { target: legacy ? 'board:legacy' : null, pattern: legacy?.[1] ?? null }
 }
