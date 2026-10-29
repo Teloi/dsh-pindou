@@ -190,6 +190,24 @@ const shot = async (p, name, opts, dir = ASSETS, auditOpts = {}) => {
  */
 async function pluginShot(p, name) {
   const boxes = await p.evaluate(settlePlugin)
+  // the entry's dot must be off while the panel is on screen (spec §15.1-3); say why when it is not
+  const dot = await p.evaluate(() => {
+    const entry = document.querySelector('.pd-entry'), roots = [...document.querySelectorAll('.pd-root')]
+    // busy is lit on purpose while the model runs; the warm progress dot only when no panel is on screen
+    if (!entry || !roots.length || (!entry.classList.contains('pd-has-progress') && roots.length < 2)) return null
+    return {
+      entry: entry.className, vis: document.visibilityState, focus: document.hasFocus(), view: [innerWidth, innerHeight],
+      roots: roots.map((root) => {
+        const r = root.getBoundingClientRect(), hid = root.closest('[hidden],[inert],[aria-hidden="true"]')
+        return { hid: hid ? `${hid.tagName}.${String(hid.className).slice(0, 40)} ${['hidden', 'inert', 'aria-hidden'].filter(a => hid.hasAttribute(a))}` : null, check: root.checkVisibility?.({ visibilityProperty: true }), rect: [r.left, r.top, r.right, r.bottom].map(Math.round) }
+      }),
+    }
+  })
+  if (dot) {
+    const shown = dot.roots.filter(r => !r.hid && r.check && r.rect[2] > 0 && r.rect[0] < dot.view[0])
+    if (dot.entry.includes('pd-has-progress') && shown.length) check(`[${name}] the entry's progress dot is off while the panel is on screen (spec §15.1-3)`, false, JSON.stringify(dot))
+    else log(`    entry: ${dot.roots.length} panel roots (${name})`, JSON.stringify(dot))
+  }
   const dir = join(OUT, 'plugin')
   mkdirSync(dir, { recursive: true })
   for (const [i, box] of boxes.entries()) {
