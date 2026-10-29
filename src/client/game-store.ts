@@ -37,7 +37,7 @@ export interface AiState {
 }
 
 export type Overlay = 'coach' | 'done' | 'result' | null
-export type ToastKey = 'cleared' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered'
+export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered'
 
 export interface GameState {
   readonly history: History
@@ -69,6 +69,26 @@ export interface GameState {
   /** An AI pattern finished while the panel was hidden; cleared when it is shown. */
   readonly fresh: boolean
 }
+
+/**
+ * One game: the board with its own undo history and what it follows. The
+ * source identity is `target`: a template id, `ai:<size>:<full encoding>` for
+ * a generated pattern (content identity: the same pattern is the same game,
+ * a different one never is), or null for free play. Template ids never start
+ * with `ai:`, so a template click can't match a generated or free board.
+ */
+export interface GameSnap {
+  readonly history: History
+  readonly target: string | null
+  readonly targetBoard: Board | null
+  readonly ironed: boolean
+  readonly complete: boolean
+  readonly color: number
+  readonly tool: Tool
+}
+
+/** How many replaced games stay reachable with undo (memory only, not persisted). */
+export const MAX_KEPT_GAMES = 5
 
 export interface GameApi {
   generate(body: { prompt: string; size: AiSize }, signal: AbortSignal): Promise<GenerateResponse>
@@ -128,6 +148,12 @@ export class GameStore {
   private last: { x: number; y: number; value: number } | null = null
   private disposed = false
   private lastGenAt = Number.NEGATIVE_INFINITY
+  /** Games replaced by a new one, newest last: undo past a game's first step brings them back. */
+  private prevGames: GameSnap[] = []
+  /** Games left by undoing a switch, for redo; any edit drops them. */
+  private nextGames: GameSnap[] = []
+  /** Live visibility of the panel (set by the mounted panel), read when a result lands. */
+  private visibilityProbe: (() => boolean) | null = null
 
   constructor(private readonly deps: GameDeps) {
     this.now = deps.now ?? Date.now
@@ -188,11 +214,27 @@ export class GameStore {
     this.set({ panelVisible: visible, ...(visible ? { fresh: false } : {}) }, false)
   }
 
+  /**
+   * The mounted panel registers a synchronous "am I on screen" check, so a
+   * result that lands between two visibility reports is judged on the live
+   * state (spec §15.1-3), not on the last sample. `null` unregisters.
+   */
+  setVisibilityProbe(probe: (() => boolean) | null): void { this.visibilityProbe = probe }
+
+  private panelOnScreen(): boolean {
+    let visible = this.state.panelVisible
+    try { if (this.visibilityProbe) visible = this.visibilityProbe() } catch { /* keep the last report */ }
+    if (visible !== this.state.panelVisible) this.setPanelVisible(visible)
+    return visible
+  }
+
   // ── derived ───────────────────────────────────────────────────────
   get board(): Board { return this.state.history.present }
   get locked(): boolean { return this.state.ironed || this.state.ironingSince !== null }
-  get canUndo(): boolean { return !this.locked && canUndo(this.state.history) }
-  get canRedo(): boolean { return !this.locked && canRedo(this.state.history) }
+  get canUndo(): boolean { return !this.locked && (canUndo(this.state.history) || this.prevGames.length > 0) }
+  get canRedo(): boolean {
+    return (!this.locked && canRedo(this.state.history)) || (this.state.ironingSince === null && this.nextGames.length > 0)
+  }
 
   // ── persistence ───────────────────────────────────────────────────
   private saved(): SavedState {
@@ -234,16 +276,91 @@ export class GameStore {
     this.set({ mode, overlay: mode === 'play' ? this.state.overlay : null })
   }
 
-  /** Free play: a blank board unless a free board is already in progress. */
+  /** Free play: resume a free board in progress, else a blank one (the old game stays undoable). */
   startFree(): void {
     const s = this.state
-    const fresh = s.target !== null || s.ironed
+    if (this.resumable(null)) {
+      this.last = null
+      this.set({ mode: 'play', overlay: s.coached ? null : 'coach', ...this.dropUndoToast() })
+      return
+    }
+    this.switchGame({
+      history: createHistory(createBoard(s.history.present.size)), target: null, targetBoard: null,
+      ironed: false, complete: false, color: s.color, tool: s.tool,
+    }, { mode: 'play', overlay: s.coached ? null : 'coach' })
+  }
+
+  // ── games (spec §4.3) ────────────────────────────────────────────
+  /** Same source, not ironed (nor ironing): picking it again only goes back to it. */
+  private resumable(target: string | null): boolean {
+    const s = this.state
+    return s.target === target && !s.ironed && s.ironingSince === null
+  }
+
+  private snap(): GameSnap {
+    const s = this.state
+    return { history: commit(s.history), target: s.target, targetBoard: s.targetBoard, ironed: s.ironed, complete: s.complete, color: s.color, tool: s.tool }
+  }
+
+  private static apply(g: GameSnap): Partial<GameState> {
+    return { history: g.history, target: g.target, targetBoard: g.targetBoard, ironed: g.ironed, complete: g.complete, color: g.color, tool: g.tool }
+  }
+
+  /** An undo toast speaks about the game on screen; leaving or swapping that game retires it. */
+  private dropUndoToast(): Partial<GameState> { return this.state.toast?.undo === true ? { toast: null } : {} }
+
+  /** An edit starts a new future: games left by undoing a switch can't be redone any more. */
+  private edited(): void { this.nextGames = [] }
+
+  /**
+   * Replace the current game. Nothing is lost: the old game (board, history,
+   * pattern, ironed state) is one undo step away, and replacing unfinished
+   * work says so with an undo toast.
+   */
+  private switchGame(next: GameSnap, extra: Partial<GameState>): void {
+    this.settleIron()
+    this.cancelDone()
+    this.last = null
+    const s = this.state
+    const beads = s.history.present.cells.some(c => c !== EMPTY)
+    if (beads || canUndo(s.history)) this.prevGames = [...this.prevGames, this.snap()].slice(-MAX_KEPT_GAMES)
+    this.nextGames = []
     this.set({
-      mode: 'play',
-      ...(fresh ? { history: push(commit(s.history), createBoard(s.history.present.size)) } : {}),
-      target: null, targetBoard: null, ironed: false, complete: false, celebrateAt: null,
-      overlay: s.coached ? null : 'coach',
+      ...GameStore.apply(next), ironingSince: null, celebrateAt: null, ...extra,
+      ...(beads && !s.ironed ? { toast: { key: 'newGame' as const, undo: true, at: this.now() } } : this.dropUndoToast()),
     })
+  }
+
+  /** Bring back the game replaced last (undo past a game's first step, or the toast). */
+  restorePreviousGame(): boolean {
+    const prev = this.prevGames.pop()
+    if (!prev) return false
+    this.settleIron()
+    this.cancelDone()
+    this.last = null
+    this.nextGames.push(this.snap())
+    this.set({
+      ...GameStore.apply(prev), mode: 'play', overlay: prev.ironed ? 'result' : null, ironingSince: null, celebrateAt: null,
+      ...this.dropUndoToast(),
+    })
+    return true
+  }
+
+  private redoGame(): boolean {
+    const next = this.nextGames.pop()
+    if (!next) return false
+    this.last = null
+    this.prevGames.push(this.snap())
+    this.set({ ...GameStore.apply(next), mode: 'play', overlay: next.ironed ? 'result' : null, ironingSince: null, celebrateAt: null })
+    return true
+  }
+
+  /** The toast's 撤销: what it undoes depends on what the toast reported. */
+  undoToast(): void {
+    const key = this.state.toast?.key
+    this.hideToast()
+    if (key === 'newGame') this.restorePreviousGame()
+    else this.undo()
   }
 
   setPrefs(patch: Partial<Prefs>): void { this.set({ prefs: { ...this.state.prefs, ...patch } }) }
@@ -288,10 +405,11 @@ export class GameStore {
     if (tool === 'pick') { this.pick(x, y); return }
     if (tool === 'fill') {
       const next = floodFill(this.board, x, y, this.state.color)
-      if (next !== this.board) { this.set({ history: push(commit(this.state.history), next) }); this.afterChange() }
+      if (next !== this.board) { this.edited(); this.set({ history: push(commit(this.state.history), next) }); this.afterChange() }
       return
     }
     const value = tool === 'erase' ? EMPTY : this.state.color
+    this.edited()
     this.last = { x, y, value }
     this.set({ history: preview(begin(this.state.history), setCell(this.board, x, y, value)), overlay: null })
   }
@@ -329,14 +447,16 @@ export class GameStore {
 
   undo(): void {
     if (this.state.ironed && this.state.ironingSince === null) { this.unIron(); return }
-    if (!this.canUndo) return
+    if (this.locked) return
+    if (!canUndo(this.state.history)) { this.restorePreviousGame(); return }
     this.last = null
     this.set({ history: undo(this.state.history) })
     this.afterChange()
   }
 
   redo(): void {
-    if (!this.canRedo) return
+    if (this.state.ironingSince !== null) return
+    if (this.locked || !canRedo(this.state.history)) { this.redoGame(); return }
     this.last = null
     this.set({ history: redo(this.state.history) })
     this.afterChange()
@@ -345,6 +465,7 @@ export class GameStore {
   clear(): void {
     if (this.locked || this.board.cells.every(c => c === EMPTY)) return
     this.cancelDone()
+    this.edited()
     this.set({ history: push(commit(this.state.history), clearBoard(this.board)), complete: false, celebrateAt: null, overlay: null })
     this.showToast('cleared', true)
   }
@@ -352,6 +473,7 @@ export class GameStore {
   resize(size: BoardSize): void {
     if (this.locked || size === this.board.size) return
     const keepTarget = this.state.targetBoard?.size === size
+    this.edited()
     this.set({
       history: push(commit(this.state.history), resizeBoard(this.board, size)),
       ...(keepTarget ? {} : { target: null, targetBoard: null }),
@@ -387,20 +509,25 @@ export class GameStore {
   }
 
   // ── patterns ──────────────────────────────────────────────────────
-  /** Start following a pattern on a fresh board of its size (undoable). */
+  /**
+   * Pick a pattern (spec §4.3). The same pattern, not ironed: back to it with
+   * its board and history untouched. Otherwise a fresh board of its size; the
+   * replaced game stays one undo step away.
+   */
   follow(target: string): void {
     const board = resolveTarget(target)
     if (!board) return
+    const s = this.state
+    if (this.resumable(target)) {
+      this.last = null
+      this.set({ mode: 'play', overlay: s.complete ? 'done' : s.coached ? null : 'coach', ...this.dropUndoToast() })
+      return
+    }
     const fresh = createBoard(board.size)
-    this.last = null
-    this.set({
-      mode: 'play',
-      history: push(commit(this.state.history), fresh),
-      target, targetBoard: board, ironed: false, ironingSince: null, complete: false, celebrateAt: null,
-      color: firstColor(fresh, board, this.state.color),
-      tool: 'paint',
-      overlay: this.state.coached ? null : 'coach',
-    })
+    this.switchGame({
+      history: createHistory(fresh), target, targetBoard: board, ironed: false, complete: false,
+      color: firstColor(fresh, board, s.color), tool: 'paint',
+    }, { mode: 'play', overlay: s.coached ? null : 'coach' })
   }
 
   leaveTarget(): void { this.cancelDone(); this.set({ target: null, targetBoard: null, complete: false, celebrateAt: null }) }
@@ -410,6 +537,7 @@ export class GameStore {
     const target = this.state.targetBoard
     if (!target || this.locked) return
     const cells = this.board.cells.map((c, i) => (target.cells[i] === EMPTY ? c : target.cells[i]!))
+    this.edited()
     this.set({ history: push(commit(this.state.history), { size: this.board.size, cells: Object.freeze(cells) }) })
     this.afterChange()
   }
@@ -417,19 +545,27 @@ export class GameStore {
   // ── ironing ───────────────────────────────────────────────────────
   iron(): void {
     if (this.locked || this.board.cells.every(c => c === EMPTY)) return
-    const finish = (): void => {
-      this.ironHandle = null
-      const t = this.state.target
-      const done = t !== null && findTemplate(t) !== undefined && this.state.complete && !this.state.done.includes(t)
-        ? [...this.state.done, t] : this.state.done
-      this.set({ ironed: true, ironingSince: null, overlay: 'result', done, celebrateAt: this.now() })
-    }
     this.last = null
     this.cancelDone()
     this.set({ history: commit(this.state.history), overlay: null })
-    if (this.deps.reducedMotion?.() ?? false) { finish(); return }
+    if (this.deps.reducedMotion?.() ?? false) { this.finishIron(); return }
     this.set({ ironingSince: this.now() }, false)
-    this.ironHandle = this.st(finish, IRON_MS)
+    this.ironHandle = this.st(() => { this.finishIron() }, IRON_MS)
+  }
+
+  private finishIron(): void {
+    this.ironHandle = null
+    const t = this.state.target
+    const done = t !== null && findTemplate(t) !== undefined && this.state.complete && !this.state.done.includes(t)
+      ? [...this.state.done, t] : this.state.done
+    this.set({ ironed: true, ironingSince: null, overlay: 'result', done, celebrateAt: this.now() })
+  }
+
+  /** Leaving a game mid-iron: finish it now, so the ironed piece belongs to that game and not the next. */
+  private settleIron(): void {
+    if (this.ironHandle === null) return
+    this.ct(this.ironHandle)
+    this.finishIron()
   }
 
   unIron(): void {
@@ -524,7 +660,7 @@ export class GameStore {
 
   /** A generated pattern becomes the faint guide on a fresh board, like a template. */
   private finishAi(result: AiResult): void {
-    this.set({ ai: { ...this.state.ai, phase: 'done', error: undefined, result }, fresh: !this.state.panelVisible }, false)
+    this.set({ ai: { ...this.state.ai, phase: 'done', error: undefined, result }, fresh: !this.panelOnScreen() }, false)
     this.follow(`ai:${result.board.size}:${encode(result.board)}`)
   }
 }
