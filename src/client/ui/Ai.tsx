@@ -5,6 +5,7 @@
 import { useEffect, useId, useRef, type ReactElement } from 'react'
 import { MAX_PROMPT_CHARS } from '../../core/index.ts'
 import { AI_SIZES } from '../game-store.ts'
+import { useFocusReturn } from '../focus.ts'
 import { IconAlert, IconSparkle } from '../icons.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 
@@ -14,7 +15,8 @@ const ERR = {
 } as const
 
 export function AiView(): ReactElement {
-  const { store, t } = useEnv()
+  const env = useEnv()
+  const { store, t } = env
   const s = useGame()
   const ai = s.ai
   const id = useId()
@@ -22,10 +24,15 @@ export function AiView(): ReactElement {
   const loading = ai.phase === 'loading'
   const notConfigured = ai.status?.configured === false || ai.error === 'not-configured'
 
+  const card = useRef<HTMLDivElement>(null)
   useEffect(() => {
     void store.probeStatus()
     area.current?.focus({ preventScroll: true })
   }, [store])
+  // While generation cannot work the input is disabled; put focus on the card's first action instead.
+  useFocusReturn(card, notConfigured)
+  const opener = notConfigured ? (env.settings?.() ?? {}) : {}
+  const off = loading || notConfigured
 
   const submit = (): void => { void store.generate() }
   const examples = t('aiExamples').split('|')
@@ -34,12 +41,22 @@ export function AiView(): ReactElement {
     <div className="pd-view" onKeyDown={(e) => { if (e.key === 'Escape' && loading) { e.stopPropagation(); store.cancelGenerate() } }}>
       {notConfigured
         ? (
-          <div className="pd-card" role="status">
+          <div className="pd-card pd-nocfg" role="status" ref={card}>
             <p className="pd-t"><IconAlert />{t('aiNotConfigured')}</p>
             <p>{t('aiNotConfiguredBody')}</p>
-            <ol><li>{t('aiStep1')}</li><li>{t('aiStep2')}</li></ol>
+            <ol>
+              <li>{opener.keys ? t('aiStep1Keys', { keys: opener.keys }) : t('aiStep1')}</li>
+              <li>{t('aiStep2')}</li>
+              <li>{t('aiStep3')}</li>
+            </ol>
+            {/* No public API opens a Settings section: say so instead of a button that does nothing. */}
+            <p className="pd-muted">{t(opener.open ? 'aiSettingsHome' : 'aiSettingsManual')}</p>
             <div className="pd-acts">
-              <button type="button" className="pd-btn" onClick={() => { store.setAiPrompt(ai.prompt); void store.probeStatus() }}>{t('aiRecheck')}</button>
+              {opener.open
+                ? <button type="button" className="pd-btn pd-primary" data-primary onClick={opener.open}>{t('aiOpenSettings')}</button>
+                : null}
+              <button type="button" className={cx('pd-btn', !opener.open && 'pd-primary')} {...(opener.open ? {} : { 'data-primary': true })}
+                onClick={() => { store.setAiPrompt(ai.prompt); void store.probeStatus(true) }}>{t('aiRecheck')}</button>
               <button type="button" className="pd-btn pd-ghost" onClick={() => { store.go('home') }}>{t('aiPlayTemplates')}</button>
             </div>
           </div>
@@ -53,7 +70,7 @@ export function AiView(): ReactElement {
           value={ai.prompt}
           maxLength={MAX_PROMPT_CHARS}
           placeholder={t('aiPlaceholder')}
-          disabled={loading}
+          disabled={off}
           aria-describedby={`${id}-n`}
           onChange={(e) => { store.setAiPrompt(e.target.value.slice(0, MAX_PROMPT_CHARS)) }}
           onKeyDown={(e) => {
@@ -66,7 +83,7 @@ export function AiView(): ReactElement {
         <div className="pd-ai-row">
           <span className="pd-seg" role="group" aria-label={t('size')}>
             {AI_SIZES.map(size => (
-              <button key={size} type="button" aria-pressed={ai.size === size} disabled={loading}
+              <button key={size} type="button" aria-pressed={ai.size === size} disabled={off}
                 onClick={() => { store.setAiSize(size) }}>{size}×{size}</button>
             ))}
           </span>
@@ -74,16 +91,22 @@ export function AiView(): ReactElement {
           {loading
             ? <button type="button" className="pd-btn pd-ghost" onClick={() => { store.cancelGenerate() }}>{t('aiCancel')}</button>
             : (
-              <button type="button" className="pd-btn pd-primary" disabled={ai.prompt.trim() === ''} onClick={submit}>
+              <button type="button" className="pd-btn pd-primary" disabled={notConfigured || ai.prompt.trim() === ''} onClick={submit}>
                 <IconSparkle />{t('aiGenerate')}
               </button>
             )}
         </div>
       </div>
-      <div aria-live="polite" className="pd-ai-row" style={{ minHeight: 28, marginTop: 8 }}>
+      {/* Stays mounted for the live region; collapses while the page is disabled (not configured) so the chips don't float below an empty row. */}
+      <div aria-live="polite" className="pd-ai-row" style={notConfigured ? undefined : { minHeight: 28, marginTop: 8 }}>
         {loading ? <span className="pd-shimmer" role="status">{t('aiGenerating')}</span> : null}
         {ai.status?.route === 'mock' && !loading ? <span className="pd-tokens">{t('aiMock')}</span> : null}
-        {ai.status?.model && ai.status.route !== 'mock' && !loading ? <span className="pd-tokens">{t('aiModel', { model: ai.status.model })}</span> : null}
+        {ai.status?.configured && ai.status.route !== 'mock' && !loading
+          ? <span className="pd-tokens" title={ai.status.model ? t('aiModel', { model: ai.status.model }) : undefined}>{t('aiMeta')}</span>
+          : null}
+        {ai.status?.configured && ai.status.verified === false && !loading
+          ? <span className="pd-tokens">{t('aiVerifyHint')}</span>
+          : null}
       </div>
       {ai.phase === 'error' && ai.error && ai.error !== 'not-configured'
         ? (
@@ -98,7 +121,7 @@ export function AiView(): ReactElement {
         : null}
       <div className={cx('pd-chips')} role="group" aria-label={t('aiTipsTitle')}>
         {examples.map(ex => (
-          <button key={ex} type="button" className="pd-chip" disabled={loading}
+          <button key={ex} type="button" className="pd-chip" disabled={off}
             onClick={() => { store.setAiPrompt(ex); area.current?.focus() }}>{ex}</button>
         ))}
       </div>

@@ -17,6 +17,7 @@ import { fetchApi } from './api.ts'
 import { makeBusyPill, makeEntry, type SessionProps } from './entry.tsx'
 import { GameStore } from './game-store.ts'
 import { IconBead } from './icons.tsx'
+import { settingsOpener, type ShortcutsFace } from './settings.ts'
 import { ensureStyles } from './styles.ts'
 import { App } from './ui/App.tsx'
 import { EnvContext, isDark, prefersReducedMotion } from './ui/context.tsx'
@@ -56,7 +57,7 @@ export interface ClientContext {
     isExpanded?(): boolean
     hide?(tabId: string): void
   }
-  shortcuts?: { register(command: Record<string, unknown>): Dispose }
+  shortcuts?: ShortcutsFace & { register(command: Record<string, unknown>): Dispose }
 }
 
 export function langOf(active: string | undefined): 'zh' | 'en' {
@@ -100,7 +101,7 @@ export function apply(ctx: ClientContext): void {
   function Body(): ReactElement {
     const l = useLang()
     return (
-      <EnvContext.Provider value={{ store, lang: l, t: tFor(l), reducedMotion: prefersReducedMotion, dark: () => isDark() }}>
+      <EnvContext.Provider value={{ store, lang: l, t: tFor(l), reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts) }}>
         <App />
       </EnvContext.Provider>
     )

@@ -1,6 +1,7 @@
 import { createContext, useContext, useSyncExternalStore } from 'react'
 import type { Translate } from '../../core/index.ts'
 import type { GameState, GameStore } from '../game-store.ts'
+import type { SettingsOpener } from '../settings.ts'
 
 export interface Env {
   readonly store: GameStore
@@ -8,6 +9,8 @@ export interface Env {
   readonly t: Translate
   readonly reducedMotion: () => boolean
   readonly dark: () => boolean
+  /** How to open DSH Settings from the panel (read when needed; see settings.ts). */
+  readonly settings?: () => SettingsOpener
 }
 
 export const EnvContext = createContext<Env | null>(null)
