@@ -35,8 +35,17 @@ export interface PreparedCall {
   stream(options: Record<string, unknown>): AsyncIterable<StreamChunk>
 }
 
+/** One row of `llm.listConfigurableProviders()` (the Models page directory). */
+export interface ConfigurableProviderLike {
+  readonly provider: string
+  readonly settingsNs?: string
+  readonly settingsPath?: readonly string[]
+  readonly nativeAuth?: { readonly env?: readonly string[]; readonly oauth?: boolean }
+}
+
 export interface LlmRuntimeLike {
   listProviders(): { id: string; name: string }[]
+  listConfigurableProviders?(): ConfigurableProviderLike[]
   prepareCall(
     config: CallConfig,
     signal?: AbortSignal,
@@ -46,6 +55,16 @@ export interface LlmRuntimeLike {
 
 export interface DefaultModelLike {
   currentSelection(): { provider: string; model: string }
+}
+
+/** `@deepseek-ai/dsh-credentials`: metadata only, never the secret. */
+export interface CredentialsLike {
+  describe(ref: string): Promise<{ readonly configured: boolean }> | { readonly configured: boolean }
+}
+
+/** `loader` rows, read only to find a provider profile's custom `apiKeyEnv`. */
+export interface LoaderLike {
+  entries(): Iterable<{ readonly options: { readonly id?: string }; readonly fiber?: { readonly effectiveConfig?: unknown } }>
 }
 
 export interface FetchRoute {
@@ -64,6 +83,8 @@ export interface HostContext {
   readonly connection: ConnectionLike
   get(name: 'llm'): LlmRuntimeLike | undefined
   get(name: 'agentDefaultModel'): DefaultModelLike | undefined
+  get(name: 'credentials'): CredentialsLike | undefined
+  get(name: 'loader'): LoaderLike | undefined
   get(name: string): unknown
   effect(fn: () => (() => void | Promise<void>) | void, label?: string): unknown
   logger?(name: string): { info(...args: unknown[]): void; warn(...args: unknown[]): void }

@@ -12,6 +12,12 @@ export interface StatusResponse {
   readonly configured: boolean
   readonly route: 'mock' | 'host' | 'direct' | 'none'
   readonly model?: string | undefined
+  /**
+   * `true` when the Host actually checked the route's credential (or the route
+   * needs none); `false` when it could not tell without calling the model, so
+   * the first generation is the real check.
+   */
+  readonly verified?: boolean | undefined
 }
 
 export interface GenerateRequest {

@@ -4,7 +4,7 @@ import {
 } from '../core/index.ts'
 import type { PindouConfig } from './config.ts'
 import { mockReply } from './mock.ts'
-import type { DefaultModelLike, LlmFailure, LlmRuntimeLike } from './types.ts'
+import type { ConfigurableProviderLike, CredentialsLike, DefaultModelLike, LlmFailure, LlmRuntimeLike } from './types.ts'
 
 /** Everything the generator reads from the outside world, injectable for tests. */
 export interface GeneratorDeps {
@@ -16,6 +16,10 @@ export interface GeneratorDeps {
   readonly now: () => number
   /** Aborted when the plugin is disposed. */
   readonly lifetime: AbortSignal
+  /** DSH credential metadata (`describe` only); absent on hosts without the service. */
+  readonly credentials?: () => CredentialsLike | undefined
+  /** A provider profile's custom `apiKeyEnv`, when the host exposes it. */
+  readonly profileKeyRef?: (entry: ConfigurableProviderLike) => string | undefined
   /** Simulated latency of mock replies (default 700 ms, so the UI's busy state is visible). */
   readonly mockDelayMs?: number
 }
@@ -58,6 +62,23 @@ export function scrubMessage(message: unknown): string {
     .slice(0, 200)
 }
 
+/** The Models page's fallback credential name for a provider (`ui-settings-models` deriveKeyRef). */
+export function deriveKeyRef(provider: string): string {
+  return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`
+}
+
+/** Credential state of a DSH provider, judged from metadata only (no model call). */
+export type CredentialState = 'ok' | 'missing' | 'unknown'
+
+const DESCRIBE_TIMEOUT_MS = 3000
+
+export interface StatusResult {
+  readonly configured: boolean
+  readonly route: RouteKind
+  readonly model?: string | undefined
+  readonly verified: boolean
+}
+
 /** Which route a generation would take right now. */
 export type RouteKind = 'mock' | 'host' | 'direct' | 'none'
 
@@ -90,9 +111,54 @@ export class Generator {
     return value ? value : undefined
   }
 
-  status(): { configured: boolean; route: RouteKind; model?: string | undefined } {
+  /**
+   * Whether a generation can work right now, without spending tokens. For the
+   * DSH default-model route this checks the provider's credential the way the
+   * Models page does; when a missing credential would fall back to the direct
+   * key, that route is reported instead (same order as `call`).
+   */
+  async status(): Promise<StatusResult> {
     const r = this.route()
-    return { configured: r.kind !== 'none', route: r.kind, model: r.model }
+    if (r.kind !== 'host') return { configured: r.kind !== 'none', route: r.kind, model: r.model, verified: true }
+    const state = await this.credentialState(r.provider!)
+    if (state === 'missing') {
+      if (this.apiKey() !== undefined) return { configured: true, route: 'direct', model: this.deps.config.fallbackModel, verified: true }
+      return { configured: false, route: 'host', model: r.model, verified: true }
+    }
+    return { configured: true, route: 'host', model: r.model, verified: state === 'ok' }
+  }
+
+  /**
+   * Credential metadata for one provider. `unknown` whenever the host cannot
+   * tell without a model call: account / OAuth logins, providers outside the
+   * configurable directory, or a missing / failing credentials service.
+   */
+  async credentialState(provider: string): Promise<CredentialState> {
+    // DeepSeek account login is a session, checked by its model catalog, not a key.
+    if (provider === 'deepseek-account') return 'unknown'
+    let entry: ConfigurableProviderLike | undefined
+    try { entry = this.deps.llm()?.listConfigurableProviders?.().find(row => row.provider === provider) } catch { entry = undefined }
+    if (entry === undefined || entry.nativeAuth?.oauth === true) return 'unknown'
+    const refs = new Set<string>()
+    let custom: string | undefined
+    try { custom = this.deps.profileKeyRef?.(entry) } catch { custom = undefined }
+    refs.add(custom ?? (provider === 'deepseek-official' ? 'DEEPSEEK_API_KEY' : deriveKeyRef(provider)))
+    for (const env of entry.nativeAuth?.env ?? []) refs.add(env)
+    const credentials = this.deps.credentials?.()
+    for (const ref of refs) {
+      if (credentials === undefined) {
+        if (this.deps.env(ref)?.trim()) return 'ok'
+        continue
+      }
+      try {
+        const described = await Promise.race([
+          Promise.resolve(credentials.describe(ref)),
+          new Promise<never>((_, reject) => { setTimeout(() => { reject(new Error('timeout')) }, DESCRIBE_TIMEOUT_MS).unref?.() }),
+        ])
+        if (described.configured) return 'ok'
+      } catch { return 'unknown' }
+    }
+    return 'missing'
   }
 
   /** HTTP face: POST JSON {prompt, size} → GenerateResponse. */

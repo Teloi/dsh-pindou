@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { decode, encodeRows, GENERATE_PATH, STATUS_PATH, TEMPLATES } from '../src/core/index.ts'
-import { apply, inject, resolveConfig } from '../src/host/index.ts'
-import { Generator, scrubMessage, type GeneratorDeps } from '../src/host/generate.ts'
+import { apply, inject, profileKeyRef, resolveConfig } from '../src/host/index.ts'
+import { deriveKeyRef, Generator, scrubMessage, type GeneratorDeps } from '../src/host/generate.ts'
 import type { FetchRoute, HostContext, LlmRuntimeLike, StreamChunk } from '../src/host/types.ts'
 
 const heartRows = encodeRows(TEMPLATES[0]!.board)
@@ -54,7 +54,7 @@ describe('config', () => {
 describe('generator routes', () => {
   it('reports not-configured without llm or key', async () => {
     const g = new Generator(deps())
-    expect(g.status()).toEqual({ configured: false, route: 'none', model: undefined })
+    expect(await g.status()).toEqual({ configured: false, route: 'none', model: undefined, verified: true })
     expect(await g.generate('cat', 16)).toEqual({ ok: false, error: 'not-configured' })
   })
 
@@ -188,6 +188,78 @@ describe('generator guards', () => {
   })
 })
 
+describe('status reflects usable credentials (no model call)', () => {
+  const official = { currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-flash' }) }
+  const withDirectory = (rows: unknown[]): LlmRuntimeLike => ({ ...fakeLlm([]), listConfigurableProviders: () => rows as never })
+  const officialRow = { provider: 'deepseek-official', settingsNs: 'llm-deepseek-api-key', settingsPath: [] }
+
+  it('default model present but no key anywhere → configured:false', async () => {
+    const describe = vi.fn(async () => ({ configured: false }))
+    const g = new Generator(deps({ llm: () => withDirectory([officialRow]), defaultModel: () => official, credentials: () => ({ describe }) }))
+    expect(await g.status()).toEqual({ configured: false, route: 'host', model: 'deepseek-v4-flash', verified: true })
+    expect(describe).toHaveBeenCalledWith('DEEPSEEK_API_KEY')
+  })
+
+  it('default model with a stored key → configured and verified', async () => {
+    const g = new Generator(deps({ llm: () => withDirectory([officialRow]), defaultModel: () => official, credentials: () => ({ describe: () => ({ configured: true }) }) }))
+    expect(await g.status()).toMatchObject({ configured: true, route: 'host', verified: true })
+  })
+
+  it('missing DSH credential but a direct key reports the direct fallback (generate order)', async () => {
+    const g = new Generator(deps({
+      llm: () => withDirectory([officialRow]), defaultModel: () => official,
+      credentials: () => ({ describe: () => ({ configured: false }) }),
+      env: n => (n === 'DEEPSEEK_API_KEY' ? 'sk-direct' : undefined),
+    }))
+    expect(await g.status()).toMatchObject({ configured: true, route: 'direct', verified: true })
+  })
+
+  it('checks the profile apiKeyEnv, derived names and native env names', async () => {
+    const seen: string[] = []
+    const g = new Generator(deps({
+      llm: () => withDirectory([{ provider: 'open-router', settingsNs: 'pi', settingsPath: ['profiles', 'x'], nativeAuth: { env: ['OPENROUTER_API_KEY'] } }]),
+      defaultModel: () => ({ currentSelection: () => ({ provider: 'open-router', model: 'm' }) }),
+      credentials: () => ({ describe: (ref: string) => { seen.push(ref); return { configured: ref === 'OPENROUTER_API_KEY' } } }),
+    }))
+    expect(await g.status()).toMatchObject({ configured: true, verified: true })
+    expect(seen).toEqual([deriveKeyRef('open-router'), 'OPENROUTER_API_KEY'])
+    expect(deriveKeyRef('open-router')).toBe('OPEN_ROUTER_API_KEY')
+    const custom = new Generator(deps({
+      llm: () => withDirectory([officialRow]), defaultModel: () => official,
+      credentials: () => ({ describe: (ref: string) => ({ configured: ref === 'MY_DS_KEY' }) }),
+      profileKeyRef: () => 'MY_DS_KEY',
+    }))
+    expect(await custom.status()).toMatchObject({ configured: true, verified: true })
+  })
+
+  it('falls back to the launch environment without a credentials service', async () => {
+    const make = (key?: string) => new Generator(deps({ llm: () => withDirectory([officialRow]), defaultModel: () => official, env: n => (n === 'DEEPSEEK_API_KEY' ? key : undefined), config: resolveConfig({ minIntervalMs: 0, apiKeyEnv: 'OTHER_KEY' }) }))
+    expect(await make('sk-x').status()).toMatchObject({ configured: true, route: 'host', verified: true })
+    expect(await make().status()).toMatchObject({ configured: false, verified: true })
+  })
+
+  it('says "unverified" (not "missing") when only a model call could tell', async () => {
+    const account = new Generator(deps({ llm: () => withDirectory([]), defaultModel: () => ({ currentSelection: () => ({ provider: 'deepseek-account', model: 'm' }) }) }))
+    expect(await account.status()).toMatchObject({ configured: true, verified: false })
+    const oauth = new Generator(deps({ llm: () => withDirectory([{ provider: 'gh', nativeAuth: { oauth: true } }]), defaultModel: () => ({ currentSelection: () => ({ provider: 'gh', model: 'm' }) }) }))
+    expect(await oauth.status()).toMatchObject({ configured: true, verified: false })
+    const broken = new Generator(deps({ llm: () => withDirectory([officialRow]), defaultModel: () => official, credentials: () => ({ describe: () => Promise.reject(new Error('down')) }) }))
+    expect(await broken.status()).toMatchObject({ configured: true, verified: false })
+  })
+
+  it('reads a profile apiKeyEnv from the loader (string or volatile)', () => {
+    const ctx = (cfg: unknown): HostContext => ({
+      connection: { fetch: { register: () => () => {} } },
+      get: ((n: string) => (n === 'loader' ? { entries: () => [{ options: { id: 'ns' }, fiber: { effectiveConfig: cfg } }] } : undefined)) as HostContext['get'],
+      effect: () => undefined,
+    })
+    expect(profileKeyRef(ctx({ apiKeyEnv: { get: () => 'MY_KEY' } }), { provider: 'deepseek-official', settingsNs: 'ns', settingsPath: [] })).toBe('MY_KEY')
+    expect(profileKeyRef(ctx({ p: { a: { apiKeyEnv: 'A_KEY' } } }), { provider: 'x', settingsNs: 'ns', settingsPath: ['p', 'a'] })).toBe('A_KEY')
+    expect(profileKeyRef(ctx({ apiKeyEnv: 'sk-not-a-name' }), { provider: 'x', settingsNs: 'ns' })).toBeUndefined()
+    expect(profileKeyRef(ctx({}), { provider: 'x', settingsNs: 'other' })).toBeUndefined()
+  })
+})
+
 describe('plugin apply', () => {
   it('registers the generate and status routes in the connection fence', async () => {
     const routes: FetchRoute[] = []
@@ -197,6 +269,7 @@ describe('plugin apply', () => {
       effect: () => undefined,
     }
     expect(inject.connection.required).toBe(true)
+    expect(inject.credentials.required).toBe(false)
     apply(ctx, { mock: 'ok' })
     expect(routes.map(r => [r.path, r.methods])).toEqual([[GENERATE_PATH, ['POST']], [STATUS_PATH, ['GET']]])
     const status = await routes[1]!.fetch(new Request('http://x/api/pindou.status'))
