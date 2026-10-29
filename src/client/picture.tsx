@@ -61,19 +61,23 @@ export interface Picture {
  * size, the header's width/height, and only then a downscaled decode.
  */
 export async function readPicture(file: Blob, doc: Document = document, max = DECODE_MAX): Promise<Picture | { readonly error: SniffError }> {
-  const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer())
-  const pre = precheck({ type: file.type, size: file.size, name: (file as Partial<File>).name ?? '' }, head)
+  const meta = { type: file.type, size: file.size, name: (file as Partial<File>).name ?? '' }
+  let pre = precheck(meta, new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer()))
+  // the frame header past the first bytes (audit R-3): read on (≤ MAX_BYTES, already checked)
+  if ('ok' in pre && pre.ok.width === null && file.size > SNIFF_BYTES) pre = precheck(meta, new Uint8Array(await file.arrayBuffer()))
   if ('error' in pre) return pre
   const { width: w, height: h } = pre.ok
+  // no declared size anywhere: never hand it to the decoder
+  if (w === null || h === null) return { error: 'cannotOpen' }
   let bmp: ImageBitmap
   try {
-    const big = w !== null && h !== null && Math.max(w, h) > max
+    const big = Math.max(w, h) > max
     bmp = await createImageBitmap(file, big ? (w >= h ? { resizeWidth: max, resizeQuality: 'high' } : { resizeHeight: max, resizeQuality: 'high' }) : {})
   } catch {
     return { error: 'cannotOpen' }
   }
   try {
-    // a header without a size (rare JPEGs): judge the decoded size instead
+    // belt and braces: the decoder's own size
     if (Math.max(bmp.width, bmp.height) > MAX_SIDE) return { error: 'tooBig' }
     const size = decodeSize(bmp.width, bmp.height, max)
     const canvas = doc.createElement('canvas')

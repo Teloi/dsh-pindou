@@ -39,6 +39,18 @@ const pngHead = (w: number, h: number): Uint8Array =>
   new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...be32(13), 0x49, 0x48, 0x44, 0x52, ...be32(w), ...be32(h), 8, 6, 0, 0, 0])
 // Node's File (jsdom's has no arrayBuffer()); the page only uses Blob APIs browsers have
 const file = (bytes: Uint8Array | string, name: string, type: string): File => new NodeFile([bytes], name, { type }) as unknown as File
+/** A JPEG whose frame header (SOF0, declaring `w`×`h`) sits after `pad` bytes of APP1 segments; no scan data. */
+function jpegFar(w: number, h: number, pad: number): Uint8Array {
+  const out: number[] = [0xff, 0xd8]
+  for (let left = pad; left > 0;) {
+    const n = Math.min(left, 65533)
+    out.push(0xff, 0xe1, ((n + 2) >> 8) & 255, (n + 2) & 255, ...Array.from({ length: n }, () => 0x20))
+    left -= n
+  }
+  if (w > 0) out.push(0xff, 0xc0, 0, 17, 8, (h >> 8) & 255, h & 255, (w >> 8) & 255, w & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1)
+  out.push(0xff, 0xd9)
+  return new Uint8Array(out)
+}
 const svgFile = (): File => file('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'a.svg', 'image/svg+xml')
 
 /** The pixels the fake decoder "decodes": a red square on white, or flat white. */
@@ -338,6 +350,9 @@ describe('picture page (spec §18.2)', () => {
     ['SVG renamed .png (never decoded)', () => file('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>', 'a.png', 'image/png'), '暂不支持 SVG，换成 PNG 或 JPG 试试'],
     ['over 20 MB', () => file(new Uint8Array(MAX_BYTES + 1).fill(0, 0).map((_, i) => (i < 33 ? pngHead(10, 10)[i]! : 0)), 'big.png', 'image/png'), '图片太大了，换一张小点的'],
     ['a side over 8000 px', () => file(pngHead(8001, 100), 'wide.png', 'image/png'), '图片太大了，换一张小点的'],
+    // audit R-3: the size is judged from the header wherever it sits, never by decoding first
+    ['R-3: a 330 KB JPEG declaring 60000×60000 past the first 256 KB', () => file(jpegFar(60000, 60000, 330 * 1024), 'far.jpg', 'image/jpeg'), '图片太大了，换一张小点的'],
+    ['R-3: a JPEG with no frame header anywhere', () => file(jpegFar(0, 0, 300 * 1024), 'nosize.jpg', 'image/jpeg'), '这张图打不开'],
   ])('%s: refused before any decode, red border + shake, message in an alert', async (_, make, message) => {
     await open()
     await choose(make())
