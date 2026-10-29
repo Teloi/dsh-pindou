@@ -15,6 +15,7 @@ import { App } from '../src/client/ui/App.tsx'
 import { EnvContext, type Env } from '../src/client/ui/context.tsx'
 import { makeTranslate, SafeStore, STORAGE_KEY, type StorageLike } from '../src/core/index.ts'
 import { MAX_BYTES } from '../src/core/image-sniff.ts'
+import { PALETTE } from '../src/core/palette.ts'
 import * as chunk from '../src/client/picture.tsx'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -375,6 +376,34 @@ describe('picture page (spec §18.2)', () => {
     expect(chunk.PICTURE_STRINGS.en.svg).toBe('SVG isn\'t supported yet. Try a PNG or JPG.')
     expect(chunk.PICTURE_STRINGS.zh.transparent).toBe('这张图几乎是透明的，换一张试试')
     expect(chunk.PICTURE_STRINGS.en.transparent).toBe('This image is almost fully transparent. Try another one.')
+  })
+
+  it('I3: a new size keeps the old preview (drawing and label) until its own cells are ready; then both change together', async () => {
+    const draws: Array<{ size: number, cells: number }> = []
+    const kit = { palette: PALETTE.map(c => c.hex), draw: (_c: HTMLCanvasElement, b: chunk.PictureBoard) => { draws.push({ size: b.size, cells: b.cells.length }) }, icon: null }
+    // as the panel does: the dropped file is handed over once, then cleared
+    const page = (f: File | null): void => {
+      root.render(<chunk.PicturePage kit={kit} lang="zh" file={f} onTaken={() => { page(null) }} onStart={() => undefined} />)
+    }
+    await act(async () => { page(file(pngHead(512, 384), 'a.png', 'image/png')) })
+    await flush(50)
+    await flush(chunk.PREVIEW_DEBOUNCE_MS + 80)
+    const prev = host.querySelector<HTMLCanvasElement>('.pd-pic-prev canvas')!
+    const label16 = prev.getAttribute('aria-label')!
+    expect(label16).toMatch(/^16×16 预览，共 \d+ 颗豆$/)
+    expect(draws).toEqual([{ size: 16, cells: 256 }])
+    await act(async () => { [...host.querySelectorAll<HTMLButtonElement>('[aria-pressed]')].find(b => b.textContent === '24×24')!.click() })
+    // the button is pressed at once, the preview is still the 16×16 one, label and all
+    expect([...host.querySelectorAll('[aria-pressed=true]')].map(b => b.textContent)).toContain('24×24')
+    expect(draws.every(d => d.cells === d.size * d.size)).toBe(true)
+    expect(draws).toHaveLength(1)
+    expect(prev.getAttribute('aria-label')).toBe(label16)
+    await flush(chunk.PREVIEW_DEBOUNCE_MS + 40)
+    expect(draws.at(-1)).toEqual({ size: 24, cells: 576 })
+    expect(draws.every(d => d.cells === d.size * d.size)).toBe(true)
+    const label24 = prev.getAttribute('aria-label')!
+    expect(label24).toMatch(/^24×24 预览，共 \d+ 颗豆$/)
+    expect(label24).not.toBe(label16.replace('16×16', '24×24'))
   })
 
   it('a decoder failure: 这张图打不开', async () => {

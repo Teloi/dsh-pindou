@@ -145,7 +145,10 @@ export function PicturePage(props: PictureProps): ReactElement {
   const [pic, setPic] = useState<Picture | null>(null)
   const [view, setView] = useState<View>({ cx: 0, cy: 0, zoom: 1 })
   const [opts, setOpts] = useState<QuantizeOptions>(DEFAULT_OPTIONS)
-  const [cells, setCells] = useState<number[] | null>(null)
+  // the preview's board: its size and cells change together, so a new size never redraws the old
+  // cells (design I3); until the new ones are ready the old preview stays, label and all
+  const [shown, setShown] = useState<PictureBoard | null>(null)
+  const cells = shown?.cells ?? null
   const [error, setError] = useState<SniffError | null>(null)
   // What the alert says. Cleared first and written a moment later, so the same error twice in
   // a row is announced again (spec v2.0 23:40; design S5). `tries` makes each error a new one.
@@ -189,13 +192,13 @@ export function PicturePage(props: PictureProps): ReactElement {
     const r = await readPicture(f)
     if (mine !== seq.current) return
     if ('error' in r) {
-      setPic(null); setCells(null); setError(r.error); setTries(n => n + 1); setShake(true)
+      setPic(null); setShown(null); setError(r.error); setTries(n => n + 1); setShake(true)
       return
     }
     const { width: w, height: h } = r.pixels
     setError(null)
     setPic(r)
-    setCells(null)
+    setShown(null)
     setView({ cx: w / 2, cy: h / 2, zoom: 1 })
   }, [])
 
@@ -242,15 +245,15 @@ export function PicturePage(props: PictureProps): ReactElement {
     if (!pic) return
     let raf = 0
     const id = setTimeout(() => {
-      raf = requestAnimationFrame(() => { setCells(quantize(pic.pixels, cropOf(pic.pixels.width, pic.pixels.height, view), opts, palette)) })
+      raf = requestAnimationFrame(() => { setShown({ size: opts.size, cells: quantize(pic.pixels, cropOf(pic.pixels.width, pic.pixels.height, view), opts, palette) }) })
     }, PREVIEW_DEBOUNCE_MS)
     return () => { clearTimeout(id); cancelAnimationFrame(raf) }
   }, [pic, view, opts, palette])
 
   useEffect(() => {
     const c = preview.current
-    if (c && cells) draw(c, { size: opts.size, cells }, c.clientWidth || 160)
-  }, [cells, draw, opts.size])
+    if (c && shown) draw(c, shown, c.clientWidth || 160)
+  }, [shown, draw])
 
   const pick = (): void => { input.current?.click() }
   const move = (dx: number, dy: number, zoom = 1): void => {
@@ -339,7 +342,7 @@ export function PicturePage(props: PictureProps): ReactElement {
           onChange={(e) => { const z = Number(e.currentTarget.value); move(0, 0, z / view.zoom) }} />
       </label>
       <div className="pd-pic-prev">
-        <canvas ref={preview} role="img" aria-label={t('preview', { n, beads })} aria-busy={cells === null} />
+        <canvas ref={preview} role="img" aria-label={t('preview', { n: shown?.size ?? n, beads })} aria-busy={cells === null} />
         <p>{simple ? <span className="pd-pic-err" id="pd-pic-simple">{t('tooSimple')}</span> : null}</p>
       </div>
       <div className="pd-pic-row">
@@ -363,7 +366,7 @@ export function PicturePage(props: PictureProps): ReactElement {
         <span>{t('removeBg')}</span><i className="pd-pic-sw" aria-hidden />
       </button>
       <div className="pd-pic-acts">
-        <button type="button" className="pd-btn" onClick={() => { seq.current++; setPic(null); setCells(null); setError(null); setTimeout(() => { zone.current?.focus() }, 0) }}>{t('another')}</button>
+        <button type="button" className="pd-btn" onClick={() => { seq.current++; setPic(null); setShown(null); setError(null); setTimeout(() => { zone.current?.focus() }, 0) }}>{t('another')}</button>
         <button type="button" className="pd-btn pd-primary" disabled={cells === null || simple} aria-describedby={simple ? 'pd-pic-simple' : undefined}
           onClick={() => {
             // quantise again now: the debounced preview may be one change behind
