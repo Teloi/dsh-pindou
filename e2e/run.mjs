@@ -191,6 +191,60 @@ async function playFirstTemplate(p) {
 }
 const fakeStatus = route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ configured: false, route: 'host', model: 'deepseek-v4-flash', verified: true }) })
 const panelBox = p => p.locator('.pd-root').boundingBox()
+/** N8: the done/result card sits under the board in the flow, swapped for tools + palette + footer. */
+const cardFlowInfo = () => {
+  const card = document.querySelector('.pd-under > .pd-overlay')
+  const board = document.querySelector('.pd-board')
+  const root = document.querySelector('.pd-root')
+  if (!card || !board) return null
+  const c = card.getBoundingClientRect(), b = board.getBoundingClientRect(), r = root.getBoundingClientRect()
+  const visible = [...document.querySelectorAll('.pd-tools, .pd-palette, .pd-foot')].filter(e => getComputedStyle(e).visibility !== 'hidden').map(e => e.className)
+  const btns = [...card.querySelectorAll('button')].map((x) => { const q = x.getBoundingClientRect(); return { h: Math.round(q.height), w: Math.round(q.width), lines: Math.round(q.height / parseFloat(getComputedStyle(x).lineHeight || '16')), right: q.right, left: q.left } })
+  return {
+    swapped: !!document.querySelector('.pd-under.pd-swapped'),
+    belowBoard: c.top >= b.bottom - 1, inRoot: c.left >= r.left - 1 && c.right <= r.right + 1,
+    visible, minBtn: Math.min(...btns.map(x => x.h)), btnsInCard: btns.every(x => x.left >= c.left - 1 && x.right <= c.right + 1),
+    card: [Math.round(c.left), Math.round(c.top), Math.round(c.width), Math.round(c.height)],
+  }
+}
+const cardFlow = () => {
+  const card = document.querySelector('.pd-under > .pd-overlay')
+  const board = document.querySelector('.pd-board')
+  const root = document.querySelector('.pd-root')
+  if (!card || !board || !document.querySelector('.pd-under.pd-swapped')) return false
+  const c = card.getBoundingClientRect(), b = board.getBoundingClientRect(), r = root.getBoundingClientRect()
+  const hiddenTools = [...document.querySelectorAll('.pd-tools, .pd-palette, .pd-foot')].every(e => getComputedStyle(e).visibility === 'hidden')
+  const btns = [...card.querySelectorAll('button')].map(x => x.getBoundingClientRect())
+  return hiddenTools && c.top >= b.bottom - 1 && c.left >= r.left - 1 && c.right <= r.right + 1
+    && btns.every(q => q.height >= 32 && q.left >= c.left - 1 && q.right <= c.right + 1)
+}
+/** N6: the real hit box of a control (probe elementFromPoint around it, pseudo-element extensions included). */
+const hitBox = (p, sel) => p.evaluate((q) => {
+  const el = document.querySelector(q)
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
+  for (let y = Math.floor(r.top - 20); y <= r.bottom + 20; y++) {
+    for (let x = Math.floor(r.left - 20); x <= r.right + 20; x++) {
+      const h = document.elementFromPoint(x + 0.5, y + 0.5)
+      if (h && (h === el || el.contains(h))) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y) }
+    }
+  }
+  return { w: x1 - x0 + 1, h: y1 - y0 + 1 }
+}, sel)
+const big = b => !!b && b.w >= 32 && b.h >= 32
+const progressText = p => p.locator('.pd-status .pd-r').first().textContent()
+/** Place `n` correct beads by following the ghost guide. */
+async function placeBeads(p, n) {
+  let placed = 0
+  const swatches = p.locator('.pd-sw:not(.pd-dim)')
+  for (let k = 0; k < await swatches.count() && placed < n; k++) {
+    await swatches.nth(k).click()
+    const spots = await p.evaluate(() => [...document.querySelectorAll('.pd-cell.pd-hot')].map((c) => { const r = c.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] }))
+    for (const [x, y] of spots) { if (placed >= n) break; await p.mouse.click(x, y); placed++ }
+  }
+  await p.waitForTimeout(200)
+}
 
 try {
   // ── A. desktop light: busy pill above the composer, entry busy dot ──
@@ -222,6 +276,8 @@ try {
   check('pill is right-aligned within the composer', geo.pill[2] <= geo.card[2] && geo.pill[0] >= geo.card[0])
   check('pill is not clipped by any ancestor', !geo.clipped && geo.hitInside)
   check('pill is announced politely', await pill.getAttribute('aria-live') === 'polite')
+  const pillX = await hitBox(p, '.pd-pill .pd-pill-x')
+  check('N6 pill × hit area ≥ 32 × 32', big(pillX), JSON.stringify(pillX))
   await shot(p, 'pill-light', { clip: { x: Math.max(0, geo.card[0] - 40), y: Math.max(0, geo.pill[1] - 40), width: Math.min(geo.vw, geo.card[2] - geo.card[0] + 80), height: geo.card[3] - geo.pill[1] + 60 } })
   await shot(p, 'busy-overview-light')
 
@@ -248,6 +304,8 @@ try {
     })
     check('I8 coach card sits in the lower half of the board', !!cg && cg.inBox && cg.top >= (cg.boardTop + cg.boardBottom) / 2 - 1 && cg.bottom <= cg.boardBottom, JSON.stringify(cg))
     check('I8 coach card takes focus on its primary button', cg?.focus === '开始拼', cg?.focus)
+    const coachHit = await hitBox(p, '.pd-overlay.pd-coach button')
+    check('N6 coach 「开始拼」 hit area ≥ 32 × 32', big(coachHit), JSON.stringify(coachHit))
     await shot(p, 'coach-light')
     await coach.first().click()
     await p.waitForTimeout(300)
@@ -317,7 +375,8 @@ try {
   check('I5 “done” card appears ~260 ms after the last bead, no confetti yet', tm.done - tm.up >= 200 && tm.done - tm.up < 700 && tm.confetti === 0, `done +${Math.round(tm.done - tm.up)}ms`)
   for (let i = 0; i < 4; i++) { await p.waitForTimeout(300); await frame() }
   await shot(p, 'complete-light')
-  const iron = p.locator('button.pd-warm[data-primary], .pd-foot button.pd-warm').first()
+  check('N8 done card replaces tools + palette in the flow, not over them', await p.evaluate(cardFlow), JSON.stringify(await p.evaluate(cardFlowInfo)))
+  const iron = p.locator('.pd-overlay button.pd-warm[data-primary]')
   await iron.click()
   for (let i = 0; i < 6; i++) { await p.waitForTimeout(250); await frame() }
   await p.waitForTimeout(1200)
@@ -433,7 +492,9 @@ try {
   const beadsAfter = await p.locator('.pd-board .pd-bead').count()
   check('A4 undo after clear restores the board', beadsBefore > 0 && beadsAfter === beadsBefore, `${beadsBefore} → ${beadsAfter}`)
   const ft = await focusDesc(p)
-  check('I2 focus after toast undo is not <body>', ft !== 'body', ft)
+  // the restored board is complete, so the done card comes back and, as spec §4.2 says, takes focus on its primary
+  const doneBack = await p.locator('.pd-under.pd-swapped [data-primary]').count() === 1
+  check('I2/N4 focus after toast undo is on the board, or on the done card it brings back', doneBack ? ft.includes('熨烫') : ft.startsWith('div[role=grid]'), `${ft} done=${doneBack}`)
 
   // A4: AI failure paths through the real host route (fake LLM misbehaves on purpose)
   const aiAgain = async (prompt) => {
@@ -460,6 +521,8 @@ try {
   const status429 = (await gen429).status()
   const rate = await p.evaluate(() => document.querySelector('.pd-card.pd-err')?.textContent ?? '')
   check('A4 upstream 429 → host answers 429 → rate-limit error card with retry', status429 === 429 && /太快啦/.test(rate) && await p.locator('.pd-card.pd-err button').count() === 1, `HTTP ${status429} · ${rate}`)
+  const fr = await focusDesc(p)
+  check('N4 an AI failure puts focus on 重试', fr.includes('重试'), fr)
   await shot(p, 'ai-429-error', undefined, OUT)
 
   // ── E. wide panel (split view) ──
@@ -592,6 +655,9 @@ try {
     if (label === 'linux') {
       check('I4 (web/linux: settings shortcut unbound) no fake button, 「重新检测」 is primary', st.buttons.join() === '重新检测*,先玩模板', st.buttons.join())
     } else {
+      const steps = await nc.locator('.pd-nocfg').textContent()
+      const keycaps = /按 (\S+) 打开 DSH 设置/.exec(steps ?? '')?.[1] ?? ''
+      check('N2 (web/macOS) the settings shortcut reads as one keycap run (e.g. ⌥⌘,), not 「⌥,⌘,,」', /^[⌃⌥⇧⌘]+,$/.test(keycaps), keycaps)
       check('I4 (web/macOS) primary 「打开 DSH 设置」, 「先玩模板」 ghost', st.buttons[0] === '打开 DSH 设置*' && st.buttons.at(-1) === '先玩模板', st.buttons.join())
       await nc.locator('.pd-nocfg button', { hasText: '打开 DSH 设置' }).click()
       const opened = await nc.locator('[data-shortcut-modal=settings]').waitFor({ timeout: 5000 }).then(() => true, () => false)
@@ -637,6 +703,131 @@ try {
   check('en-US not-configured card is in English', /Check again/.test(await e2.locator('.pd-nocfg').textContent()))
   await outShot(e2, 'en-not-configured-dark')
   await e2.context().close()
+
+  // ── J. design round 2 (r3): N1 same pattern resumes, N8 card in the flow, N9 dot, N10 dark rings ──
+  log('J. round-3 fixes')
+  const j = await newPage({ viewport: { width: 1280, height: 900 }, colorScheme: 'light' })
+  await startSession(j, '解释一下 package.json')
+  await openPanel(j)
+  await playFirstTemplate(j)
+  await placeBeads(j, 10)
+  const p10 = await progressText(j)
+  check('N1 setup: 10 correct beads on the first template', (p10 ?? '').startsWith('10/118'), p10)
+  await j.locator('.pd-head .pd-ib').first().click()
+  await j.waitForTimeout(300)
+  const cont = await hitBox(j, '.pd-view .pd-link')
+  check('N6 home 「继续上次」 hit area ≥ 32 × 32', big(cont), JSON.stringify(cont))
+  await j.locator('.pd-tpl').first().click()
+  await j.waitForTimeout(400)
+  const back = await progressText(j)
+  check('N1 home → same template keeps the board (10/118), no coach, no toast', (back ?? '').startsWith('10/118') && await j.locator('.pd-overlay.pd-coach, .pd-toast').count() === 0, back)
+  await outShot(j, 'n1-same-template-resumes')
+  await j.locator('.pd-head .pd-ib').first().click()
+  await j.waitForTimeout(300)
+  await j.locator('.pd-tpl').nth(2).click()
+  await j.waitForTimeout(400)
+  const c2 = j.locator('.pd-overlay.pd-coach button')
+  if (await c2.count()) { await c2.first().click(); await j.waitForTimeout(200) }
+  const toastTxt = await j.locator('.pd-toast').textContent().catch(() => '')
+  check('N1 a different template starts a new game with an undo toast', /已开始新的一局/.test(toastTxt ?? '') && (await progressText(j) ?? '').startsWith('0/'), toastTxt)
+  await outShot(j, 'n1-other-template-toast')
+  const undoHit = await hitBox(j, '.pd-toast button')
+  check('N6 toast 「撤销」 hit area ≥ 32 × 32', big(undoHit), JSON.stringify(undoHit))
+  await j.locator('.pd-toast button').click()
+  await j.waitForTimeout(300)
+  const restored = await progressText(j)
+  const fj = await focusDesc(j)
+  check('N1 撤销 in the toast brings the first game back (10/118), focus on the board (N4)', (restored ?? '').startsWith('10/118') && fj.startsWith('div[role=grid]'), `${restored} · ${fj}`)
+  // ironed → same template = a new game; Ctrl/⌘+Z brings the ironed piece back
+  await j.locator('.pd-foot button.pd-warm').click()
+  await j.waitForTimeout(1800)
+  check('N1 setup: ironed with the result card', await j.locator('.pd-overlay.pd-result, .pd-under > .pd-overlay').count() === 1)
+  // N8 sweep with the result card up: in the flow, no overlap, 32 px actions, no wrapped labels
+  for (const px of [300, 320, 480, 900]) {
+    await j.evaluate(v => { document.querySelector('.pd-root').style.width = `${v}px` }, px)
+    await j.waitForTimeout(350)
+    const info = await j.evaluate(cardFlowInfo)
+    check(`N8 panel ${px}px: result card in the flow, no overlap, actions ≥ 32 px`, await j.evaluate(cardFlow), JSON.stringify(info))
+    const b = await j.locator('.pd-root').boundingBox()
+    await outShot(j, `n8-result-${px}`, b ? { clip: { x: b.x, y: b.y, width: b.width, height: Math.min(b.height, 900 - b.y) } } : undefined)
+  }
+  await j.evaluate(() => { document.querySelector('.pd-root').style.width = '' })
+  await j.locator('.pd-head .pd-ib').first().click()
+  await j.waitForTimeout(300)
+  await j.locator('.pd-tpl').first().click()
+  await j.waitForTimeout(400)
+  const fresh = await progressText(j)
+  check('N1 ironed → same template starts a new game (0/118), no toast', (fresh ?? '').startsWith('0/118') && await j.locator('.pd-toast').count() === 0, fresh)
+  await outShot(j, 'n1-ironed-same-template-new')
+  await j.locator('[role=grid]').focus()
+  await j.keyboard.press('ControlOrMeta+z')
+  await j.waitForTimeout(400)
+  check('N1 Ctrl/⌘+Z after that brings the ironed piece back with its result card', await j.locator('.pd-under.pd-swapped').count() === 1 && (await progressText(j) ?? '').startsWith('10/118'))
+  // N10: dark ghost rings ≥ 3:1 against the board
+  await j.locator('.pd-head .pd-ib').first().click()
+  await j.waitForTimeout(300)
+  await j.emulateMedia({ colorScheme: 'dark' })
+  await j.waitForTimeout(500)
+  const ringsChecked = []
+  for (let t = 0; t < await j.locator('.pd-tpl').count(); t++) {
+    await j.locator('.pd-tpl').nth(t).click()
+    await j.waitForTimeout(300)
+    const cc = j.locator('.pd-overlay.pd-coach button')
+    if (await cc.count()) { await cc.first().click(); await j.waitForTimeout(150) }
+    ringsChecked.push(...await j.evaluate(() => {
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- runs inside the page, no outer scope there
+      const lum = (c) => { const ch = c.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2] }
+      const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+      const board = getComputedStyle(document.querySelector('.pd-board')).backgroundColor
+      const seen = new Map()
+      for (const cell of document.querySelectorAll('.pd-cell.pd-g')) {
+        const shadow = getComputedStyle(cell, '::after').boxShadow
+        const ring = /rgba?\([^)]*\)/.exec(shadow)?.[0]
+        const gc = cell.style.getPropertyValue('--pd-gc')
+        if (!seen.has(gc)) seen.set(gc, { gc, ring, board, ratio: ring ? Math.round(ratio(ring, board) * 100) / 100 : 0 })
+      }
+      return [...seen.values()]
+    }))
+    if (t === 0) await outShot(j, 'n10-dark-ghosts')
+    await j.locator('.pd-head .pd-ib').first().click()
+    await j.waitForTimeout(200)
+  }
+  const ringMap = new Map(ringsChecked.map(r => [r.gc, r]))
+  const weak = [...ringMap.values()].filter(r => r.ratio < 3)
+  check(`N10 dark ghost rings ≥ 3:1 on the board for every colour in the templates (${ringMap.size} colours, min ${Math.min(...[...ringMap.values()].map(r => r.ratio))})`, ringMap.size >= 8 && weak.length === 0, JSON.stringify(weak.slice(0, 4)))
+  await j.emulateMedia({ colorScheme: 'light' })
+  // N9: close the tab (or collapse the sidebar) while generating → the entry dot lights; opening clears it
+  // the busy dot (session still running) wins over the progress dot by design; wait for the turn to end
+  await j.locator('.pd-entry.pd-busy').waitFor({ state: 'detached', timeout: 60000 })
+  for (const how of ['close', 'collapse']) {
+    await j.locator('.pd-big', { hasText: 'AI' }).click()
+    await j.waitForTimeout(1700)
+    let release
+    const gate = new Promise(r => { release = r })
+    await j.route('**/api/pindou.generate', async (route) => { await gate; await route.continue() })
+    await j.locator('.pd-ai-box textarea').fill(how === 'close' ? '一只小鸭子' : '一朵小花')
+    await j.locator('.pd-ai-box button.pd-primary:not([disabled])').click()
+    await j.waitForTimeout(300)
+    if (how === 'close') await j.locator('[data-dockkit-strip] button[aria-label="关闭"]').first().click()
+    else await j.getByRole('button', { name: '收起右侧边栏' }).first().click()
+    await j.waitForTimeout(500)
+    const done = j.waitForResponse(r => r.url().includes('pindou.generate'), { timeout: 60000 })
+    release()
+    await done
+    await j.unroute('**/api/pindou.generate')
+    await j.waitForTimeout(800)
+    const lit = await j.locator('.pd-entry.pd-has-progress').count()
+    const entryCls = await j.locator('.pd-entry').getAttribute('class')
+    check(`N9 (${how}) result lands while the panel is ${how === 'close' ? 'closed' : 'collapsed'} → entry dot lit`, lit === 1, `dot=${lit} ${entryCls}`)
+    await outShot(j, `n9-${how}-dot`, { clip: await j.locator('.pd-entry').boundingBox().then(b => ({ x: Math.max(0, b.x - 120), y: Math.max(0, b.y - 20), width: 280, height: b.height + 40 })) })
+    await j.locator('.pd-entry').click()
+    await j.locator('.pd-root').waitFor()
+    await j.waitForTimeout(600)
+    check(`N9 (${how}) opening the panel clears the dot and shows the new board`, await j.locator('.pd-entry.pd-has-progress').count() === 0 && await j.locator('.pd-board').count() === 1)
+    await j.locator('.pd-head .pd-ib').first().click()
+    await j.waitForTimeout(300)
+  }
+  await j.context().close()
 
   check('no page errors from the plugin', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
   // ::-webkit-scrollbar parts: the host scrollbar theme is meant to apply to .pd-scroll too
