@@ -3,7 +3,7 @@
 // it must stay self-contained (no imports, no closures over module scope).
 //
 // It reports:
-// - leaks:    host rules (selectors without a pd- class) that match our elements, with
+// - leaks:    host rules (any rule outside the plugin's own <style id="dsh-pindou-…">) that match our elements, with
 //             the properties they set (design I1: find what bleeds in, don't guess)
 // - icons:    every <svg>: rendered size and whether it carries .pd-i (B1)
 // - round:    every element drawn as a circle (border-radius ≥ 50%): its corner-shape (I1)
@@ -36,7 +36,7 @@ export function auditPanel() {
       if (rule.cssRules && !(rule instanceof CSSStyleRule)) { walk(rule.cssRules, sheet); continue }
       if (!(rule instanceof CSSStyleRule)) continue
       const sel = rule.selectorText
-      if (!sel || /\bpd-/.test(sel)) continue
+      if (!sel) continue
       for (const part of splitTop(sel)) {
         const base = part.replace(/::?(before|after|placeholder|selection|marker|-webkit-[\w-]+)\b/g, '').trim() || '*'
         let hit = null
@@ -52,6 +52,9 @@ export function auditPanel() {
     }
   }
   for (const sheet of document.styleSheets) {
+    // the plugin's own stylesheets (styles.ts, picture-styles.ts …); their class names ship short, so
+    // telling them apart by a `pd-` in the selector no longer works
+    if (sheet.ownerNode?.id?.startsWith('dsh-pindou-')) continue
     let rules
     try { rules = sheet.cssRules } catch { continue }
     walk(rules, sheet)
@@ -110,7 +113,7 @@ export function auditPanel() {
     const rect = el.getBoundingClientRect()
     const perLine = own.length / Math.max(1, n)
     if (n >= 3 && perLine < 2.5) wraps.push({ el: `${el.tagName.toLowerCase()}.${el.className}`, text: own.slice(0, 20), lines: n, width: Math.round(rect.width), why: 'one char per line' })
-    else if (el.closest('button') && !el.closest('.pd-tpl, .pd-big, .pd-ex, .pd-mi') && n > 1) wraps.push({ el: `${el.tagName.toLowerCase()}.${el.className}`, text: own.slice(0, 20), lines: n, width: Math.round(rect.width), why: 'button label wrapped' })
+    else if (el.closest('button') && !el.closest('.pd-tpl, .pd-big, .pd-mi') && n > 1) wraps.push({ el: `${el.tagName.toLowerCase()}.${el.className}`, text: own.slice(0, 20), lines: n, width: Math.round(rect.width), why: 'button label wrapped' })
     else if (rect.width > 0 && rect.width < fs * 1.5 && n > 1) wraps.push({ el: `${el.tagName.toLowerCase()}.${el.className}`, text: own.slice(0, 20), lines: n, width: Math.round(rect.width), why: 'squeezed' })
   }
 

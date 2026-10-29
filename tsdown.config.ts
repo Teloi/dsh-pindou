@@ -16,6 +16,7 @@ import { builtinModules } from 'node:module'
 import { defineConfig, type UserConfig } from 'tsdown'
 import pkg from './package.json' with { type: 'json' }
 import { asyncChunksPlugin, registrationBanner } from './scripts/async-chunks.ts'
+import { shortenClasses } from './scripts/css-classes.ts'
 import { shortenCssVars } from './scripts/css-vars.ts'
 import { aliasJsxRuntime } from './scripts/jsx-alias.ts'
 import { minifyCssModule } from './scripts/minify-css.ts'
@@ -78,6 +79,14 @@ const client: UserConfig = {
     transform(code: string, id: string) {
       if (!/\/src\/client\/[^?]*\.tsx?$/.test(id.replaceAll('\\', '/'))) return null
       const out = shortenCssVars(code)
+      return out === code ? null : { code: out, map: null }
+    },
+  }, {
+    // Class names, ids and keyframes ship under their short names too (scripts/css-classes.ts).
+    name: 'dsh-client-classes',
+    transform(code: string, id: string) {
+      if (!/\/src\/client\/[^?]*\.tsx?$/.test(id.replaceAll('\\', '/'))) return null
+      const out = shortenClasses(code)
       return out === code ? null : { code: out, map: null }
     },
   }, {

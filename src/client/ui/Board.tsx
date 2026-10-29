@@ -282,7 +282,7 @@ export function BoardView({ overlay }: { readonly overlay?: ReactNode }): ReactE
         aria-readonly={ironed}
         aria-rowcount={n}
         aria-colcount={n}
-        className={cx('pd-board', `pd-tool-${s.tool}`, kbd && 'pd-kbd', ironed && 'pd-ironed', !showGuide && 'pd-noguide')}
+        className={cx('pd-board', s.tool === 'pick' ? 'pd-tool-pick' : s.tool === 'erase' && 'pd-tool-erase', kbd && 'pd-kbd', ironed && 'pd-ironed', !showGuide && 'pd-noguide')}
         style={style}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

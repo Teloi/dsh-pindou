@@ -9,6 +9,7 @@
 // - package.json declares what awesome-dsh-hub and `dsh plugin add` need;
 // - no stray class prefixes or unscoped names leak into the shipped CSS;
 // - custom properties ship short (scripts/css-vars.ts): no long name left, none used undefined.
+// - class names, ids and keyframes ship short (scripts/css-classes.ts): no long `pd-…` name left.
 // - size, gzip at the zlib default level (what CDNs and `gzip` ship), each below 90%
 //   of its budget so there is always headroom for the next change:
 //     first screen  lib/client.js            ≤ 40 KB = 40,960 B (spec §10)
@@ -93,6 +94,13 @@ for (const { f, code } of shipped) {
     else if (!SHORT.has(name)) fail.push(`${f} uses var(${name}), which is neither a short name from scripts/css-vars.json nor a host token`)
     else if (!defined.has(name)) fail.push(`${f} uses var(${name}), which nothing that ships defines`)
   }
+}
+
+// Class names, ids and keyframes ship short too (scripts/css-classes.ts, one table: css-classes.json):
+// a long `pd-…` token left over would match no rule (or no element) in what ships.
+for (const { f, code } of shipped) {
+  const long = [...new Set(code.match(/(?<![\w$-])pd-[\w-]*\w/g) ?? [])]
+  if (long.length) fail.push(`${f} still has long class names (add them to scripts/css-classes.json): ${long.join(' ')}`)
 }
 
 function budget(label, bytes, limit) {

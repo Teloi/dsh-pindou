@@ -7,6 +7,7 @@ import { gzipSync } from 'node:zlib'
 import type { UserConfig } from 'tsdown'
 import { afterAll, describe, expect, it } from 'vitest'
 import { assertOnlyDynamicChunks, registrationBanner, rewriteDynamicImports } from '../scripts/async-chunks.ts'
+import { CSS_CLASSES } from '../scripts/css-classes.ts'
 import { CSS_VARS } from '../scripts/css-vars.ts'
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -137,10 +138,10 @@ describe('check:bundle on lazy chunks', () => {
 
   it('custom properties: a long name left over, an undefined short name, an unknown name or a host token without fallback fail', () => {
     const a = CSS_VARS['--pd-accent']!, b = CSS_VARS['--pd-border']!, c = CSS_VARS['--pd-c']!
-    const ok = checkBundle(libWith({ 'client.js': entry(`var s=\`.pd-root{${a}:red}.x{color:var(${a});width:var(--dsw-w,1px)}\`,k={"${c}":1},y=\`.y{color:var(${c})}\`;`) }))
+    const ok = checkBundle(libWith({ 'client.js': entry(`var s=\`.${CSS_CLASSES['pd-root']}{${a}:red}.x{color:var(${a});width:var(--dsw-w,1px)}\`,k={"${c}":1},y=\`.y{color:var(${c})}\`;`) }))
     expect(ok.out).toContain('bundle shape ok')
     const cases: [string, RegExp][] = [
-      [`.pd-root{--pd-accent:red}`, /long custom property names.*--pd-accent/],
+      [`.${CSS_CLASSES['pd-root']}{--pd-accent:red}`, /long custom property names.*--pd-accent/],
       [`.x{color:var(${b})}`, new RegExp(`var\\(${b}\\), which nothing that ships defines`)],
       [`.x{color:var(--zz)}`, /var\(--zz\), which is neither/],
       [`.x{color:var(--dsw-a)}`, /host token --dsw-a without a fallback/],
@@ -150,6 +151,20 @@ describe('check:bundle on lazy chunks', () => {
       expect(r.status, css).toBe(1)
       expect(r.out, css).toMatch(msg)
     }
+  })
+
+  it('class names: the committed lib ships short names only (scripts/css-classes.ts)', () => {
+    const shipped = ['client.js', 'client.picture.js'].map(f => readFileSync(join(ROOT, 'lib', f), 'utf8')).join('')
+    expect(shipped.match(/(?<![\w$-])pd-[\w-]*\w/g)).toBeNull()
+    expect(shipped).toContain(`.${CSS_CLASSES['pd-root']}{`)
+  })
+
+  it('a long class name left over fails; custom properties and data attributes are not class names', () => {
+    const r = checkBundle(libWith({ 'client.js': entry('var s=`.pd-board{color:red}`;') }))
+    expect(r.status).toBe(1)
+    expect(r.out).toMatch(/long class names.*pd-board/)
+    const ok = checkBundle(libWith({ 'client.js': entry('var s=`[data-pd-x]{color:red}`;') }))
+    expect(ok.out).toContain('bundle shape ok')
   })
 
   it('a JSX runtime call left in the (0,x.jsx)(…) form fails (scripts/jsx-alias.ts)', () => {
