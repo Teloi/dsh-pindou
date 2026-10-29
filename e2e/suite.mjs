@@ -337,11 +337,15 @@ const startCards = (lineCount, split) => [...document.querySelectorAll('.pd-star
   }
 })
 /**
- * I1/C1 at each panel width: titles never cut (Chinese on one line; English may wrap at a space), a
- * status line (需要新版 DSH / 加载失败) in full, other descriptions at most two whole lines, four
- * equal cards at least 64 px (72 px icon-on-top below 480): two rows of two below 560, one row from 560 (spec §18.4).
+ * I1/C1 at each panel width: titles never cut (Chinese on one line; English may wrap at a space, to
+ * at most two lines, at any width), descriptions and status lines (需要新版 DSH / 加载失败) never cut
+ * either: at most two whole lines, no ellipsis (b3 一: a clamped line's scrollHeight is past its
+ * clientHeight). Four equal cards at least 64 px (72 px icon-on-top below 480): two rows of two below
+ * 560, one row from 560 (spec §18.4). The widths include 320, 340, 361, 400 and 480, where the
+ * earlier English subtitles were clamped (b3 一).
  */
-async function cardsFit(p, label, widths = [300, 360, 420, 640, 900], shots = []) {
+const CARD_WIDTHS = [300, 320, 340, 360, 361, 400, 420, 480, 640, 900]
+async function cardsFit(p, label, widths = CARD_WIDTHS, shots = []) {
   const all = []
   for (const px of widths) {
     await p.evaluate(v => { document.querySelector('.pd-root').style.width = `${v}px` }, px)
@@ -350,11 +354,11 @@ async function cardsFit(p, label, widths = [300, 360, 420, 640, 900], shots = []
     const hs = cards.map(c => c.h), ws = cards.map(c => c.w)
     const min = px < 480 ? 72 : 64
     const cut = cards.filter(c => c.titleCut || c.titleSplit.length > 0 || (label.startsWith('zh') && c.titleLines !== 1) || c.titleLines > 2
-      || (c.status ? c.subCut : c.subShown > 2 || (c.subCut && c.clamp !== '2')))
+      || c.subCut || c.subLines > 2)
     const rows = px >= 560 ? 1 : 2
     const ok = cards.length === 4 && cut.length === 0 && Math.max(...hs) - Math.min(...hs) <= 1 && Math.max(...ws) - Math.min(...ws) <= 1
       && Math.min(...hs) >= min && new Set(cards.map(c => c.top)).size === rows
-    check(`I1/C1 (${label}) panel ${px}px: card titles whole (wrapped only at spaces), status line whole, descriptions ≤ 2 lines, four equal cards ≥ ${min}px in ${rows} row${rows > 1 ? 's' : ''}`, ok, JSON.stringify(cut.length ? cut : cards.map(c => [c.w, c.h, c.titleLines, c.subLines, c.subShown])))
+    check(`I1/C1 (${label}) panel ${px}px: card titles whole (wrapped only at spaces), descriptions and status lines whole (≤ 2 lines, no ellipsis), four equal cards ≥ ${min}px in ${rows} row${rows > 1 ? 's' : ''}`, ok, JSON.stringify(cut.length ? cut : cards.map(c => [c.w, c.h, c.titleLines, c.subLines, c.subShown])))
     all.push({ px, cards })
     if (shots.includes(px)) await outShot(p, `c1-home-${label}-${px}`, { clip: await p.locator('.pd-start').boundingBox() })
   }
@@ -1581,6 +1585,12 @@ try {
   check('en-US panel is labelled “Bead Break”', await e1.locator('.pd-root').getAttribute('aria-label') === 'Bead Break')
   await outShot(e1, 'en-home')
   await cardsFit(e1, 'en', undefined, [300, 360, 640])
+  // counter-proof (b3 一): the cut rule sees a clamped subtitle (a long one put in for a moment at 300 px)
+  await e1.evaluate(() => { document.querySelector('.pd-root').style.width = '300px'; const d = document.querySelector('.pd-start .pd-big b + span'); d.dataset.was = d.textContent; d.textContent = 'Blank board, anything goes, every bead wherever you like' })
+  await e1.waitForTimeout(300)
+  const clamped = (await e1.evaluate(`(${startCards})(${lines}, ${splitWords})`))[0]
+  await e1.evaluate(() => { const d = document.querySelector('.pd-start .pd-big b + span'); d.textContent = d.dataset.was; delete d.dataset.was; document.querySelector('.pd-root').style.width = '' })
+  check('b3 一 counter-proof: a subtitle past two lines is caught as cut (scrollHeight > clientHeight)', clamped.subCut && clamped.subShown === 2, JSON.stringify(clamped))
   await playFirstTemplate(e1)
   await outShot(e1, 'en-play')
   await e1.locator('.pd-head .pd-ib').first().click()
