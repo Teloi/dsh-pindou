@@ -9,6 +9,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { assertOnlyDynamicChunks, registrationBanner, rewriteDynamicImports } from '../scripts/async-chunks.ts'
 import { CSS_CLASSES } from '../scripts/css-classes.ts'
 import { CSS_VARS } from '../scripts/css-vars.ts'
+import { DAILY_DEFS } from '../src/core/daily.ts'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const tmp: string[] = []
@@ -178,6 +179,15 @@ describe('check:bundle on lazy chunks', () => {
     expect(r.out).toMatch(/long class names.*pd-board/)
     const ok = checkBundle(libWith({ 'client.js': entry('var s=`[data-pd-x]{color:red}`;') }))
     expect(ok.out).toContain('bundle shape ok')
+  })
+
+  it('F1: a daily pattern in the first screen (or any chunk but works) fails; in client.works.js it is fine', () => {
+    const rows = DAILY_DEFS[0]!.rows.map(row => `"${row}"`).join(',')
+    const r = checkBundle(libWith({ 'client.js': entry(`var d=[${rows}];`) }))
+    expect(r.status).toBe(1)
+    expect(r.out).toMatch(/client\.js carries daily patterns \(carrot\)/)
+    const half = DAILY_DEFS[0]!.rows.slice(0, 8).map(row => `"${row}"`).join(',')
+    expect(checkBundle(libWith({ 'client.js': entry(`var d=[${half}];`) })).out).toContain('bundle shape ok')
   })
 
   it('a JSX runtime call left in the (0,x.jsx)(…) form fails (scripts/jsx-alias.ts)', () => {

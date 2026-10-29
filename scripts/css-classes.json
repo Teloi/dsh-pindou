@@ -146,5 +146,9 @@
   "pd-w-in": "pdep",
   "pd-wclose": "pdeq",
   "pd-wdel": "pder",
-  "pd-wmeta": "pdes"
+  "pd-wmeta": "pdes",
+  "pd-wday": "pdet",
+  "pd-wdaily": "pdeu",
+  "pd-wgo": "pdev",
+  "pd-wtag": "pdew"
 }
