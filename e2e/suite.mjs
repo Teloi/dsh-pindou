@@ -438,6 +438,8 @@ async function ringPixels(k, codes) {
   })
 }
 
+/** The dark board's lowest median ring ray at device scale 1, as measured (design note: reference only, not a pass line). */
+const DARK_RING_REF = 2.98
 /** Both I6 runs (all colours but the selected one, then that one with another selected): every median ray ≥ 3:1, at 1.5px. */
 async function ringPixelCheck(k, scheme, pick) {
   const rows = await ringPixels(k, '0123456789abcdef'.replace('4', ''))
@@ -447,7 +449,8 @@ async function ringPixelCheck(k, scheme, pick) {
   const low = Math.min(...rows.map(x => x.median))
   // I6 is the light board (its ring was 1px); the dark one has been 1.5px since N10 and is recorded for reference
   if (scheme === 'light') check(`I6/C3 light board at device scale 1: 1.5px rings, the median ray of every colour ≥ 3:1 (lowest ${low})`, rows.length === 16 && rows.every(x => x.width === 1.5 && x.median >= 3), JSON.stringify(rows.filter(x => x.width !== 1.5 || x.median < 3).slice(0, 6)))
-  else log(`    I6 reference: dark board at device scale 1, 1.5px rings, lowest median ray ${low}`, JSON.stringify(rows.filter(x => x.median < 3)))
+  // the dark board is a measured reference, pinned so it cannot slip unnoticed (b3 S5): 2.98 on 2b7e158 and since
+  else check(`b3 S5 dark board at device scale 1: 1.5px rings, the lowest median ray stays at the 2.98 reference or above (lowest ${low})`, rows.length === 16 && rows.every(x => x.width === 1.5) && low >= DARK_RING_REF, JSON.stringify(rows.filter(x => x.median < 3)))
   writeFileSync(join(OUT, 'audit', `o3-ring-pixels-1x-${scheme}.json`), `${JSON.stringify(rows, null, 2)}\n`)
   if (SELFCHECK) copyFileSync(join(OUT, 'audit', `o3-ring-pixels-1x-${scheme}.json`), join(SELFCHECK, `o3-ring-pixels-1x-${scheme}.json`))
 }
