@@ -805,6 +805,53 @@ describe('b2 D-I1: a picture loaded from a drop or paste (I4, the other path)', 
   })
 })
 
+describe('spec 00:58: refused drops and failed loads', () => {
+  const png = (): File => file(pngHead(600, 400), 'p.png', 'image/png')
+  it('a picture is loaded: a non-image dropped on the panel keeps it, and the alert says why', async () => {
+    const { rootEl } = await panel(ready())
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-crop')).not.toBeNull() })
+    const crop = host.querySelector('.pd-pic-crop')
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])) })
+    await flush(20)
+    expect(await alertSays()).toBe('这不是图片')
+    // the same picture, the same crop frame: nothing reloaded or reset
+    expect(host.querySelector('.pd-pic-crop')).toBe(crop)
+    expect(host.querySelector('.pd-pic-drop')).toBeNull()
+    expect(bitmap).toHaveBeenCalledTimes(1)
+    // an SVG is refused with its own message, the picture still stays
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [svgFile()])) })
+    await flush(20)
+    expect(await alertSays()).toBe('暂不支持 SVG，换成 PNG 或 JPG 试试')
+    expect(host.querySelector('.pd-pic-crop')).toBe(crop)
+    // the next good picture replaces it and the alert empties
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    await vi.waitFor(() => { expect(bitmap).toHaveBeenCalledTimes(2) })
+    expect(await alertSays()).toBe('')
+    expect(host.querySelector('.pd-pic-crop')).not.toBeNull()
+  })
+
+  it('a picture dropped while the chunk loads, then the load fails: the retry opens an empty page', async () => {
+    const { mod, calls } = gate()
+    const { rootEl, store } = await panel(mod)
+    await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [png()])) })
+    expect(store.getSnapshot().mode).toBe('picture')
+    expect(calls).toHaveLength(1)
+    await act(async () => { calls[0]!.reject(new Error('net::ERR_FAILED')) })
+    await flush()
+    expect(host.querySelector<HTMLElement>('.pd-lazy')?.dataset['lazy']).toBe('failed')
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-lazy button')!.click() })
+    await act(async () => { calls[1]!.resolve(chunk) })
+    await flush(20)
+    expect(host.querySelector('.pd-pic-drop')).not.toBeNull()
+    expect(host.querySelector('.pd-pic-crop')).toBeNull()
+    expect(bitmap).not.toHaveBeenCalled()
+    // and from the home card after a failure, the same
+    await act(async () => { store.go('home') })
+    expect(host.querySelector('.pd-pic-crop')).toBeNull()
+  })
+})
+
 describe('b2 D-C1: in both degraded states a pasted picture is ignored like a dropped one', () => {
   it('load failed: paste on the start page and on the failed page does nothing and loads nothing', async () => {
     const { mod, calls } = gate()

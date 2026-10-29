@@ -219,6 +219,8 @@ export function App(): ReactElement {
   const status = useLazy(picture)
   const pictures = status !== 'unsupported' && status !== 'failed'
   const [dropped, setDropped] = useState<Blob | null>(null)
+  // a picture dropped while the chunk was loading goes when the load fails: a retry opens an empty page (spec 00:58)
+  if (status === 'failed' && dropped) setDropped(null)
   const taken = useCallback(() => { setDropped(null) }, [])
   const take = useCallback((file: File | undefined): void => {
     if (!file) return

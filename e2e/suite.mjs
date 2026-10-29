@@ -927,6 +927,19 @@ try {
     await q.waitForTimeout(800) // DSH adds a dropped file's card within a frame or two; give it far longer
     const panelCards = await q.evaluate(hostFileCards, 'ball.png')
     check('T1 a picture dropped on the panel (on the board) opens the page with it; the host never sees the drop (no DSH attachment)', dropped.dropPrevented && dropped.overPrevented && dropped.hostSaw.length === 0 && panelCards === 0, JSON.stringify({ ...dropped, panelCards }))
+    // spec 00:58 rule 1: a picture is loaded, a non-image dropped on the panel is refused, the picture stays, the alert says why
+    const errBox = () => q.evaluate(() => {
+      const e = document.querySelector('#pd-pic-err')
+      return e ? { h: Math.round(e.getBoundingClientRect().height), text: e.textContent } : null
+    })
+    const quiet = await errBox()
+    await q.locator('.pd-pic-crop').evaluate(e => { e.dataset.e2eMark = '1' })
+    const refused = await q.evaluate(dropFile, ['.pd-root', Buffer.from('hello, not a picture').toString('base64'), 'notes.txt', 'text/plain'])
+    const refusedSaid = await q.waitForFunction(() => document.querySelector('#pd-pic-err')?.textContent === '这不是图片', undefined, { timeout: 3000 }).then(() => true, () => false)
+    const loud = await errBox()
+    const kept = await q.evaluate(() => ({ crop: document.querySelectorAll('.pd-pic-crop[data-e2e-mark]').length, zone: document.querySelectorAll('.pd-pic-drop').length, prev: document.querySelectorAll('.pd-pic-prev canvas[role=img]').length }))
+    check('spec 00:58 一 a picture loaded, a text file dropped on the panel: the same picture stays, 「这不是图片」 shows under it (no room taken before)', refused.dropPrevented && refusedSaid && quiet?.h === 0 && quiet.text === '' && loud?.h > 0 && kept.crop === 1 && kept.zone === 0 && kept.prev === 1, JSON.stringify({ quiet, loud, kept, prevented: refused.dropPrevented }))
+    await outShot(q, 'spec0058-refused-kept')
     await q.locator('.pd-head .pd-ib').first().click()
     await q.locator('.pd-v-home').waitFor()
     await pictureCard(q).focus()
@@ -1061,6 +1074,26 @@ try {
     await f.locator('.pd-pic-drop').waitFor({ timeout: 10000 })
     check('T1 Enter on the retry loads the page once the chunk is reachable', await f.locator('.pd-pic-drop').count() === 1 && await f.locator('.pd-toast').count() === 0, `fetches ${fetches}`)
     await f.context().close()
+    // spec 00:58 rule 2: a picture dropped while the chunk loads, then the load fails: the retry opens an empty page
+    const g = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+    let gMode = 'fail'
+    await g.route(CHUNK, async (route) => {
+      if (gMode === 'fail') { await new Promise((r) => { setTimeout(r, 600) }); return route.abort('internetdisconnected') }
+      return route.continue()
+    })
+    await startSession(g, '看看 README')
+    await openPanel(g)
+    const gDrop = await g.evaluate(dropFile, ['.pd-root', b64(png(40, 40, () => [0, 0, 0, 255])), 'before-fail.png', 'image/png'])
+    const loadingSeen = await g.locator('.pd-lazy[data-lazy=loading]').count()
+    await g.locator('.pd-lazy[data-lazy=failed] button').waitFor({ timeout: 10000 })
+    gMode = 'ok'
+    await g.locator('.pd-lazy button').click()
+    await g.locator('.pd-pic-drop, .pd-pic-crop').first().waitFor({ timeout: 10000 })
+    await g.waitForTimeout(400)
+    const afterRetry = await g.evaluate(() => ({ crop: document.querySelectorAll('.pd-pic-crop').length, zone: document.querySelectorAll('.pd-pic-drop').length, alert: document.querySelector('#pd-pic-err')?.textContent }))
+    check('spec 00:58 二 a picture dropped while the chunk loads, the load fails: after the retry the page is empty (the picture does not come back)', gDrop.dropPrevented && loadingSeen === 1 && afterRetry.crop === 0 && afterRetry.zone === 1 && afterRetry.alert === '', JSON.stringify({ prevented: gDrop.dropPrevented, loadingSeen, afterRetry }))
+    await outShot(g, 'spec0058-retry-empty')
+    await g.context().close()
     // the host logs the failed chunk; those are the failures we caused, nothing else
     const caused = pageErrors.splice(errorsBefore)
     check('T1 the only errors during the failure run are the aborted chunk loads', caused.every(e => /client\.picture\.js|ERR_INTERNET_DISCONNECTED|Failed to fetch|net::/i.test(e)), caused.slice(0, 3).join(' | '))

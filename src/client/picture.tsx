@@ -200,8 +200,9 @@ export function PicturePage(props: PictureProps): ReactElement {
     const mine = ++seq.current
     const r = await readPicture(f)
     if (mine !== seq.current) return
+    // a refused file never takes the place of a loaded picture: that one stays, the alert says why (spec 00:58)
     if ('error' in r) {
-      setPic(null); setShown(null); setError(r.error); setTries(n => n + 1); setShake(true)
+      setError(r.error); setTries(n => n + 1); setShake(true)
       return
     }
     const { width: w, height: h } = r.pixels
@@ -358,6 +359,7 @@ export function PicturePage(props: PictureProps): ReactElement {
         <canvas ref={cropCanvas} aria-hidden />
       </div>
       {fileInput}
+      <p id="pd-pic-err" className="pd-pic-err" role="alert">{saying ? t(saying) : ''}</p>
       <label className="pd-pic-row">
         <span>{t('zoom')}</span>
         <input type="range" min={1} max={ZOOM_MAX} step={0.01} value={view.zoom} style={{ '--pd-v': `${((view.zoom - 1) / (ZOOM_MAX - 1)) * 100}%` } as CSSProperties}
