@@ -377,7 +377,11 @@ export function WorksPage(props: WorksProps): ReactElement {
     setUndo(u => ({ w, seq: (u?.seq ?? 0) + 1 }))
   }
 
+  const restore = (w: Work): void => { env.store.setWall(addWork(env.store.works() as Work[], w)); refocus.current = w.i; setActive(w.i); setUndo(null) }
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    // Ctrl+Z / ⌘Z while the delete toast is up does what its 撤销 does (b4 suggestion)
+    if (undo && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') { e.preventDefault(); restore(undo.w); return }
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-work]')
     if (!el || !current) return
     const items = [...(grid.current?.querySelectorAll<HTMLElement>('[data-work]') ?? [])]
@@ -437,7 +441,7 @@ export function WorksPage(props: WorksProps): ReactElement {
       {undo
         ? (
           <UndoToast key={undo.seq} lang={env.lang}
-            onUndo={() => { env.store.setWall(addWork(env.store.works() as Work[], undo.w)); refocus.current = undo.w.i; setActive(undo.w.i); setUndo(null) }}
+            onUndo={() => { restore(undo.w) }}
             onDone={() => { setUndo(null) }} />
         )
         : null}

@@ -2,7 +2,7 @@
 // The works wall's keyboard and screen-reader tree (b4 suggestions): the grid behind
 // the detail card is out of reach while the card is open; the home row's thumbnails
 // are one Tab stop with arrow keys, like the wall.
-import { act } from 'react'
+import { act, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GameStore } from '../src/client/game-store.ts'
@@ -73,5 +73,37 @@ describe('b4 suggestion: the home row is one Tab stop (roving tabindex, like the
     expect(document.activeElement).toBe(thumbs()[0])
     await act(async () => { key(thumbs()[0]!, 'ArrowLeft') })
     expect(document.activeElement).toBe(thumbs()[0])
+  })
+})
+
+describe('b4 suggestion: Ctrl+Z / ⌘Z on the wall undoes a delete, like 撤销', () => {
+  it.each([['ctrlKey'], ['metaKey']] as const)('%s+Z right after Delete brings the work back, focus on it, the toast gone', async (mod) => {
+    const e = env()
+    e.store.setWall(wall)
+    // like the entry: re-render with the stored wall whenever the store changes
+    const Live = (): ReturnType<typeof chunk.WorksPage> => { useSyncExternalStore(e.store.subscribe, e.store.getSnapshot); return <chunk.WorksPage env={e} kit={kit} wall={e.store.works()} /> }
+    await act(async () => { root.render(<Live />) })
+    const first = host.querySelector<HTMLElement>('.pd-wc')!
+    const id = first.dataset['work']
+    first.focus()
+    await act(async () => { key(first, 'Delete') })
+    expect(e.store.works()).toHaveLength(3)
+    expect(host.querySelector('.pd-toast')).not.toBeNull()
+    await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', [mod]: true, bubbles: true })) })
+    expect(e.store.works()).toHaveLength(4)
+    expect(host.querySelector('.pd-toast')).toBeNull()
+    expect((document.activeElement as HTMLElement).dataset['work']).toBe(id)
+  })
+
+  it('with nothing to undo it does nothing (the key is left alone)', async () => {
+    const e = env()
+    e.store.setWall(wall)
+    await act(async () => { root.render(<chunk.WorksPage env={e} kit={kit} wall={e.store.works()} />) })
+    const first = host.querySelector<HTMLElement>('.pd-wc')!
+    first.focus()
+    const z = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+    await act(async () => { first.dispatchEvent(z) })
+    expect(z.defaultPrevented).toBe(false)
+    expect(e.store.works()).toHaveLength(4)
   })
 })
