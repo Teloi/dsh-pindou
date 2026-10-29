@@ -53,8 +53,19 @@ const log = (...a) => { process.stdout.write(`${a.join(' ')}\n`) }
 // The plugin's own finite animations are over: finished or cancelled. An animation whose element
 // leaves the page is cancelled and its `finished` rejects with AbortError, which Promise.all turned
 // into a crash (runs rc-4 and kr-old-rerun, 06:20, both at the F1 detail card under load).
-const animationsDone = p => p.evaluate(() => Promise.allSettled(document.getAnimations()
-  .filter(a => a.effect?.target?.closest?.('.pd-root') && a.effect.getTiming().iterations !== Infinity).map(a => a.finished)))
+// At most 2 s, like settlePlugin (audit N-1): a paused or stuck animation would otherwise hang the
+// run with no error. Resolves to the number still running then (0 = all done); a stall is logged.
+const ANIM_WAIT_MS = 2000
+const animationsDone = async (p, where = '') => {
+  const left = await p.evaluate(ms => {
+    const ours = document.getAnimations().filter(a => a.effect?.target?.closest?.('.pd-root, .pd-portal') && Number.isFinite(a.effect.getComputedTiming().endTime))
+    let done = 0
+    const all = Promise.allSettled(ours.map(a => a.finished.finally(() => { done++ })))
+    return Promise.race([all.then(() => 0), new Promise(r => { setTimeout(() => { r(ours.length - done) }, ms) })])
+  }, ANIM_WAIT_MS)
+  if (left) log(`  ⚠ ${left} plugin animation(s) still running after ${ANIM_WAIT_MS} ms${where ? ` (${where})` : ''}; going on`)
+  return left
+}
 const checks = []
 function check(name, ok, detail = '') {
   // this file's `pd-…` names were shortened as it loaded (e2e/classes-hook.mjs): log the source's names
@@ -214,6 +225,8 @@ async function audit(p, label, { text = true } = {}) {
   if (text) check(`[${label}] text contrast ≥ 4.5:1 (3:1 large) (${a.contrast.length} texts, min ${Math.min(...a.contrast.map(c => c.ratio))})`, a.contrast.length > 0 && badContrast.length === 0, a.contrast.length ? JSON.stringify(badContrast.slice(0, 4)) : 'no text measured')
 }
 const shot = async (p, name, opts, dir = ASSETS, auditOpts = {}) => {
+  // audit N-8: measure contrast once fades are over (run K measured a card mid-fade: 4.31 for 4.66)
+  await animationsDone(p, name)
   await p.screenshot({ path: join(dir, `${name}.png`), ...opts })
   log('  📷', relative(REPO, join(dir, `${name}.png`)))
   if (SELFCHECK) { mkdirSync(SELFCHECK, { recursive: true }); copyFileSync(join(dir, `${name}.png`), join(SELFCHECK, `${name}.png`)) }
@@ -921,6 +934,26 @@ try {
     check('harness: waiting for animations survives one cancelled mid-wait (AbortError crashed rc-4 and kr-old-rerun)', r === 'done', r)
     await h.close()
   }
+  {
+    // audit N-1: a paused animation does not hang the wait: it returns after about 2 s and says so
+    const h = await browser.newPage()
+    await h.setContent('<div class="pd-root"><i id="x" style="display:block;animation:x 1s"></i></div><style>@keyframes x{to{opacity:.5}}</style>')
+    await h.evaluate(() => { for (const a of document.getAnimations()) a.pause() })
+    const t0 = Date.now()
+    const left = await animationsDone(h, 'harness self-check, paused on purpose')
+    const ms = Date.now() - t0
+    check('harness: a paused animation ends the wait after about 2 s (no hang) and is reported', left === 1 && ms >= 1900 && ms < 4000, JSON.stringify({ left, ms }))
+    await h.close()
+  }
+  {
+    // audit N-8: shot() measures after a fade is over, not halfway through it
+    const h = await browser.newPage()
+    await h.setContent('<div class="pd-root"><p id="x" style="animation:f .3s">x</p></div><style>@keyframes f{from{opacity:.3}to{opacity:1}}</style>')
+    const left = await animationsDone(h, 'harness self-check, fade')
+    const op = await h.evaluate(() => getComputedStyle(document.getElementById('x')).opacity)
+    check('harness: after the wait a 300 ms fade (0.3 → 1) has ended: opacity 1 when the audit measures', left === 0 && op === '1', JSON.stringify({ left, op }))
+    await h.close()
+  }
   sections: {
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
   if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
@@ -948,7 +981,7 @@ try {
     await q.locator('.pd-pic-drop').waitFor({ timeout: 10000 })
     check('T1 opening the page fetches lib/client.picture.js from DSH once (200) and it runs', chunkResponses.join() === '200', chunkResponses.join())
     // measure once the page has slid in
-    await q.evaluate(() => Promise.allSettled(document.getAnimations().filter(a => a.animationName === 'pd-view-in').map(a => a.finished)))
+    await animationsDone(q, 'picture page slide-in')
     const empty = await q.evaluate(v => ({
       title: document.querySelector('.pd-head h2')?.textContent,
       back: !!document.querySelector('.pd-head .pd-ib'),
