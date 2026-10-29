@@ -545,8 +545,6 @@ export class GameStore {
     }, { mode: 'play', overlay: s.coached ? null : 'coach' })
   }
 
-  leaveTarget(): void { this.cancelDone(); this.set({ target: null, targetBoard: null, complete: false, celebrateAt: null }) }
-
   /** Put every pattern bead in place (AI patterns: "fill board"). Undoable. */
   fillTarget(): void {
     const target = this.state.targetBoard
