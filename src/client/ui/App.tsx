@@ -2,7 +2,7 @@
  * Panel body. The host tab strip already shows the title and the close button,
  * so the inner header carries only ‹ Back and ⋯ (spec §3.1/§14.3).
  */
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { COLOR_COUNT, type MessageKey } from '../../core/index.ts'
 import type { GameState, ToastKey } from '../game-store.ts'
 import { focusBoard, useFocusGuard, useFocusReturn } from '../focus.ts'
@@ -10,6 +10,8 @@ import { IconBack, IconMore } from '../icons.tsx'
 import { AiView } from './Ai.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 import { HomeView } from './Home.tsx'
+import { useLazy } from './LazyView.tsx'
+import { PictureView } from './Picture.tsx'
 import { PlayView } from './Play.tsx'
 
 const TOAST_TEXT: Record<ToastKey, MessageKey> = {
@@ -186,9 +188,26 @@ function usePanelVisibility(ref: { readonly current: HTMLElement | null }): void
 }
 
 export function App(): ReactElement {
-  const { store, t } = useEnv()
+  const { store, t, picture } = useEnv()
   const s = useGame()
   const [menu, setMenu] = useState(false)
+  // Picture to pattern (spec §18.2): a picture dropped anywhere on the panel, or pasted on
+  // the start page, opens the page with it. Never when the host cannot load the chunk.
+  const pictures = useLazy(picture) !== 'unsupported'
+  const [dropped, setDropped] = useState<Blob | null>(null)
+  const taken = useCallback(() => { setDropped(null) }, [])
+  const take = (file: File | undefined): void => {
+    if (!file) return
+    setDropped(file)
+    store.go('picture')
+  }
+  // A file dragged over the panel is ours: the host's document-level listener would
+  // otherwise attach it to the chat (an upload), so it never sees these events.
+  const own = (e: { readonly dataTransfer: DataTransfer, preventDefault(): void, stopPropagation(): void }): boolean => {
+    const files = pictures && e.dataTransfer.types.includes('Files')
+    if (files) { e.preventDefault(); e.stopPropagation() }
+    return files
+  }
   const scroller = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
   usePanelVisibility(root)
@@ -227,18 +246,26 @@ export function App(): ReactElement {
   const live = s.complete ? t('celebrate') : ''
   return (
     <div ref={root} className={cx('pd-root', s.prefs.showCodes && 'pd-codes')} onKeyDown={onKeyDown} data-mode={s.mode}
+      onDragEnter={own} onDragOver={own} onDragLeave={own}
+      onDrop={(e) => { if (own(e)) take(e.dataTransfer.files[0]) }}
+      // only paste events from inside the panel reach here: the chat input is never touched
+      onPaste={(e) => {
+        const f = e.clipboardData.files[0]
+        if (pictures && f && (s.mode === 'home' || s.mode === 'picture')) { e.preventDefault(); e.stopPropagation(); take(f) }
+      }}
       role="region" aria-label={t('appName')} tabIndex={-1}>
       <header className="pd-head">
         {s.mode !== 'home'
           ? <button type="button" className="pd-ib" aria-label={t('back')} title={t('back')} onClick={() => { store.go('home') }}><IconBack /></button>
           : null}
+        {s.mode === 'picture' ? <h2>{t('homePicture')}</h2> : null}
         <span className="pd-spacer" />
         <button type="button" className="pd-ib" data-pd-menu-btn aria-label={t('settings')} title={t('settings')}
           aria-haspopup="menu" aria-expanded={menu} onClick={() => { setMenu(m => !m) }}><IconMore /></button>
       </header>
       {menu ? <Menu onClose={() => { setMenu(false) }} /> : null}
       <div className="pd-scroll" ref={scroller}>
-        {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : <PlayView />}
+        {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : s.mode === 'picture' ? <PictureView file={dropped} onTaken={taken} /> : <PlayView />}
       </div>
       <Preview />
       <Toast />

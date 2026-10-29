@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers, toastLongLine } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
+import { dropFile, HEART, NO_ASYNC_REQUIRE, pasteFile, png, storedFootprint } from './picture.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DSH_SRC = process.env.DSH_SRC ?? '/home/box/src/deepseek-harness'
@@ -259,6 +260,9 @@ const progressText = p => p.locator('.pd-status .pd-r').first().textContent()
 const minOf = r => Math.min(...[...r.normal, ...r.hot].map(x => x.ratio ?? 0))
 const allOk = r => r.normal.length === 16 && r.hot.length === 16 && [...r.normal, ...r.hot].every(x => x.ok)
 const bad = r => JSON.stringify([...r.normal, ...r.hot].filter(x => !x.ok).slice(0, 4))
+/** The third start card: picture to pattern (spec §18.1). */
+const pictureCard = p => p.locator('.pd-start .pd-big').nth(2)
+const b64 = buf => Buffer.from(buf).toString('base64')
 /** Place `n` correct beads by following the ghost guide. */
 async function placeBeads(p, n) {
   let placed = 0
@@ -271,7 +275,221 @@ async function placeBeads(p, n) {
   await p.waitForTimeout(200)
 }
 
+// E2E_ONLY=t1 runs just the picture section (the rest of the suite is unchanged)
+const ONLY = process.env.E2E_ONLY ?? ''
 try {
+  sections: {
+  // ── T1. picture to pattern (spec §18.2) + lazy modules (spec §18.6), in the real product ──
+  log('T1. picture to pattern')
+  {
+    const CHUNK = /\/dsh-pindou\/client\.picture\.js\?/
+    const q = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+    const net = []
+    q.on('request', (r) => { net.push({ url: r.url(), method: r.method(), body: r.postDataBuffer() }) })
+    const chunkResponses = []
+    q.on('response', (r) => { if (CHUNK.test(r.url())) chunkResponses.push(r.status()) })
+    await startSession(q, '看看 README')
+    await openPanel(q)
+    const live = await pictureCard(q).evaluate(b => ({ lazy: b.dataset.lazy, off: b.getAttribute('aria-disabled'), text: b.textContent, h: Math.round(b.getBoundingClientRect().height) }))
+    check('T1 a host with require.async: the third card is live (「图片转图纸 · 照片变成图纸」, 64 tall), nothing fetched before opening',
+      live.lazy === 'idle' && live.off === null && live.text === '图片转图纸照片变成图纸' && live.h === 64 && chunkResponses.length === 0, JSON.stringify(live))
+    await outShot(q, 't1-home-cards')
+    await pictureCard(q).click()
+    await q.locator('.pd-pic-drop').waitFor({ timeout: 10000 })
+    check('T1 opening the page fetches lib/client.picture.js from DSH once (200) and it runs', chunkResponses.join() === '200', chunkResponses.join())
+    const empty = await q.evaluate(() => ({
+      title: document.querySelector('.pd-head h2')?.textContent,
+      back: !!document.querySelector('.pd-head .pd-ib'),
+      zone: document.querySelector('.pd-pic-drop')?.textContent,
+      accept: document.querySelector('.pd-pic-file')?.accept,
+      note: document.querySelector('.pd-pic-note')?.textContent,
+      square: (() => { const r = document.querySelector('.pd-pic-drop').getBoundingClientRect(); return Math.abs(r.width - r.height) < 1 && r.width <= 480 })(),
+      dashed: getComputedStyle(document.querySelector('.pd-pic-drop')).borderTopStyle,
+      noteColor: getComputedStyle(document.querySelector('.pd-pic-note')).color,
+      text3: getComputedStyle(document.querySelector('.pd-root')).getPropertyValue('--pd-text-3').trim(),
+    }))
+    check('T1 empty state: header 「图片转图纸」 with back, square dashed zone ≤ 480, 「拖入、粘贴或选择一张图片」/「选择图片」, accept image/*, the privacy note',
+      empty.title === '图片转图纸' && empty.back && empty.square && empty.dashed === 'dashed' && empty.zone === '拖入、粘贴或选择一张图片选择图片' && empty.accept === 'image/*' && empty.note === '图片只在本机处理，不会上传', JSON.stringify(empty))
+    await outShot(q, 't1-empty')
+    // keyboard: Enter on the zone opens the system picker
+    await q.locator('.pd-pic-drop').focus()
+    const zoneFocus = await focusDesc(q)
+    const [chooser] = await Promise.all([q.waitForEvent('filechooser', { timeout: 6000 }).catch(() => null), q.keyboard.press('Enter')])
+    check('T1 Enter on the drop zone opens the file picker', !!chooser, zoneFocus)
+    // errors: refused before any decode
+    const alertText = () => q.locator('#pd-pic-err').textContent()
+    await q.locator('.pd-pic-file').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello, not a picture') })
+    await q.waitForTimeout(60)
+    const shaking = await q.locator('.pd-pic-drop.pd-shake').count()
+    await q.waitForTimeout(250)
+    const err1 = { text: await alertText(), shook: shaking, after: await q.locator('.pd-pic-drop.pd-shake').count(), border: await q.locator('.pd-pic-drop').evaluate(e => getComputedStyle(e).borderTopColor) }
+    check('T1 a text file: 「这不是图片」, red border, a shake that ends', err1.text === '这不是图片' && err1.shook === 1 && err1.after === 0, JSON.stringify(err1))
+    await outShot(q, 't1-error-not-image')
+    await q.locator('.pd-pic-file').setInputFiles({ name: 'x.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9"><script>window.pdSvgRan=1</script><rect width="9" height="9"/></svg>') })
+    await q.waitForTimeout(100)
+    check('T1 an SVG is never decoded: 「这张图打不开」', await alertText() === '这张图打不开' && await q.evaluate(() => !window.pdSvgRan))
+    await q.locator('.pd-pic-file').setInputFiles({ name: 'huge.png', mimeType: 'image/png', buffer: png(9000, 2, () => [0, 0, 0, 255]) })
+    await q.waitForTimeout(100)
+    check('T1 a 9000 px wide PNG: 「图片太大了，换一张小点的」 (from the header)', await alertText() === '图片太大了，换一张小点的')
+    await q.locator('.pd-pic-file').setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.concat([HEART.subarray(0, 40), Buffer.alloc(200)]) })
+    await q.waitForTimeout(200)
+    check('T1 a broken PNG: 「这张图打不开」', await alertText() === '这张图打不开')
+    // a real picture
+    const before = net.length
+    const t0 = Date.now()
+    await q.locator('.pd-pic-file').setInputFiles({ name: 'heart.png', mimeType: 'image/png', buffer: HEART })
+    const prev = q.locator('.pd-pic-prev canvas[role=img]')
+    await prev.waitFor({ timeout: 5000 })
+    // the first preview: 120 ms after the picture, then a frame (aria-busy until then)
+    await q.locator('.pd-pic-prev canvas[aria-busy=false]').waitFor({ timeout: 5000 })
+    const firstPreviewMs = Date.now() - t0
+    const label = await prev.getAttribute('aria-label')
+    const beads16 = Number(/共 (\d+) 颗豆/.exec(label)?.[1])
+    check(`T1 a 1200×900 PNG previews as 16×16 with the background removed (${label}, ${firstPreviewMs} ms)`, /^16×16 预览，共 \d+ 颗豆$/.test(label ?? '') && beads16 > 40 && beads16 < 256, label)
+    const adjust = await q.evaluate(() => ({
+      pressed: [...document.querySelectorAll('.pd-pic [aria-pressed=true]')].map(b => b.textContent),
+      switches: [...document.querySelectorAll('.pd-pic [role=switch]')].map(b => `${b.textContent}:${b.getAttribute('aria-checked')}`),
+      start: document.querySelector('.pd-pic-acts .pd-primary')?.disabled === false,
+    }))
+    check('T1 adjust defaults: 16×16, 全部 16 色, 抖动 off, 去掉背景 on, 开始拼 enabled', adjust.pressed.join() === '16×16,全部 16 色' && adjust.switches.join() === '抖动:false,去掉背景:true' && adjust.start, JSON.stringify(adjust))
+    await outShot(q, 't1-adjust')
+    // keyboard on the crop: + zooms, arrows pan
+    await q.locator('.pd-pic-crop').focus()
+    await q.keyboard.press('+')
+    await q.keyboard.press('ArrowLeft')
+    const zoom = Number(await q.locator('.pd-pic input[type=range]').inputValue())
+    check('T1 + on the crop zooms in (1.25), arrows pan', Math.abs(zoom - 1.25) < 0.01, String(zoom))
+    await q.keyboard.press('-')
+    await q.locator('.pd-pic [aria-pressed]', { hasText: '24×24' }).click()
+    await q.locator('.pd-pic [aria-pressed]', { hasText: '8 色' }).click()
+    await q.locator('.pd-pic [role=switch]', { hasText: '抖动' }).click()
+    await q.waitForFunction(() => (document.querySelector('.pd-pic-prev canvas[aria-busy=false]')?.getAttribute('aria-label') ?? '').startsWith('24×24 预览'), null, { timeout: 3000 })
+    await q.waitForTimeout(200)
+    await outShot(q, 't1-adjust-24-8-dither')
+    await q.locator('.pd-pic [role=switch]', { hasText: '抖动' }).click()
+    await q.locator('.pd-pic-acts .pd-primary').click()
+    await q.locator('.pd-board').waitFor({ timeout: 5000 })
+    await q.waitForTimeout(300)
+    const coach = q.locator('.pd-overlay.pd-coach button')
+    if (await coach.count()) { await coach.first().click(); await q.waitForTimeout(250) }
+    const play = await q.evaluate(() => ({
+      status: document.querySelector('.pd-status')?.textContent ?? '',
+      guides: document.querySelectorAll('.pd-board .pd-cell.pd-g').length,
+      size: document.querySelectorAll('.pd-board .pd-row').length,
+      target: JSON.parse(localStorage.getItem('dsh-pindou:v1') ?? '{}').target,
+    }))
+    check('T1 开始拼: a 24×24 game from the picture titled 「我的图纸」, no AI prompt or tokens, a board:p- source', play.status.includes('我的图纸') && !/token|tokens/i.test(play.status) && play.size === 24 && play.guides > 40 && (play.target ?? '').startsWith('board:p-'), JSON.stringify(play))
+    await outShot(q, 't1-play')
+    // privacy: nothing uploaded, nothing stored but the pattern
+    const sent = net.slice(before).filter(r => r.body && (r.body.includes(HEART.subarray(0, 64)) || r.body.toString('latin1').includes('iVBORw0')))
+    const external = net.filter(r => !r.url.startsWith(new URL(url).origin) && !r.url.startsWith('data:') && !r.url.startsWith('blob:'))
+    const posted = net.slice(before).filter(r => r.method !== 'GET').map(r => `${r.method} ${new URL(r.url).pathname} ${r.body?.length ?? 0}`)
+    check('T1 the picture is never sent: no request carries it, nothing goes to another origin', sent.length === 0 && external.length === 0, JSON.stringify({ sent: sent.map(r => r.url), external: external.map(r => r.url).slice(0, 3), posted: posted.slice(0, 6) }))
+    const foot = await q.evaluate(storedFootprint)
+    check('T1 storage holds only the pattern: no picture in localStorage, no IndexedDB or Cache Storage from the plugin', !foot.picture && foot.bytes < 8 * 1024 && !foot.dbs.some(n => /pindou/i.test(n ?? '')) && !foot.caches.some(n => /pindou/i.test(n)), JSON.stringify(foot))
+    // drop anywhere on the panel (here: on the board) and paste on the start page
+    const small = png(320, 320, (x, y) => ((x - 160) ** 2 + (y - 160) ** 2 < 110 ** 2 ? [98, 182, 233, 255] : [250, 249, 245, 255]))
+    const dropped = await q.evaluate(dropFile, ['.pd-board', b64(small), 'ball.png', 'image/png'])
+    await q.locator('.pd-pic-crop').waitFor({ timeout: 5000 })
+    check('T1 a picture dropped on the panel (on the board) opens the page with it; the host never sees the drop (no chat attachment)', dropped.dropPrevented && dropped.overPrevented && dropped.hostSaw.length === 0 && await q.locator('[data-composer-card] img, [data-attachment]').count() === 0, JSON.stringify(dropped))
+    await q.locator('.pd-head .pd-ib').first().click()
+    await q.locator('.pd-v-home').waitFor()
+    const pasted = await q.evaluate(pasteFile, ['.pd-root', b64(small), 'ball.png', 'image/png'])
+    await q.locator('.pd-pic-crop').waitFor({ timeout: 5000 })
+    check('T1 a picture pasted on the start page opens the page with it', pasted)
+    // paste in the chat input is DSH's, untouched
+    await q.locator('.pd-head .pd-ib').first().click()
+    const editor = q.locator('[contenteditable=true]').first()
+    await editor.click()
+    const chatPaste = await q.evaluate(pasteFile, ['[contenteditable=true]', b64(small), 'ball.png', 'image/png'])
+    await q.waitForTimeout(300)
+    check('T1 a picture pasted into the chat input is left to DSH (the panel stays on the start page)', await q.locator('.pd-v-home').count() === 1 && await q.locator('.pd-pic').count() === 0, `defaultPrevented by host: ${chatPaste}`)
+    await q.context().close()
+
+    // ── load failure: in-page retry, Enter and Space, no toast; skeleton after 150 ms ──
+    const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+    const errorsBefore = pageErrors.length
+    let fetches = 0
+    let mode = 'abort'
+    await f.route(CHUNK, async (route) => {
+      fetches++
+      if (mode === 'abort') return route.abort('internetdisconnected')
+      if (mode === 'slow') await new Promise((r) => { setTimeout(r, 700) })
+      return route.continue()
+    })
+    await startSession(f, '看看 README')
+    await openPanel(f)
+    await pictureCard(f).click()
+    await f.locator('.pd-lazy[data-lazy=failed] button').waitFor({ timeout: 10000 })
+    const failedState = await f.evaluate(() => ({
+      text: document.querySelector('.pd-lazy button')?.textContent,
+      toast: document.querySelectorAll('.pd-toast').length,
+      spinner: document.querySelectorAll('.pd-lazy [class*=spin], .pd-lazy svg').length,
+    }))
+    check('T1 chunk load failure: in-page 「加载失败，点此重试」 button, no toast, no spinner', failedState.text === '加载失败，点此重试' && failedState.toast === 0 && failedState.spinner === 0, JSON.stringify(failedState))
+    await outShot(f, 't1-load-failed')
+    await f.locator('.pd-lazy button').focus()
+    await f.keyboard.press('Space')
+    await f.waitForTimeout(400)
+    check('T1 Space on the retry fetches the chunk again (still offline: failed again, still no toast)', fetches === 2 && await f.locator('.pd-lazy[data-lazy=failed]').count() === 1 && await f.locator('.pd-toast').count() === 0, `fetches ${fetches}`)
+    await f.locator('.pd-head .pd-ib').first().click()
+    const cardFailed = await pictureCard(f).evaluate(b => ({ lazy: b.dataset.lazy, text: b.textContent }))
+    check('T1 after a failure the home card says 「加载失败，点此重试」', cardFailed.lazy === 'failed' && cardFailed.text.includes('加载失败，点此重试'), JSON.stringify(cardFailed))
+    await outShot(f, 't1-card-failed')
+    await pictureCard(f).click()
+    await f.locator('.pd-lazy[data-lazy=failed] button').waitFor({ timeout: 10000 })
+    mode = 'slow'
+    await f.locator('.pd-lazy button').focus()
+    await f.keyboard.press('Enter')
+    await f.waitForTimeout(80)
+    const early = await f.locator('.pd-skel').count()
+    await f.waitForTimeout(220)
+    const skel = await f.evaluate(() => {
+      const s = document.querySelector('.pd-skel')
+      if (!s) return null
+      const r = s.getBoundingClientRect()
+      return { w: Math.round(r.width), h: Math.round(r.height), bg: getComputedStyle(s).backgroundColor, surface: getComputedStyle(s).getPropertyValue('--pd-surface').trim() }
+    })
+    check('T1 a slow chunk: no block before 150 ms, then a square --pd-surface skeleton (no spinner)', early === 0 && !!skel && skel.w === skel.h && skel.w > 100, JSON.stringify({ early, skel }))
+    await outShot(f, 't1-skeleton', undefined, { text: false })
+    await f.locator('.pd-pic-drop').waitFor({ timeout: 10000 })
+    check('T1 Enter on the retry loads the page once the chunk is reachable', await f.locator('.pd-pic-drop').count() === 1 && await f.locator('.pd-toast').count() === 0, `fetches ${fetches}`)
+    await f.context().close()
+    // the host logs the failed chunk; those are the failures we caused, nothing else
+    const caused = pageErrors.splice(errorsBefore)
+    check('T1 the only errors during the failure run are the aborted chunk loads', caused.every(e => /client\.picture\.js|ERR_INTERNET_DISCONNECTED|Failed to fetch|net::/i.test(e)), caused.slice(0, 3).join(' | '))
+
+    // ── a host without require.async: card off but focusable, nothing loads, core play works ──
+    for (const lang of ['zh', 'en']) {
+      const u = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, lang, NO_ASYNC_REQUIRE)
+      let asked = 0
+      u.on('request', (r) => { if (CHUNK.test(r.url())) asked++ })
+      await startSession(u, lang === 'zh' ? '看看 README' : 'Hello', lang)
+      await openPanel(u)
+      const off = await pictureCard(u).evaluate(b => ({ lazy: b.dataset.lazy, aria: b.getAttribute('aria-disabled'), disabled: b.disabled, tab: b.tabIndex, opacity: getComputedStyle(b).opacity, text: b.textContent }))
+      const want = lang === 'zh' ? '需要新版 DSH' : 'Requires a newer DSH'
+      check(`T1 (${lang}) no require.async: card at 50% opacity, aria-disabled, still focusable, 「${want}」`, off.lazy === 'unsupported' && off.aria === 'true' && !off.disabled && off.tab === 0 && off.opacity === '0.5' && off.text.endsWith(want), JSON.stringify(off))
+      await pictureCard(u).focus()
+      const focused = await u.evaluate(() => document.activeElement?.classList.contains('pd-off'))
+      await u.keyboard.press('Enter')
+      await u.keyboard.press('Space')
+      await pictureCard(u).click({ force: true }) // a real click on an aria-disabled button
+      await u.waitForTimeout(300)
+      check(`T1 (${lang}) the off card takes focus; Enter, Space and click do nothing; the chunk is never requested`, focused && await u.locator('.pd-v-home').count() === 1 && await u.locator('.pd-lazy, .pd-pic').count() === 0 && asked === 0, `asked ${asked}`)
+      if (lang === 'zh') {
+        const taken = await u.evaluate(pasteFile, ['.pd-root', b64(png(40, 40, () => [0, 0, 0, 255])), 'p.png', 'image/png'])
+        check('T1 no require.async: a pasted picture is not taken', !taken && await u.locator('.pd-v-home').count() === 1)
+      }
+      await outShot(u, `t1-unsupported-${lang}`)
+      await u.locator('.pd-start .pd-big').first().click()
+      await u.locator('.pd-board').waitFor({ timeout: 5000 })
+      for (let i = 0; i < 3; i++) await u.locator('.pd-board .pd-cell').nth(i * 17).click()
+      check(`T1 (${lang}) no require.async: free play still works`, await u.locator('.pd-board .pd-cell .pd-bead').count() >= 3)
+      await u.context().close()
+    }
+  }
+
+  if (ONLY === 't1') break sections
   // ── A. desktop light: busy pill above the composer, entry busy dot ──
   log('A. busy pill (1280×800, light)')
   const p = await newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'light' })
@@ -927,6 +1145,7 @@ try {
     writeFileSync(join(OUT, 'audit', 'o3-rings.json'), `${JSON.stringify({ light, dark }, null, 2)}\n`)
     if (SELFCHECK) copyFileSync(join(OUT, 'audit', 'o3-rings.json'), join(SELFCHECK, 'o3-rings.json'))
     await k.context().close()
+  }
   }
 
   check('no page errors from the plugin', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))

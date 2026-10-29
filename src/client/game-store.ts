@@ -36,6 +36,13 @@ export interface AiState {
   readonly status?: StatusResponse | undefined
 }
 
+/** Source ids of picture patterns start with this (AI ones never contain a `-`). */
+export const PICTURE_PREFIX = 'p-'
+export const isPictureSource = (target: string | null): boolean => target?.startsWith(`board:${PICTURE_PREFIX}`) ?? false
+
+/** What the panel shows; `picture` (spec §18.2) is a page of home and is saved as `home`. */
+export type ViewMode = Mode | 'picture'
+
 export type Overlay = 'coach' | 'done' | 'result' | null
 export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered'
 
@@ -43,7 +50,7 @@ export interface GameState {
   readonly history: History
   readonly color: number
   readonly tool: Tool
-  readonly mode: Mode
+  readonly mode: ViewMode
   readonly target: string | null
   readonly targetBoard: Board | null
   readonly ironed: boolean
@@ -238,7 +245,7 @@ export class GameStore {
   private saved(): SavedState {
     const s = this.state
     return {
-      board: s.history.present, color: s.color, tool: s.tool, mode: s.mode, target: s.target,
+      board: s.history.present, color: s.color, tool: s.tool, mode: s.mode === 'picture' ? 'home' : s.mode, target: s.target,
       pattern: s.target?.startsWith('board:') && s.targetBoard ? encode(s.targetBoard) : null,
       ironed: s.ironed || s.ironingSince !== null, prefs: s.prefs, done: s.done, coached: s.coached,
     }
@@ -269,7 +276,7 @@ export class GameStore {
   }
 
   // ── navigation & prefs ────────────────────────────────────────────
-  go(mode: Mode): void {
+  go(mode: ViewMode): void {
     if (mode === this.state.mode) return
     this.last = null
     this.set({ mode, overlay: mode === 'play' ? this.state.overlay : null })
@@ -665,6 +672,14 @@ export class GameStore {
       board: decoded.board, prompt, usage: reply.usage, cached: false, repaired: reply.repaired === true,
       truncated: reply.finish === 'max-tokens', model: typeof reply.model === 'string' ? reply.model.slice(0, 80) : undefined,
     })
+  }
+
+  /**
+   * Picture to pattern (spec §18.2): the quantised picture becomes the guide of
+   * a new `board:p-…` game titled 「我的图纸」; only this pattern is saved.
+   */
+  startPicture(board: Board): void {
+    this.startPattern(`board:${PICTURE_PREFIX}${this.now().toString(36)}${(++this.boardSeq).toString(36)}`, board)
   }
 
   /** A generated pattern becomes the faint guide on a fresh board, like a template. */

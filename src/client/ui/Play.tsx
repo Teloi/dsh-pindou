@@ -6,6 +6,7 @@ import {
 import { IconBrush, IconCopy, IconEraser, IconFill, IconIron, IconPicker, IconRedo, IconSparkle, IconTrash, IconUndo, IconDownload } from '../icons.tsx'
 import { canCopyImage, copyPng, downloadBlob, exportBlob, exportFileName, saveRoute } from '../render.ts'
 import { useFocusReturn } from '../focus.ts'
+import { isPictureSource } from '../game-store.ts'
 import { BoardView } from './Board.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 
@@ -49,9 +50,11 @@ function StatusLine(): ReactElement {
   const board = s.history.present
   const target = s.targetBoard
   const tpl = findTemplate(templateIdOf(s.target) ?? '')
-  const isAi = s.target?.startsWith('board:') ?? false
+  // a picture pattern (spec §18.2) is a `board:` source too, but not the AI's: no prompt, no tokens
+  const pic = isPictureSource(s.target)
+  const isAi = !pic && (s.target?.startsWith('board:') ?? false)
   const ai = isAi ? s.ai.result : undefined
-  const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : isAi ? (ai?.prompt ?? t('homeAi')) : t('playFree')
+  const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : pic ? t('myPattern') : isAi ? (ai?.prompt ?? t('homeAi')) : t('playFree')
   const beads = board.cells.filter(c => c !== EMPTY).length
   const c = target ? completion(board, target) : null
   return (
@@ -188,7 +191,8 @@ function Footer(): ReactElement {
   const s = useGame()
   const empty = s.history.present.cells.every(c => c === EMPTY)
   const ironing = s.ironingSince !== null
-  const isAi = s.target?.startsWith('board:') ?? false
+  // 「填满」 is an AI-pattern helper; a picture pattern plays like a template (spec §18.2 → §4.5)
+  const isAi = !isPictureSource(s.target) && (s.target?.startsWith('board:') ?? false)
   // The result card carries export / copy itself; don't show them twice (spec §4.6).
   const dup = s.overlay === 'result'
   return (

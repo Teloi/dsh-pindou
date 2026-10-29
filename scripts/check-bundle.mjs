@@ -12,6 +12,8 @@
 //   of its budget so there is always headroom for the next change:
 //     first screen  lib/client.js            ≤ 40 KB = 40,960 B (spec §10)
 //     lazy chunks   lib/client.<name>.js     ≤ 20 KB = 20,480 B together (spec §18.6)
+//   and v0.2 may grow the first screen by at most 1.5 KB over v0.1 (spec §18.6):
+//     lib/client.js ≤ 33,746 + 1,536 = 35,282 B (no headroom rule; this is the hard cap)
 //
 // Usage: node scripts/check-bundle.mjs [libDir]   (default lib; package.json from cwd)
 import { readdirSync, readFileSync } from 'node:fs'
@@ -22,6 +24,10 @@ import { gzipSync } from 'node:zlib'
 export const GZIP_BUDGET = 40 * 1024
 /** Spec §18.6: lazily loaded chunks, all together, at or below 20 KB gzip. */
 export const ASYNC_GZIP_BUDGET = 20 * 1024
+/** v0.1.0's lib/client.js, gzip (the spec §18.6 baseline). */
+export const V01_FIRST_SCREEN = 33746
+/** Spec §18.6: the v0.2 features add at most 1.5 KB gzip to the first screen. */
+export const V02_FIRST_SCREEN_GROWTH = 1536
 /** Project rule on top of the spec: stay at or below 90% so a feature can't silently use up the last few KB. */
 export const GZIP_HEADROOM = 0.9
 const PLATFORM = new Set(['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client'])
@@ -72,6 +78,7 @@ function budget(label, bytes, limit) {
 }
 const gz = gzipSync(client).length
 budget(`${libDir}/client.js`, gz, GZIP_BUDGET)
+if (gz > V01_FIRST_SCREEN + V02_FIRST_SCREEN_GROWTH) fail.push(`${libDir}/client.js is ${gz} B gzip, ${gz - V01_FIRST_SCREEN} B over v0.1 (${V01_FIRST_SCREEN} B); spec §18.6 allows at most ${V02_FIRST_SCREEN_GROWTH} B: move code into a lazy chunk`)
 const asyncGz = chunks.reduce((sum, { code }) => sum + gzipSync(code).length, 0)
 budget(`lazy chunks (${chunks.length})`, asyncGz, ASYNC_GZIP_BUDGET)
 if (!host.includes('export')) fail.push(`${libDir}/index.js must be an ES module`)

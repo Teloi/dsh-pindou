@@ -1,6 +1,7 @@
 import { createContext, useContext, useSyncExternalStore } from 'react'
 import type { Translate } from '../../core/index.ts'
 import type { GameState, GameStore } from '../game-store.ts'
+import type { Lazy } from '../lazy.ts'
 import type { SettingsOpener } from '../settings.ts'
 
 export interface Env {
@@ -11,6 +12,8 @@ export interface Env {
   readonly dark: () => boolean
   /** How to open DSH Settings from the panel (read when needed; see settings.ts). */
   readonly settings?: () => SettingsOpener
+  /** Picture to pattern, the lazy chunk lib/client.picture.js (spec §18.2/§18.6). */
+  readonly picture?: Lazy<typeof import('../picture.tsx')>
 }
 
 export const EnvContext = createContext<Env | null>(null)

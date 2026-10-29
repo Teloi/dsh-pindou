@@ -67,7 +67,7 @@ const client: UserConfig = {
     // Comments and whitespace in the stylesheet stay in the source only (scripts/minify-css.ts).
     name: 'dsh-client-css-minify',
     transform(code: string, id: string) {
-      return id.replaceAll('\\', '/').endsWith('/src/client/styles.ts') ? { code: minifyCssModule(code), map: null } : null
+      return id.replaceAll('\\', '/').match(/\/src\/client\/(?:picture-)?styles\.ts$/) ? { code: minifyCssModule(code), map: null } : null
     },
   }, asyncChunksPlugin(), {
     name: 'dsh-client-bundle-purity',

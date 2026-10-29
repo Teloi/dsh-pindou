@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
@@ -83,6 +84,17 @@ describe.skipIf(!canBuild)('async chunks: the real client build config', () => {
   it('a module shared by the entry and a lazy module fails the build, not the user', async () => {
     await expect(buildFixture('entry-shared.ts')).rejects.toThrow(/shared between the entry and a lazy module/)
   })
+
+  it('the real picture chunk builds alone as client.picture.js with only platform requires', async () => {
+    const dir = await buildFixture('entry-picture.ts')
+    expect(readdirSync(dir).toSorted()).toEqual(['client.js', 'client.picture.js', 'index.js'])
+    const chunk = readFileSync(join(dir, 'client.picture.js'), 'utf8')
+    expect([...chunk.matchAll(/\brequire\(["'`]([^"'`]+)["'`]\)/g)].map(m => m[1]).toSorted()).toEqual(['react', 'react/jsx-runtime'])
+  }, 30_000)
+
+  it('counterexample: an entry importing one of the picture chunk\'s local modules (core/quantize.ts) fails the build', async () => {
+    await expect(buildFixture('entry-picture-shared.ts')).rejects.toThrow(/shared between the entry and a lazy module/)
+  }, 30_000)
 })
 
 /** Incompressible filler: ~10 KB gzip, so two chunks pass 90% of the 20 KB lazy budget. */
@@ -98,7 +110,34 @@ describe('check:bundle on lazy chunks', () => {
   const chunk = (name: string, body = ''): string => `${opening(name)}var module={exports:{}};${body}${close}`
 
   it('the committed lib passes', () => {
-    expect(checkBundle('lib').status).toBe(0)
+    const r = checkBundle('lib')
+    expect(r.out).toContain('bundle shape ok')
+    expect(r.status).toBe(0)
+  })
+
+  it('the committed lib: the first screen is within v0.1 + 1.5 KB, and the picture page is a lazy chunk (spec §18.6)', () => {
+    const gz = gzipSync(readFileSync(join(ROOT, 'lib/client.js'))).length
+    expect(gz).toBeLessThanOrEqual(33746 + 1536)
+    const shipped = readFileSync(join(ROOT, 'lib/client.js'), 'utf8')
+    expect(shipped).toMatch(/require\.async\(["'`]\.\/client\.picture\.js["'`]\)/)
+    // the probe survives minification: no require.async, no picture page
+    expect(shipped).toMatch(/typeof require\s*==\s*["'`]function["'`]\s*&&\s*typeof require\.async\s*==\s*["'`]function["'`]/)
+    // quantising and sniffing live only in the chunk
+    expect(shipped).not.toContain('resizeWidth')
+    expect(entry).not.toContain('VP8X')
+    expect(readFileSync(join(ROOT, 'lib/client.picture.js'), 'utf8')).toContain('VP8X')
+  })
+
+  it('a first screen over v0.1 + 1.5 KB fails even below 90% of 40 KB', () => {
+    // base64 of random bytes gzips to ~76%: grow until just over the cap
+    const random = randomBytes(60_000).toString('base64')
+    let n = 40_000
+    let body = ''
+    do { body = `var n="${random.slice(0, n)}";`; n += 200 } while (gzipSync(entry(body)).length <= 33746 + 1536)
+    expect(gzipSync(entry(body)).length).toBeLessThan(40 * 1024 * 0.9)
+    const r = checkBundle(libWith({ 'client.js': entry(body) }))
+    expect(r.status).toBe(1)
+    expect(r.out).toMatch(/spec §18\.6 allows at most 1536 B/)
   })
 
   it('a synchronous require of a package chunk fails', () => {

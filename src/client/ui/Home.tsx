@@ -1,9 +1,10 @@
-/** Start page: free play / AI cards, then the pattern grid with canvas thumbnails. */
+/** Start page: free play / AI / picture cards, then the pattern grid with canvas thumbnails. */
 import { memo, useEffect, useRef, type ReactElement } from 'react'
 import { EMPTY, TEMPLATES, type Template } from '../../core/index.ts'
-import { IconCheck, IconGrid, IconSparkle } from '../icons.tsx'
+import { IconCheck, IconGrid, IconPicture, IconSparkle } from '../icons.tsx'
 import { drawThumb } from '../render.ts'
 import { useEnv, useGame } from './context.tsx'
+import { LazyCard } from './LazyView.tsx'
 
 const Thumb = memo(function Thumb({ tpl }: { readonly tpl: Template }): ReactElement {
   const ref = useRef<HTMLCanvasElement>(null)
@@ -12,7 +13,7 @@ const Thumb = memo(function Thumb({ tpl }: { readonly tpl: Template }): ReactEle
 })
 
 export function HomeView(): ReactElement {
-  const { store, t, lang } = useEnv()
+  const { store, t, lang, picture } = useEnv()
   const s = useGame()
   const inProgress = !s.ironed && s.history.present.cells.some(c => c !== EMPTY)
   return (
@@ -28,6 +29,8 @@ export function HomeView(): ReactElement {
           <b>{t('homeAi')}</b>
           <span>{t('homeAiDesc')}</span>
         </button>
+        <LazyCard mod={picture} icon={<IconPicture />} title={t('homePicture')} desc={t('homePictureDesc')}
+          onOpen={() => { store.go('picture') }} />
       </div>
       <h3 className="pd-sec">
         <span>{t('homeTemplates')} · {t('homeCount', { n: TEMPLATES.length })}</span>
