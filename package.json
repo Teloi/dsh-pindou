@@ -64,8 +64,9 @@
     "lint": "oxlint --deny-warnings src tests scripts e2e",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
-    "e2e": "node e2e/run.mjs"
+    "check": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run check:bundle",
+    "e2e": "node e2e/run.mjs",
+    "check:bundle": "node scripts/check-bundle.mjs"
   },
   "peerDependencies": {
     "react": "^18.2.0"
