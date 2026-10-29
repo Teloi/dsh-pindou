@@ -608,20 +608,47 @@ async function worksSection() {
     await openPanel(g)
     await g.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
     await g.waitForTimeout(300)
-    /** A piece's canvas: bitmap = its own device pixels, the opaque box a whole multiple of n, centred on whole pixels. */
-    const piece = (sel, n) => g.evaluate(([q, m]) => {
-      const c = document.querySelector(q), r = c.getBoundingClientRect(), d = devicePixelRatio
-      const px = c.width, data = c.getContext('2d').getImageData(0, 0, px, px).data
-      let x0 = px, x1 = -1, y0 = px, y1 = -1
-      for (let y = 0; y < px; y++) for (let x = 0; x < px; x++) if (data[(y * px + x) * 4 + 3] > 0) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y) }
-      const k = Math.floor(px / m), side = x1 - x0 + 1
-      const b = c.parentElement.getBoundingClientRect()
-      return {
-        css: c.clientWidth, px, dpr: d, k, side, x0, y0, rows: y1 - y0 + 1,
-        ok: px === Math.round(c.clientWidth * d) && side === m * k && y1 - y0 + 1 === m * k && x0 === Math.floor((px - m * k) / 2) && y0 === x0 && Number.isInteger(r.left * d) && Number.isInteger(r.top * d),
-        inset: Math.min(r.left - b.left, r.top - b.top, b.right - r.right, b.bottom - r.bottom),
+    /**
+     * A piece's canvas: bitmap = its own device pixels, the opaque box a whole multiple of n, centred.
+     * Then the screen itself: every opaque bitmap pixel shows unchanged at one whole-pixel offset in a
+     * screenshot, i.e. the canvas is painted 1:1 and nothing resampled it (its layout box may sit at a
+     * fractional css position; Chrome snaps a replaced element's paint to device pixels).
+     */
+    const piece = async (sel, n) => {
+      const at = await g.evaluate(([q, m]) => {
+        const c = document.querySelector(q), r = c.getBoundingClientRect(), d = devicePixelRatio
+        const px = c.width, data = c.getContext('2d').getImageData(0, 0, px, px).data
+        let x0 = px, x1 = -1, y0 = px, y1 = -1
+        for (let y = 0; y < px; y++) for (let x = 0; x < px; x++) if (data[(y * px + x) * 4 + 3] > 0) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y) }
+        const k = Math.floor(px / m), side = x1 - x0 + 1
+        const b = c.parentElement.getBoundingClientRect()
+        return {
+          css: c.clientWidth, px, dpr: d, k, side, x0, y0, rows: y1 - y0 + 1,
+          ok: px === Math.round(c.clientWidth * d) && side === m * k && y1 - y0 + 1 === m * k && x0 === Math.floor((px - m * k) / 2) && y0 === x0,
+          inset: Math.min(r.left - b.left, r.top - b.top, b.right - r.right, b.bottom - r.bottom),
+          left: r.left, top: r.top, rgba: [...data].join(','),
+        }
+      }, [sel, n])
+      const { left, top, rgba, ...out } = at
+      const bits = rgba.split(',').map(Number), px = out.px, d = out.dpr
+      const clip = { x: Math.floor(left) - 1, y: Math.floor(top) - 1, width: out.css + 3, height: out.css + 3 }
+      const seen = decodePng(await g.screenshot({ clip, animations: 'disabled' }))
+      const base = { x: Math.round((left - clip.x) * d), y: Math.round((top - clip.y) * d) }
+      const fits = (ox, oy) => {
+        for (let y = 0; y < px; y++) for (let x = 0; x < px; x++) {
+          const o = (y * px + x) * 4
+          if (bits[o + 3] !== 255) continue
+          const sx = x + ox, sy = y + oy
+          if (sx < 0 || sy < 0 || sx >= seen.width || sy >= seen.height) return false
+          const t = (sy * seen.width + sx) * 4
+          if (Math.abs(seen.data[t] - bits[o]) > 2 || Math.abs(seen.data[t + 1] - bits[o + 1]) > 2 || Math.abs(seen.data[t + 2] - bits[o + 2]) > 2) return false
+        }
+        return true
       }
-    }, [sel, n])
+      let shown = null
+      for (const dy of [0, -1, 1]) for (const dx of [0, -1, 1]) if (!shown && fits(base.x + dx, base.y + dy)) shown = { dx, dy }
+      return { ...out, at: { left, top }, onScreen1to1: shown !== null, ok: out.ok && shown !== null }
+    }
     const thumb = await piece('.pd-v-home .pd-wt canvas', 12)
     check(`b4 重要 1 (${dpr}×) home thumbnail 12×12: ${46 * dpr} device px, ${Math.floor(46 * dpr / 12)} a bead, centred on whole pixels, 5 css (1 border + 4 padding) inside the round corner`, thumb.ok && thumb.css === 46 && thumb.inset === 5, JSON.stringify(thumb))
     await rowShot(g, `b4-thumbs${tag}`)
