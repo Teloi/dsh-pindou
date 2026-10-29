@@ -10,7 +10,7 @@
  */
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import type { StoredWork, Template } from '../core/index.ts'
-import { DAILY_DEFS, dailyCounts, dailyDate, dailyDay, dailyDayOf, dailyIndex, dailyStreak } from '../core/daily.ts'
+import { DAILY_DEFS, dailyDate, dailyDay, dailyDayOf, dailyIndex, dailyStreak } from '../core/daily.ts'
 import { addWork, cleanWorks, removeWork, type Work } from '../core/works.ts'
 import type { Env } from './ui/context.tsx'
 import type { WorksKit } from './ui/Works.tsx'
@@ -96,8 +96,7 @@ function Daily({ env, kit, wall }: { readonly env: Env; readonly kit: WorksKit; 
   const date = dailyDate(today)
   const def = DAILY_DEFS[dailyIndex(today)]!
   const preview = useMemo<Work>(() => ({ i: 0, n: 16, b: def.rows.join(''), s: null }), [def])
-  // only finished dailies ironed on their own day count (spec §18.3)
-  const days = wall.flatMap((w) => { const d = dailyOf(w.s); return d && dailyCounts(d, w) ? [dailyDayOf(d)] : [] })
+  const days = wall.flatMap((w) => { const d = dailyOf(w.s); return d ? [dailyDayOf(d)] : [] })
   const streak = dailyStreak(days, today)
   const g = env.store.getSnapshot()
   const going = dailyOf(g.target) === date && !g.ironed && g.ironingSince === null

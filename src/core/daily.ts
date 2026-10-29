@@ -1178,16 +1178,6 @@ export const dailyDate = (day: number): string => new Date(DAILY_EPOCH + day * D
 export const dailyDayOf = (date: string): number => /^\d{4}-\d\d-\d\d$/.test(date) ? (Date.parse(date) - DAILY_EPOCH) / DAY : Number.NaN
 
 /**
- * Whether a daily work counts for the streak (spec §18.3): it is finished (拼完: the ironed board is
- * that day's pattern exactly, every bead in place and none extra, like completion().done) and it was
- * ironed on that very day (a 补拼 of an older daily, or one finished past midnight, does not count).
- */
-export function dailyCounts(date: string, w: { readonly i: number; readonly b: string }): boolean {
-  const day = dailyDayOf(date)
-  return dailyDay(w.i) === day && w.b === DAILY_DEFS[dailyIndex(day)]?.rows.join('')
-}
-
-/**
  * Streak (spec §18.3, derived, never stored): consecutive days with a daily work, ending today,
  * or yesterday while today's is still to do. Deleting a work can shorten it.
  */
