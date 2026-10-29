@@ -29,6 +29,8 @@ vi.mock('../src/client/lazy.ts', async (orig) => {
 type Chunk = typeof chunk
 const sleep = (ms: number): Promise<void> => new Promise((r) => { setTimeout(r, ms) })
 const flush = async (ms = 0): Promise<void> => { await act(async () => { await sleep(ms) }) }
+/** The alert's text once it has been (re)written. */
+const alertSays = async (): Promise<string> => { await flush(chunk.ANNOUNCE_MS + 20); return host.querySelector('[role=alert]')?.textContent ?? '' }
 
 // ── fixtures ──────────────────────────────────────────────────────────
 const be32 = (n: number): number[] => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]
@@ -39,9 +41,10 @@ const file = (bytes: Uint8Array | string, name: string, type: string): File => n
 const svgFile = (): File => file('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'a.svg', 'image/svg+xml')
 
 /** The pixels the fake decoder "decodes": a red square on white, or flat white. */
-let decoded: { w: number, h: number, flat: boolean } = { w: 512, h: 384, flat: false }
+let decoded: { w: number, h: number, flat: boolean, clear?: boolean } = { w: 512, h: 384, flat: false }
 function pixels(w: number, h: number, flat: boolean): ImageData {
   const data = new Uint8ClampedArray(w * h * 4)
+  if (decoded.clear) return { data, width: w, height: h, colorSpace: 'srgb' } as ImageData // every pixel alpha 0
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const sq = !flat && x > w * 0.3 && x < w * 0.7 && y > h * 0.3 && y < h * 0.7
@@ -327,7 +330,8 @@ describe('picture page (spec §18.2)', () => {
 
   it.each([
     ['text', () => file('hello', 'a.txt', 'text/plain'), '这不是图片'],
-    ['SVG (never decoded)', svgFile, '这张图打不开'],
+    ['SVG (never decoded)', svgFile, '暂不支持 SVG，换成 PNG 或 JPG 试试'],
+    ['SVG renamed .png (never decoded)', () => file('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>', 'a.png', 'image/png'), '暂不支持 SVG，换成 PNG 或 JPG 试试'],
     ['over 20 MB', () => file(new Uint8Array(MAX_BYTES + 1).fill(0, 0).map((_, i) => (i < 33 ? pngHead(10, 10)[i]! : 0)), 'big.png', 'image/png'), '图片太大了，换一张小点的'],
     ['a side over 8000 px', () => file(pngHead(8001, 100), 'wide.png', 'image/png'), '图片太大了，换一张小点的'],
   ])('%s: refused before any decode, red border + shake, message in an alert', async (_, make, message) => {
@@ -337,16 +341,47 @@ describe('picture page (spec §18.2)', () => {
     const zone = host.querySelector<HTMLElement>('.pd-pic-drop')!
     expect(zone.dataset['error']).toBeTruthy()
     expect(zone.classList.contains('pd-shake')).toBe(true)
-    expect(host.querySelector('[role=alert]')!.textContent).toBe(message)
+    expect(await alertSays()).toBe(message)
     await flush(200)
     expect(zone.classList.contains('pd-shake')).toBe(false)
+  })
+
+  it('C4: an almost fully transparent picture is refused with its own message (not 「图案太简单」)', async () => {
+    await open()
+    decoded = { w: 64, h: 64, flat: false, clear: true }
+    await choose(file(pngHead(64, 64), 'clear.png', 'image/png'))
+    expect(await alertSays()).toBe('这张图几乎是透明的，换一张试试')
+    expect(host.querySelector('.pd-pic-crop')).toBeNull()
+    expect(host.querySelector('#pd-pic-simple')).toBeNull()
+    expect(close).toHaveBeenCalledTimes(1) // the bitmap is still released
+  })
+
+  it('C4/S5: the same error twice in a row is announced again: the alert is emptied, then rewritten', async () => {
+    await open()
+    await choose(file('hello', 'a.txt', 'text/plain'))
+    expect(await alertSays()).toBe('这不是图片')
+    const alert = host.querySelector('[role=alert]')!
+    const seen: string[] = []
+    const mo = new MutationObserver(() => { seen.push(alert.textContent ?? '') })
+    mo.observe(alert, { childList: true, characterData: true, subtree: true })
+    await choose(file('hello again', 'b.txt', 'text/plain'))
+    expect(await alertSays()).toBe('这不是图片')
+    mo.disconnect()
+    expect(seen).toEqual(['', '这不是图片'])
+  })
+
+  it('C4 copy, both languages, as in the spec revision', () => {
+    expect(chunk.PICTURE_STRINGS.zh.svg).toBe('暂不支持 SVG，换成 PNG 或 JPG 试试')
+    expect(chunk.PICTURE_STRINGS.en.svg).toBe('SVG isn\'t supported yet. Try a PNG or JPG.')
+    expect(chunk.PICTURE_STRINGS.zh.transparent).toBe('这张图几乎是透明的，换一张试试')
+    expect(chunk.PICTURE_STRINGS.en.transparent).toBe('This image is almost fully transparent. Try another one.')
   })
 
   it('a decoder failure: 这张图打不开', async () => {
     await open()
     bitmap.mockRejectedValueOnce(new Error('InvalidStateError'))
     await choose(file(pngHead(10, 10), 'broken.png', 'image/png'))
-    expect(host.querySelector('[role=alert]')!.textContent).toBe('这张图打不开')
+    expect(await alertSays()).toBe('这张图打不开')
   })
 
   it('a big picture is decoded downscaled (long side 512), the bitmap released, then previewed and started', async () => {
@@ -580,7 +615,7 @@ describe('drop and paste (spec §18.2)', () => {
     const drop = dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])
     await act(async () => { host.querySelector('.pd-pic-drop')!.dispatchEvent(drop) })
     await flush(20)
-    expect(host.querySelector('#pd-pic-err')?.textContent).toBe('这不是图片')
+    expect(await alertSays()).toBe('这不是图片')
     const paste = pasteEvent([file(pngHead(600, 600), 'p.png', 'image/png')])
     await act(async () => { host.querySelector('.pd-pic-drop')!.dispatchEvent(paste) })
     await flush(20)
@@ -630,8 +665,7 @@ describe('drop and paste (spec §18.2)', () => {
   it('a dropped non-image lands on the page with its error', async () => {
     const { rootEl } = await panel(ready())
     await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [svgFile()])) })
-    await flush(20)
-    expect(host.querySelector('[role=alert]')!.textContent).toBe('这张图打不开')
+    await vi.waitFor(() => { expect(host.querySelector('[role=alert]')?.textContent).toBe('暂不支持 SVG，换成 PNG 或 JPG 试试') })
     expect(bitmap).not.toHaveBeenCalled()
   })
 

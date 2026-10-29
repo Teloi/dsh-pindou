@@ -369,6 +369,8 @@ try {
     check('T1 Enter on the drop zone opens the file picker', choosers.length === 1, `${zoneFocus}; choosers ${choosers.length}`)
     // errors: refused before any decode
     const alertText = () => q.locator('#pd-pic-err').textContent()
+    // the alert is emptied, then written ~60 ms later (so a repeated error is read again)
+    const says = want => q.waitForFunction(w => document.querySelector('#pd-pic-err')?.textContent === w, want, { timeout: 3000 }).then(() => true, () => false)
     await q.locator('.pd-pic-file').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello, not a picture') })
     await q.waitForTimeout(60)
     const shaking = await q.locator('.pd-pic-drop.pd-shake').count()
@@ -378,13 +380,26 @@ try {
     await outShot(q, 't1-error-not-image')
     await q.locator('.pd-pic-file').setInputFiles({ name: 'x.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9"><script>window.pdSvgRan=1</script><rect width="9" height="9"/></svg>') })
     await q.waitForTimeout(100)
-    check('T1 an SVG is never decoded: 「这张图打不开」', await alertText() === '这张图打不开' && await q.evaluate(() => !window.pdSvgRan))
+    check('T1 C4 an SVG is never decoded: 「暂不支持 SVG，换成 PNG 或 JPG 试试」', await says('暂不支持 SVG，换成 PNG 或 JPG 试试') && await q.evaluate(() => !window.pdSvgRan), await alertText())
+    // C4 / S5: the same error again is announced again — the live region is emptied, then rewritten
+    await q.evaluate(() => {
+      const a = document.querySelector('#pd-pic-err')
+      window.pdSaid = []
+      new MutationObserver(() => { window.pdSaid.push(a.textContent) }).observe(a, { childList: true, characterData: true, subtree: true })
+    })
+    await q.locator('.pd-pic-file').setInputFiles({ name: 'renamed.png', mimeType: 'image/png', buffer: Buffer.from('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9"/>') })
+    await says('暂不支持 SVG，换成 PNG 或 JPG 试试')
+    await q.waitForTimeout(100)
+    const said = await q.evaluate(() => window.pdSaid)
+    check('T1 C4 the same error twice (an SVG renamed .png): the alert is emptied, then says it again', JSON.stringify(said) === JSON.stringify(['', '暂不支持 SVG，换成 PNG 或 JPG 试试']), JSON.stringify(said))
+    await q.locator('.pd-pic-file').setInputFiles({ name: 'clear.png', mimeType: 'image/png', buffer: png(64, 64, () => [0, 0, 0, 0]) })
+    check('T1 C4 a fully transparent PNG: 「这张图几乎是透明的，换一张试试」, not loaded', await says('这张图几乎是透明的，换一张试试') && await q.locator('.pd-pic-crop').count() === 0, await alertText())
     await q.locator('.pd-pic-file').setInputFiles({ name: 'huge.png', mimeType: 'image/png', buffer: png(9000, 2, () => [0, 0, 0, 255]) })
     await q.waitForTimeout(100)
-    check('T1 a 9000 px wide PNG: 「图片太大了，换一张小点的」 (from the header)', await alertText() === '图片太大了，换一张小点的')
+    check('T1 a 9000 px wide PNG: 「图片太大了，换一张小点的」 (from the header)', await says('图片太大了，换一张小点的'), await alertText())
     await q.locator('.pd-pic-file').setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.concat([HEART.subarray(0, 40), Buffer.alloc(200)]) })
     await q.waitForTimeout(200)
-    check('T1 a broken PNG: 「这张图打不开」', await alertText() === '这张图打不开')
+    check('T1 a broken PNG: 「这张图打不开」', await says('这张图打不开'), await alertText())
     // a real picture
     const before = net.length
     const t0 = Date.now()

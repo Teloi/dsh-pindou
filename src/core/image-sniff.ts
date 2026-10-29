@@ -8,7 +8,7 @@
  */
 
 export type ImageKind = 'png' | 'jpeg' | 'gif' | 'webp' | 'bmp'
-export type SniffError = 'notImage' | 'tooBig' | 'cannotOpen'
+export type SniffError = 'notImage' | 'tooBig' | 'cannotOpen' | 'svg' | 'transparent'
 
 /** 20 MB, spec §18.2. */
 export const MAX_BYTES = 20 * 1024 * 1024
@@ -70,15 +70,35 @@ export function sniff(b: Uint8Array): Sniffed | null {
   return null
 }
 
+/** Does the text start like an SVG document (BOM, XML declaration, comments and doctype allowed)? */
+export function isSvgText(head: Uint8Array): boolean {
+  const text = String.fromCharCode(...head.subarray(0, 1024))
+  return /^(?:\xEF\xBB\xBF|\uFEFF)?\s*(?:<\?xml[^>]*>\s*)?(?:(?:<!--[\s\S]*?-->|<!DOCTYPE[^>]*>)\s*)*<svg[\s>/]/i.test(text)
+}
+
+/** A decoded picture is 「几乎是透明的」 when fewer than this share of its pixels is visible (alpha ≥ 16). */
+export const VISIBLE_MIN = 0.005
+
+/** Spec v2.0 (23:40, C4): almost nothing in the picture is visible. RGBA bytes. */
+export function almostTransparent(rgba: ArrayLike<number>): boolean {
+  const n = rgba.length >> 2
+  let seen = 0
+  for (let i = 3; i < rgba.length; i += 4) if (rgba[i]! >= 16) seen++
+  return n > 0 && seen < n * VISIBLE_MIN
+}
+
 /**
  * The verdict before decoding. `type` is the browser's MIME guess, `size` the
- * byte length, `head` the first SNIFF_BYTES. A file that claims to be an image
- * (or has an image extension) but is not one we decode — SVG included — cannot
- * be opened; anything else that is not an image is 「这不是图片」.
+ * byte length, `head` the first SNIFF_BYTES. SVG (by type, name or text) is
+ * never decoded and says so; a file that claims to be an image (or has an image
+ * extension) but is not one we decode cannot be opened; anything else that is
+ * not an image is 「这不是图片」.
  */
 export function precheck(file: { readonly type: string, readonly size: number, readonly name?: string }, head: Uint8Array): { ok: Sniffed } | { error: SniffError } {
   const s = sniff(head)
   if (!s) {
+    // SVG gets its own message (spec v2.0 23:40, C4): by its type, its name, or its text (renamed .png too)
+    if (/svg/i.test(file.type) || /\.svg$/i.test(file.name ?? '') || isSvgText(head)) return { error: 'svg' }
     const claimsImage = file.type.startsWith('image/') || /\.(?:png|jpe?g|gif|webp|bmp|svg|avif|heic|heif|ico|tiff?)$/i.test(file.name ?? '')
     return { error: claimsImage ? 'cannotOpen' : 'notImage' }
   }

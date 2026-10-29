@@ -1,7 +1,7 @@
 // Picture to pattern (spec §18.2, audit T1): type and size are judged from the
 // first bytes, before any decoder sees the file; SVG is never decoded.
 import { describe, expect, it } from 'vitest'
-import { decodeSize, MAX_BYTES, MAX_SIDE, precheck, sniff } from '../src/core/image-sniff.ts'
+import { almostTransparent, decodeSize, isSvgText, MAX_BYTES, MAX_SIDE, precheck, sniff, VISIBLE_MIN } from '../src/core/image-sniff.ts'
 
 const bytes = (...parts: Array<string | number[]>): Uint8Array =>
   new Uint8Array(parts.flatMap(p => (typeof p === 'string' ? [...p].map(c => c.charCodeAt(0)) : p)))
@@ -56,10 +56,24 @@ describe('sniff: magic bytes and header size', () => {
 const file = (type: string, size: number, name = 'x'): { type: string, size: number, name: string } => ({ type, size, name })
 
 describe('precheck: the order of checks', () => {
-  it('SVG is never decoded: it claims to be an image, so 「这张图打不开」', () => {
-    expect(precheck(file('image/svg+xml', svg.length, 'a.svg'), svg)).toEqual({ error: 'cannotOpen' })
+  it('SVG is never decoded and says so (C4: 「暂不支持 SVG」): by type, by name, by its text when renamed', () => {
+    expect(precheck(file('image/svg+xml', svg.length, 'a.svg'), svg)).toEqual({ error: 'svg' })
     // even when the browser gives no MIME type
-    expect(precheck(file('', svg.length, 'a.svg'), svg)).toEqual({ error: 'cannotOpen' })
+    expect(precheck(file('', svg.length, 'a.svg'), svg)).toEqual({ error: 'svg' })
+    // renamed to .png, typed image/png by the browser
+    expect(precheck(file('image/png', svg.length, 'a.png'), svg)).toEqual({ error: 'svg' })
+    const bare = bytes('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    expect(precheck(file('', bare.length, 'pic'), bare)).toEqual({ error: 'svg' })
+  })
+
+  it('isSvgText: BOM, XML declaration, comments and doctype before <svg>; nothing else', () => {
+    expect(isSvgText(bytes([0xef, 0xbb, 0xbf], '  <svg>'))).toBe(true)
+    expect(isSvgText(bytes('<?xml version="1.0"?>\n<!-- by hand -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x">\n<svg viewBox="0 0 1 1">'))).toBe(true)
+    expect(isSvgText(bytes('<SVG/>'))).toBe(true)
+    expect(isSvgText(bytes('<svgx>'))).toBe(false)
+    expect(isSvgText(bytes('<html><svg>'))).toBe(false) // an HTML page is not an SVG
+    expect(isSvgText(bytes('hello <svg>'))).toBe(false)
+    expect(precheck(file('text/html', 11, 'a.html'), bytes('<html><svg>'))).toEqual({ error: 'notImage' })
   })
 
   it('not an image at all: 「这不是图片」', () => {
@@ -100,5 +114,27 @@ describe('decodeSize: big pictures are decoded small', () => {
     expect(decodeSize(1000, 8000, 512)).toEqual({ width: 64, height: 512 })
     expect(decodeSize(100, 50, 512)).toEqual({ width: 100, height: 50 })
     expect(decodeSize(8000, 1, 512)).toEqual({ width: 512, height: 1 })
+  })
+})
+
+const rgba = (n: number, visible: number, alpha = 255): Uint8ClampedArray => {
+  const d = new Uint8ClampedArray(n * 4)
+  for (let i = 0; i < visible; i++) d[i * 4 + 3] = alpha
+  return d
+}
+
+describe('almostTransparent (C4: 「这张图几乎是透明的」)', () => {
+  it('fully transparent, or only faint (alpha < 16) pixels: yes', () => {
+    expect(almostTransparent(rgba(10000, 0))).toBe(true)
+    expect(almostTransparent(rgba(10000, 10000, 15))).toBe(true)
+  })
+  it(`under ${VISIBLE_MIN * 100}% visible: yes; at it or above: no`, () => {
+    expect(almostTransparent(rgba(10000, 49))).toBe(true)
+    expect(almostTransparent(rgba(10000, 50))).toBe(false)
+    expect(almostTransparent(rgba(10000, 10000, 16))).toBe(false)
+    expect(almostTransparent(rgba(10000, 10000))).toBe(false)
+  })
+  it('an empty buffer is not judged', () => {
+    expect(almostTransparent(new Uint8ClampedArray(0))).toBe(false)
   })
 })

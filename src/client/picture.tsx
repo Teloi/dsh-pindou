@@ -14,7 +14,7 @@
  * the quantised pattern leaves this module (through `onStart`).
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react'
-import { decodeSize, MAX_SIDE, precheck, SNIFF_BYTES, type SniffError } from '../core/image-sniff.ts'
+import { almostTransparent, decodeSize, MAX_SIDE, precheck, SNIFF_BYTES, type SniffError } from '../core/image-sniff.ts'
 import { beadCount, COLOR_LIMITS, DEFAULT_OPTIONS, MIN_BEADS, PICTURE_SIZES, quantize, type ColorLimit, type Crop, type PictureSize, type Pixels, type QuantizeOptions } from '../core/quantize.ts'
 import { PICTURE_CSS } from './picture-styles.ts'
 
@@ -22,6 +22,7 @@ const STRINGS = {
   zh: {
     drop: '拖入、粘贴或选择一张图片', choose: '选择图片', note: '图片只在本机处理，不会上传',
     notImage: '这不是图片', tooBig: '图片太大了，换一张小点的', cannotOpen: '这张图打不开',
+    svg: '暂不支持 SVG，换成 PNG 或 JPG 试试', transparent: '这张图几乎是透明的，换一张试试',
     tooSimple: '图案太简单了，试试关掉去背景', start: '开始拼', another: '换一张',
     crop: '裁剪框：拖动或用方向键移动，+ / - 缩放', zoom: '缩放', size: '尺寸', colors: '颜色数',
     all: '全部 16 色', some: '{n} 色', dither: '抖动', removeBg: '去掉背景', preview: '{n}×{n} 预览，共 {beads} 颗豆',
@@ -29,6 +30,7 @@ const STRINGS = {
   en: {
     drop: 'Drop, paste or choose a picture', choose: 'Choose a picture', note: 'Your picture never leaves this device',
     notImage: 'That’s not a picture', tooBig: 'That picture is too big — try a smaller one', cannotOpen: 'Couldn’t open this picture',
+    svg: 'SVG isn\'t supported yet. Try a PNG or JPG.', transparent: 'This image is almost fully transparent. Try another one.',
     tooSimple: 'Too simple — try turning off Remove background', start: 'Start beading', another: 'Choose another',
     crop: 'Crop: drag or use the arrow keys to move, + / - to zoom', zoom: 'Zoom', size: 'Size', colors: 'Colours',
     all: 'All 16', some: '{n} colours', dither: 'Dithering', removeBg: 'Remove background', preview: '{n}×{n} preview, {beads} beads',
@@ -44,6 +46,8 @@ export const DECODE_MAX = 512
 /** Spec §18.2: preview after 120 ms of quiet, drawn in a frame. */
 export const PREVIEW_DEBOUNCE_MS = 120
 const ZOOM_MAX = 4
+/** The alert is emptied, then written after this long, so a repeated error is read again. */
+export const ANNOUNCE_MS = 60
 const STYLE_ID = 'dsh-pindou-picture-styles'
 
 export interface Picture {
@@ -79,7 +83,8 @@ export async function readPicture(file: Blob, doc: Document = document, max = DE
     if (!ctx || size.width < 1 || size.height < 1) return { error: 'cannotOpen' }
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(bmp, 0, 0, size.width, size.height)
-    return { pixels: ctx.getImageData(0, 0, size.width, size.height), canvas }
+    const pixels = ctx.getImageData(0, 0, size.width, size.height)
+    return almostTransparent(pixels.data) ? { error: 'transparent' } : { pixels, canvas }
   } catch {
     return { error: 'cannotOpen' }
   } finally {
@@ -142,6 +147,17 @@ export function PicturePage(props: PictureProps): ReactElement {
   const [opts, setOpts] = useState<QuantizeOptions>(DEFAULT_OPTIONS)
   const [cells, setCells] = useState<number[] | null>(null)
   const [error, setError] = useState<SniffError | null>(null)
+  // What the alert says. Cleared first and written a moment later, so the same error twice in
+  // a row is announced again (spec v2.0 23:40; design S5). `tries` makes each error a new one.
+  const [tries, setTries] = useState(0)
+  const [said, setSaid] = useState<{ readonly n: number; readonly error: SniffError } | null>(null)
+  useEffect(() => {
+    if (!error) return
+    const n = tries
+    const id = setTimeout(() => { setSaid({ n, error }) }, ANNOUNCE_MS)
+    return () => { clearTimeout(id) }
+  }, [error, tries])
+  const saying = error && said?.n === tries ? said.error : null
   const [shake, setShake] = useState(false)
   const [over, setOver] = useState(false)
   const input = useRef<HTMLInputElement>(null)
@@ -173,7 +189,7 @@ export function PicturePage(props: PictureProps): ReactElement {
     const r = await readPicture(f)
     if (mine !== seq.current) return
     if ('error' in r) {
-      setPic(null); setCells(null); setError(r.error); setShake(true)
+      setPic(null); setCells(null); setError(r.error); setTries(n => n + 1); setShake(true)
       return
     }
     const { width: w, height: h } = r.pixels
@@ -302,7 +318,7 @@ export function PicturePage(props: PictureProps): ReactElement {
           <span className="pd-btn" aria-hidden>{t('choose')}</span>
         </div>
         {fileInput}
-        <p id="pd-pic-err" className="pd-pic-err" role="alert">{error ? t(error) : ''}</p>
+        <p id="pd-pic-err" className="pd-pic-err" role="alert">{saying ? t(saying) : ''}</p>
         <p id="pd-pic-note" className="pd-pic-note">{t('note')}</p>
       </div>
     )
