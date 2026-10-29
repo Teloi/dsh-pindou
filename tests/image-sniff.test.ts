@@ -76,7 +76,7 @@ describe('precheck: the order of checks', () => {
     expect(precheck(file('text/html', 11, 'a.html'), bytes('<html><svg>'))).toEqual({ error: 'notImage' })
   })
 
-  it('not an image at all: 「这不是图片」', () => {
+  it('not an image at all: 「这个文件不是图片」', () => {
     expect(precheck(file('text/plain', 10, 'a.txt'), bytes('hello'))).toEqual({ error: 'notImage' })
     expect(precheck(file('application/pdf', 10, 'a.pdf'), bytes('%PDF-1.7'))).toEqual({ error: 'notImage' })
   })

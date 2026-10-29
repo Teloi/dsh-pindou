@@ -92,7 +92,7 @@ export function almostTransparent(rgba: ArrayLike<number>): boolean {
  * byte length, `head` the first SNIFF_BYTES. SVG (by type, name or text) is
  * never decoded and says so; a file that claims to be an image (or has an image
  * extension) but is not one we decode cannot be opened; anything else that is
- * not an image is 「这不是图片」.
+ * not an image is 「这个文件不是图片」.
  */
 export function precheck(file: { readonly type: string, readonly size: number, readonly name?: string }, head: Uint8Array): { ok: Sniffed } | { error: SniffError } {
   const s = sniff(head)

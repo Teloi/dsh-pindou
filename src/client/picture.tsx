@@ -21,7 +21,7 @@ import { PICTURE_CSS } from './picture-styles.ts'
 const STRINGS = {
   zh: {
     drop: '拖入、粘贴或选择一张图片', choose: '选择图片', note: '图片只在本机处理，不会上传',
-    notImage: '这不是图片', tooBig: '图片太大了，换一张小点的', cannotOpen: '这张图打不开',
+    notImage: '这个文件不是图片', tooBig: '图片太大了，换一张小点的', cannotOpen: '这张图打不开',
     svg: '暂不支持 SVG，换成 PNG 或 JPG 试试', transparent: '这张图几乎是透明的，换一张试试',
     tooSimple: '图案太简单了，试试关掉去背景', start: '开始拼', another: '换一张',
     crop: '裁剪框：拖动或用方向键移动，+ / - 缩放', zoom: '缩放', size: '尺寸', colors: '颜色数',
@@ -29,7 +29,7 @@ const STRINGS = {
   },
   en: {
     drop: 'Drop, paste or choose a picture', choose: 'Choose a picture', note: 'Your picture never leaves this device',
-    notImage: 'That’s not a picture', tooBig: 'That picture is too big — try a smaller one', cannotOpen: 'Couldn’t open this picture',
+    notImage: 'That file isn’t an image.', tooBig: 'That picture is too big — try a smaller one', cannotOpen: 'Couldn’t open this picture',
     svg: 'SVG isn\'t supported yet. Try a PNG or JPG.', transparent: 'This image is almost fully transparent. Try another one.',
     tooSimple: 'Too simple — try turning off Remove background', start: 'Start beading', another: 'Choose another',
     crop: 'Crop: drag or use the arrow keys to move, + / - to zoom', zoom: 'Zoom', size: 'Size', colors: 'Colours',

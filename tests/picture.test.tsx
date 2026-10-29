@@ -333,7 +333,7 @@ describe('picture page (spec §18.2)', () => {
   })
 
   it.each([
-    ['text', () => file('hello', 'a.txt', 'text/plain'), '这不是图片'],
+    ['text', () => file('hello', 'a.txt', 'text/plain'), '这个文件不是图片'],
     ['SVG (never decoded)', svgFile, '暂不支持 SVG，换成 PNG 或 JPG 试试'],
     ['SVG renamed .png (never decoded)', () => file('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>', 'a.png', 'image/png'), '暂不支持 SVG，换成 PNG 或 JPG 试试'],
     ['over 20 MB', () => file(new Uint8Array(MAX_BYTES + 1).fill(0, 0).map((_, i) => (i < 33 ? pngHead(10, 10)[i]! : 0)), 'big.png', 'image/png'), '图片太大了，换一张小点的'],
@@ -363,15 +363,15 @@ describe('picture page (spec §18.2)', () => {
   it('C4/S5: the same error twice in a row is announced again: the alert is emptied, then rewritten', async () => {
     await open()
     await choose(file('hello', 'a.txt', 'text/plain'))
-    expect(await alertSays()).toBe('这不是图片')
+    expect(await alertSays()).toBe('这个文件不是图片')
     const alert = host.querySelector('[role=alert]')!
     const seen: string[] = []
     const mo = new MutationObserver(() => { seen.push(alert.textContent ?? '') })
     mo.observe(alert, { childList: true, characterData: true, subtree: true })
     await choose(file('hello again', 'b.txt', 'text/plain'))
-    expect(await alertSays()).toBe('这不是图片')
+    expect(await alertSays()).toBe('这个文件不是图片')
     mo.disconnect()
-    expect(seen).toEqual(['', '这不是图片'])
+    expect(seen).toEqual(['', '这个文件不是图片'])
   })
 
   it('C4 copy, both languages, as in the spec revision', () => {
@@ -379,6 +379,11 @@ describe('picture page (spec §18.2)', () => {
     expect(chunk.PICTURE_STRINGS.en.svg).toBe('SVG isn\'t supported yet. Try a PNG or JPG.')
     expect(chunk.PICTURE_STRINGS.zh.transparent).toBe('这张图几乎是透明的，换一张试试')
     expect(chunk.PICTURE_STRINGS.en.transparent).toBe('This image is almost fully transparent. Try another one.')
+  })
+
+  it('b4 重要 4 / spec 03:30: one refusal line everywhere, 「这个文件不是图片」 / "That file isn’t an image." (curly apostrophe, like You’ve)', () => {
+    expect(chunk.PICTURE_STRINGS.zh.notImage).toBe('这个文件不是图片')
+    expect(chunk.PICTURE_STRINGS.en.notImage).toBe('That file isn’t an image.')
   })
 
   it('I3: a new size keeps the old preview (drawing and label) until its own cells are ready; then both change together', async () => {
@@ -647,7 +652,7 @@ describe('drop and paste (spec §18.2)', () => {
     const drop = dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])
     await act(async () => { host.querySelector('.pd-pic-drop')!.dispatchEvent(drop) })
     await flush(20)
-    expect(await alertSays()).toBe('这不是图片')
+    expect(await alertSays()).toBe('这个文件不是图片')
     const paste = pasteEvent([file(pngHead(600, 600), 'p.png', 'image/png')])
     await act(async () => { host.querySelector('.pd-pic-drop')!.dispatchEvent(paste) })
     await flush(20)
@@ -814,7 +819,7 @@ describe('spec 00:58: refused drops and failed loads', () => {
     const crop = host.querySelector('.pd-pic-crop')
     await act(async () => { rootEl().dispatchEvent(dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])) })
     await flush(20)
-    expect(await alertSays()).toBe('这不是图片')
+    expect(await alertSays()).toBe('这个文件不是图片')
     // the same picture, the same crop frame: nothing reloaded or reset
     expect(host.querySelector('.pd-pic-crop')).toBe(crop)
     expect(host.querySelector('.pd-pic-drop')).toBeNull()
