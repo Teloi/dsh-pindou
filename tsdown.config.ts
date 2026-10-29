@@ -48,8 +48,13 @@ const client: UserConfig = {
   dts: false,
   clean: false,
   sourcemap: false,
-  external: PLATFORM_MODULES,
-  noExternal: (id: string) => !PLATFORM_MODULES.includes(id),
+  // Whitespace and syntax only: identifiers stay readable for review, and the
+  // gzip budget (scripts/check-bundle.mjs) still holds with room to spare.
+  minify: { compress: true, mangle: false, codegen: { removeWhitespace: true } },
+  deps: {
+    neverBundle: PLATFORM_MODULES,
+    alwaysBundle: (id: string) => !PLATFORM_MODULES.includes(id),
+  },
   define: { 'process.env.NODE_ENV': JSON.stringify(mode) },
   plugins: [{
     name: 'dsh-client-bundle-purity',
