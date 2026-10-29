@@ -204,14 +204,20 @@ describe('degradation path, from apply() to a game (host without require.async)'
     await act(async () => { card.click() })
     expect(host.querySelector('.pd-v-home')).not.toBeNull()
     expect(host.querySelector('.pd-lazy, .pd-pic')).toBeNull()
-    // a dropped or pasted picture is not taken: the host keeps its default
+    // a picture dropped on the panel is swallowed and ignored (spec §18.6 / C6): it must not
+    // become a chat attachment, and nothing opens. A paste is left to DSH.
     const panelRoot = host.querySelector<HTMLElement>('.pd-root')!
     const png = file(pngHead(10, 10), 'a.png', 'image/png')
-    const drop = dropEvent('drop', [png])
-    await act(async () => { panelRoot.dispatchEvent(drop) })
+    const hostSaw: string[] = []
+    const spy = (e: Event): void => { hostSaw.push(e.type) }
+    for (const type of ['dragenter', 'dragover', 'drop']) document.addEventListener(type, spy)
+    const drags = (['dragenter', 'dragover', 'drop'] as const).map(type => dropEvent(type, [png]))
+    for (const e of drags) await act(async () => { panelRoot.dispatchEvent(e) })
+    for (const type of ['dragenter', 'dragover', 'drop']) document.removeEventListener(type, spy)
+    expect(drags.map(e => e.defaultPrevented)).toEqual([true, true, true])
+    expect(hostSaw).toEqual([])
     const paste = pasteEvent([png])
     await act(async () => { panelRoot.dispatchEvent(paste) })
-    expect(drop.defaultPrevented).toBe(false) // DSH's own drop handling (attach to chat) still applies
     expect(paste.defaultPrevented).toBe(false)
     expect(host.querySelector('.pd-v-home')).not.toBeNull()
     expect(bitmap).not.toHaveBeenCalled()
@@ -454,6 +460,129 @@ describe('drop and paste (spec §18.2)', () => {
     await act(async () => { rootEl().dispatchEvent(textDrop) })
     expect(hostSaw).toEqual(['drop'])
     for (const type of ['dragenter', 'dragover', 'dragleave', 'drop']) document.removeEventListener(type, spy)
+  })
+
+  it('listeners: drag/drop only on the panel root (never window or document), all removed on unmount', async () => {
+    const DRAG = new Set(['dragenter', 'dragover', 'dragleave', 'drop'])
+    const added: Array<{ on: EventTarget, type: string, fn: unknown }> = []
+    const removed: Array<{ on: EventTarget, type: string, fn: unknown }> = []
+    const realAdd = EventTarget.prototype.addEventListener, realRemove = EventTarget.prototype.removeEventListener
+    vi.spyOn(EventTarget.prototype, 'addEventListener').mockImplementation(function (this: EventTarget, type: string, fn: EventListenerOrEventListenerObject | null, opts?: boolean | AddEventListenerOptions) {
+      if (DRAG.has(type)) added.push({ on: this, type, fn })
+      realAdd.call(this, type, fn, opts)
+    })
+    vi.spyOn(EventTarget.prototype, 'removeEventListener').mockImplementation(function (this: EventTarget, type: string, fn: EventListenerOrEventListenerObject | null, opts?: boolean | EventListenerOptions) {
+      if (DRAG.has(type)) removed.push({ on: this, type, fn })
+      realRemove.call(this, type, fn, opts)
+    })
+    const { rootEl } = await panel(ready())
+    const panelRoot = rootEl()
+    const ours = added.filter(a => a.on !== host) // React's own delegation lives on its root container
+    expect(added.some(a => a.on === window || a.on === document)).toBe(false)
+    expect(ours.map(a => [a.on === panelRoot, a.type])).toEqual([[true, 'dragenter'], [true, 'dragover'], [true, 'dragleave'], [true, 'drop']])
+    // the panel goes away: every listener it added is removed, the same function from the same element
+    await act(async () => { root.render(<div />) })
+    for (const a of ours) expect(removed.some(r => r.on === a.on && r.type === a.type && r.fn === a.fn)).toBe(true)
+    // and a drop on the detached element is no longer handled
+    const late = dropEvent('drop', [file(pngHead(10, 10), 'a.png', 'image/png')])
+    panelRoot.dispatchEvent(late)
+    expect(late.defaultPrevented).toBe(false)
+  })
+
+  it('a file dropped on the chat input (outside the panel) reaches DSH untouched', async () => {
+    const { rootEl } = await panel(ready())
+    const chat = document.createElement('div')
+    chat.contentEditable = 'true'
+    document.body.append(chat)
+    const hostSaw: string[] = []
+    const spy = (e: Event): void => { hostSaw.push(e.type) }
+    for (const type of ['dragenter', 'dragover', 'drop']) document.addEventListener(type, spy)
+    const events = (['dragenter', 'dragover', 'drop'] as const).map(type => dropEvent(type, [file(pngHead(600, 600), 'chat.png', 'image/png')]))
+    for (const e of events) await act(async () => { chat.dispatchEvent(e) })
+    await flush(20)
+    for (const type of ['dragenter', 'dragover', 'drop']) document.removeEventListener(type, spy)
+    expect(hostSaw).toEqual(['dragenter', 'dragover', 'drop']) // DSH's document listener gets every event…
+    expect(events.map(e => e.defaultPrevented)).toEqual([false, false, false]) // …with nothing decided for it
+    expect(bitmap).not.toHaveBeenCalled()
+    expect(rootEl().dataset['mode']).toBe('home')
+    chat.remove()
+  })
+
+  it('load failed: a picture dropped on the panel is swallowed and nothing happens (spec §18.6)', async () => {
+    const { mod, calls } = gate()
+    const { card, rootEl } = await panel(mod)
+    await act(async () => { card().click() })
+    await act(async () => { calls[0]!.reject(new Error('offline')) })
+    await flush()
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-head .pd-ib')!.click() })
+    expect(rootEl().dataset['mode']).toBe('home')
+    const drop = dropEvent('drop', [file(pngHead(10, 10), 'a.png', 'image/png')])
+    await act(async () => { rootEl().dispatchEvent(drop) })
+    await flush(20)
+    expect(drop.defaultPrevented).toBe(true)
+    expect(rootEl().dataset['mode']).toBe('home')
+    expect(calls).toHaveLength(1) // no reload attempt either
+  })
+
+  it('C5: a non-image file dropped on another page is swallowed and silently ignored', async () => {
+    const { rootEl } = await panel(ready())
+    for (const where of ['home', 'play'] as const) {
+      if (where === 'play') await act(async () => { host.querySelector<HTMLButtonElement>('.pd-start .pd-big')!.click() })
+      expect(rootEl().dataset['mode']).toBe(where)
+      const drop = dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])
+      await act(async () => { rootEl().dispatchEvent(drop) })
+      await flush(20)
+      expect(drop.defaultPrevented).toBe(true) // still not the chat's
+      expect(rootEl().dataset['mode']).toBe(where)
+      expect(host.querySelector('[role=alert]')?.textContent ?? '').toBe('')
+    }
+  })
+
+  it('C5: several files dropped at once — the first picture is taken', async () => {
+    const { rootEl } = await panel(ready())
+    const drop = dropEvent('drop', [file('hello', 'notes.txt', 'text/plain'), file(pngHead(600, 300), 'b.png', 'image/png'), file(pngHead(300, 600), 'c.png', 'image/png')])
+    await act(async () => { rootEl().dispatchEvent(drop) })
+    await flush(20)
+    expect(drop.defaultPrevented).toBe(true)
+    expect(host.querySelector('.pd-pic-crop')).not.toBeNull()
+    expect(host.querySelector('#pd-pic-err')?.textContent ?? '').toBe('')
+    expect(bitmap).toHaveBeenCalledTimes(1)
+    expect((bitmap.mock.calls[0]![0] as File).name).toBe('b.png')
+  })
+
+  it('C5: on the picture page a non-image drop is taken (and explained), a paste works directly', async () => {
+    const { card } = await panel(ready())
+    await act(async () => { card().click() })
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-drop')).not.toBeNull() })
+    const drop = dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])
+    await act(async () => { host.querySelector('.pd-pic-drop')!.dispatchEvent(drop) })
+    await flush(20)
+    expect(host.querySelector('#pd-pic-err')?.textContent).toBe('这不是图片')
+    const paste = pasteEvent([file(pngHead(600, 600), 'p.png', 'image/png')])
+    await act(async () => { host.querySelector('.pd-pic-drop')!.dispatchEvent(paste) })
+    await flush(20)
+    expect(paste.defaultPrevented).toBe(true)
+    expect(host.querySelector('.pd-pic-crop')).not.toBeNull()
+    expect(bitmap).toHaveBeenCalledTimes(1)
+  })
+
+  it('the drop zone stays lit while the pointer crosses its own text, and goes out on leave or drop', async () => {
+    const { card } = await panel(ready())
+    await act(async () => { card().click() })
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-drop')).not.toBeNull() })
+    const zone = host.querySelector<HTMLElement>('.pd-pic-drop')!
+    const text = zone.querySelectorAll('span')[1]!
+    const fire = async (el: Element, type: string): Promise<void> => { await act(async () => { el.dispatchEvent(dropEvent(type as 'drop', [])) }) }
+    await fire(zone, 'dragenter')
+    expect(zone.hasAttribute('data-over')).toBe(true)
+    await fire(text, 'dragenter')
+    await fire(zone, 'dragleave') // leaving the zone for its text
+    expect(zone.hasAttribute('data-over')).toBe(true)
+    await fire(text, 'dragleave')
+    expect(zone.hasAttribute('data-over')).toBe(false)
+    await fire(zone, 'dragenter')
+    await fire(zone, 'drop')
+    expect(zone.hasAttribute('data-over')).toBe(false)
   })
 
   it('paste on the start page opens it; paste while playing and text pastes are left alone', async () => {

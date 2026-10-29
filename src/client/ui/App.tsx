@@ -2,7 +2,7 @@
  * Panel body. The host tab strip already shows the title and the close button,
  * so the inner header carries only ‹ Back and ⋯ (spec §3.1/§14.3).
  */
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from 'react'
 import { COLOR_COUNT, type MessageKey } from '../../core/index.ts'
 import type { GameState, ToastKey } from '../game-store.ts'
 import { focusBoard, useFocusGuard, useFocusReturn } from '../focus.ts'
@@ -187,30 +187,50 @@ function usePanelVisibility(ref: { readonly current: HTMLElement | null }): void
   }, [ref, store])
 }
 
+/**
+ * Files dragged onto the panel are the panel's, always (spec §18.6): its root alone calls
+ * preventDefault + stopPropagation, so DSH's document-level drop listener never attaches them
+ * to the chat; drags anywhere else are untouched. Bound to the root, unbound on unmount.
+ */
+function useFileDrops(ref: RefObject<HTMLElement | null>, onFiles: (files: FileList) => void): void {
+  useEffect(() => {
+    const el = ref.current
+    const on = (e: DragEvent): void => {
+      if (!e.dataTransfer?.types.includes('Files')) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.type === 'drop') onFiles(e.dataTransfer.files)
+    }
+    for (const type of DRAGS) el?.addEventListener(type, on)
+    return () => { for (const type of DRAGS) el?.removeEventListener(type, on) }
+  }, [ref, onFiles])
+}
+const DRAGS = ['dragenter', 'dragover', 'dragleave', 'drop'] as const
+
 export function App(): ReactElement {
   const { store, t, picture } = useEnv()
   const s = useGame()
   const [menu, setMenu] = useState(false)
   // Picture to pattern (spec §18.2): a picture dropped anywhere on the panel, or pasted on
-  // the start page, opens the page with it. Never when the host cannot load the chunk.
-  const pictures = useLazy(picture) !== 'unsupported'
+  // the start or picture page, opens the page with it. Never when the host cannot load the chunk.
+  const status = useLazy(picture)
+  const pictures = status !== 'unsupported'
   const [dropped, setDropped] = useState<Blob | null>(null)
   const taken = useCallback(() => { setDropped(null) }, [])
-  const take = (file: File | undefined): void => {
+  const take = useCallback((file: File | undefined): void => {
     if (!file) return
     setDropped(file)
     store.go('picture')
-  }
-  // A file dragged over the panel is ours: the host's document-level listener would
-  // otherwise attach it to the chat (an upload), so it never sees these events.
-  const own = (e: { readonly dataTransfer: DataTransfer, preventDefault(): void, stopPropagation(): void }): boolean => {
-    const files = pictures && e.dataTransfer.types.includes('Files')
-    if (files) { e.preventDefault(); e.stopPropagation() }
-    return files
-  }
+  }, [store])
+  // The first picture of a drop; on the picture page any file (it explains why it is not one);
+  // elsewhere a drop without a picture is ignored. Nothing when the chunk cannot load (§18.6).
+  const onFiles = useCallback((files: FileList): void => {
+    if (pictures && status !== 'failed') take([...files].find(f => f.type.startsWith('image/')) ?? (s.mode === 'picture' ? files[0] : undefined))
+  }, [pictures, status, s.mode, take])
   const scroller = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
   usePanelVisibility(root)
+  useFileDrops(root, onFiles)
   useFocusGuard(root)
   // oxlint-disable-next-line react/exhaustive-effect-dependencies -- scroll to top whenever the view changes
   useEffect(() => { scroller.current?.scrollTo?.({ top: 0 }) }, [s.mode])
@@ -246,8 +266,6 @@ export function App(): ReactElement {
   const live = s.complete ? t('celebrate') : ''
   return (
     <div ref={root} className={cx('pd-root', s.prefs.showCodes && 'pd-codes')} onKeyDown={onKeyDown} data-mode={s.mode}
-      onDragEnter={own} onDragOver={own} onDragLeave={own}
-      onDrop={(e) => { if (own(e)) take(e.dataTransfer.files[0]) }}
       // only paste events from inside the panel reach here: the chat input is never touched
       onPaste={(e) => {
         const f = e.clipboardData.files[0]

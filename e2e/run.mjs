@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers, toastLongLine } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
-import { dropFile, HEART, NO_ASYNC_REQUIRE, pasteFile, png, storedFootprint } from './picture.mjs'
+import { dropFile, HEART, hostFileCards, NO_ASYNC_REQUIRE, pasteFile, png, storedFootprint } from './picture.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DSH_SRC = process.env.DSH_SRC ?? '/home/box/src/deepseek-harness'
@@ -295,6 +295,11 @@ try {
     const chunkResponses = []
     q.on('response', (r) => { if (CHUNK.test(r.url())) chunkResponses.push(r.status()) })
     await startSession(q, '看看 README')
+    // the plugin is installed but its panel was never opened: a file dropped on the chat input is DSH's attachment
+    const dot = png(48, 48, () => [98, 182, 233, 255])
+    const closedDrop = await q.evaluate(dropFile, ['[contenteditable=true]', b64(dot), 'chat-closed.png', 'image/png'])
+    const closedCard = await q.waitForFunction(hostFileCards, 'chat-closed.png', { timeout: 8000 }).then(() => true, () => false)
+    check('T1 panel never opened: a file dropped on the chat input becomes a DSH attachment', closedCard && closedDrop.dropPrevented && closedDrop.hostSaw.includes('drop'), JSON.stringify({ closedCard, ...closedDrop }))
     await openPanel(q)
     const live = await pictureCard(q).evaluate(b => ({ lazy: b.dataset.lazy, off: b.getAttribute('aria-disabled'), text: b.textContent, h: Math.round(b.getBoundingClientRect().height) }))
     check('T1 a host with require.async: the third card is live (「图片转图纸 · 照片变成图纸」, 64 tall), nothing fetched before opening',
@@ -409,7 +414,9 @@ try {
     const small = png(320, 320, (x, y) => ((x - 160) ** 2 + (y - 160) ** 2 < 110 ** 2 ? [98, 182, 233, 255] : [250, 249, 245, 255]))
     const dropped = await q.evaluate(dropFile, ['.pd-board', b64(small), 'ball.png', 'image/png'])
     await q.locator('.pd-pic-crop').waitFor({ timeout: 5000 })
-    check('T1 a picture dropped on the panel (on the board) opens the page with it; the host never sees the drop (no chat attachment)', dropped.dropPrevented && dropped.overPrevented && dropped.hostSaw.length === 0 && await q.locator('[data-composer-card] img, [data-attachment]').count() === 0, JSON.stringify(dropped))
+    await q.waitForTimeout(800) // DSH adds a dropped file's card within a frame or two; give it far longer
+    const panelCards = await q.evaluate(hostFileCards, 'ball.png')
+    check('T1 a picture dropped on the panel (on the board) opens the page with it; the host never sees the drop (no DSH attachment)', dropped.dropPrevented && dropped.overPrevented && dropped.hostSaw.length === 0 && panelCards === 0, JSON.stringify({ ...dropped, panelCards }))
     await q.locator('.pd-head .pd-ib').first().click()
     await q.locator('.pd-v-home').waitFor()
     const pasted = await q.evaluate(pasteFile, ['.pd-root', b64(small), 'ball.png', 'image/png'])
@@ -419,9 +426,28 @@ try {
     await q.locator('.pd-head .pd-ib').first().click()
     const editor = q.locator('[contenteditable=true]').first()
     await editor.click()
-    const chatPaste = await q.evaluate(pasteFile, ['[contenteditable=true]', b64(small), 'ball.png', 'image/png'])
+    const chatPaste = await q.evaluate(pasteFile, ['[contenteditable=true]', b64(small), 'chat-paste.png', 'image/png'])
     await q.waitForTimeout(300)
     check('T1 a picture pasted into the chat input is left to DSH (the panel stays on the start page)', await q.locator('.pd-v-home').count() === 1 && await q.locator('.pd-pic').count() === 0, `defaultPrevented by host: ${chatPaste}`)
+    // panel open: a file dropped on the chat input is still DSH's attachment, and the panel ignores it
+    const openDrop = await q.evaluate(dropFile, ['[contenteditable=true]', b64(dot), 'chat-open.png', 'image/png'])
+    const openCard = await q.waitForFunction(hostFileCards, 'chat-open.png', { timeout: 8000 }).then(() => true, () => false)
+    check('T1 panel open: a file dropped on the chat input becomes a DSH attachment; the panel stays on the start page', openCard && openDrop.hostSaw.includes('drop') && await q.locator('.pd-v-home').count() === 1 && await q.locator('.pd-pic').count() === 0, JSON.stringify({ openCard, ...openDrop }))
+    // (the chat paste above used another name, so a ball.png attachment could only come from the panel drop)
+    check('T1 the file dropped on the panel never became a DSH attachment, then or later', await q.evaluate(hostFileCards, 'ball.png') === 0)
+    // panel closed (its tab closed: the plugin unmounts and must leave nothing bound): DSH attaches as before
+    const tabClose = await q.evaluate(() => {
+      const tabs = [...document.querySelectorAll('[role=tab], [role=tablist] > *, div, li')].filter(e => !e.closest('.pd-root, .pd-portal') && e.textContent?.trim() === '拼豆小憩' && e.querySelector('button'))
+      const btn = tabs.at(-1)?.querySelector('button')
+      btn?.setAttribute('data-e2e-close', '')
+      return btn ? btn.getAttribute('aria-label') ?? btn.title : null
+    })
+    if (tabClose !== null) await q.locator('[data-e2e-close]').click()
+    await q.waitForTimeout(500)
+    const goneRoots = await q.locator('.pd-root').count()
+    const closedAfter = await q.evaluate(dropFile, ['[contenteditable=true]', b64(dot), 'chat-after-close.png', 'image/png'])
+    const afterCard = await q.waitForFunction(hostFileCards, 'chat-after-close.png', { timeout: 8000 }).then(() => true, () => false)
+    check('T1 panel closed (tab closed, plugin unmounted): a file dropped on the chat input becomes a DSH attachment', tabClose !== null && goneRoots === 0 && afterCard && closedAfter.hostSaw.includes('drop'), JSON.stringify({ tabClose, goneRoots, afterCard, ...closedAfter }))
     await q.context().close()
 
     // ── load failure: in-page retry, Enter and Space, no toast; skeleton after 150 ms ──
@@ -453,6 +479,11 @@ try {
     await f.locator('.pd-head .pd-ib').first().click()
     const cardFailed = await pictureCard(f).evaluate(b => ({ lazy: b.dataset.lazy, text: b.textContent }))
     check('T1 after a failure the home card says 「加载失败，点此重试」', cardFailed.lazy === 'failed' && cardFailed.text.includes('加载失败，点此重试'), JSON.stringify(cardFailed))
+    // spec §18.6 / C6: after a failed load a picture dropped on the panel is swallowed and ignored (no reload)
+    const failDrop = await f.evaluate(dropFile, ['.pd-root', b64(png(40, 40, () => [0, 0, 0, 255])), 'failed-panel.png', 'image/png'])
+    await f.waitForTimeout(800)
+    const failCards = await f.evaluate(hostFileCards, 'failed-panel.png')
+    check('T1 load failed: a picture dropped on the panel is swallowed (no DSH attachment), nothing opens or reloads', failDrop.dropPrevented && failDrop.hostSaw.length === 0 && failCards === 0 && fetches === 2 && await f.locator('.pd-v-home').count() === 1, JSON.stringify({ ...failDrop, failCards, fetches }))
     await outShot(f, 't1-card-failed')
     await pictureCard(f).click()
     await f.locator('.pd-lazy[data-lazy=failed] button').waitFor({ timeout: 10000 })
@@ -497,6 +528,15 @@ try {
       if (lang === 'zh') {
         const taken = await u.evaluate(pasteFile, ['.pd-root', b64(png(40, 40, () => [0, 0, 0, 255])), 'p.png', 'image/png'])
         check('T1 no require.async: a pasted picture is not taken', !taken && await u.locator('.pd-v-home').count() === 1)
+        // spec §18.6 / C6: a picture dropped on the panel is still the panel's (never a chat attachment), and ignored
+        const pic = b64(png(40, 40, () => [0, 0, 0, 255]))
+        const offDrop = await u.evaluate(dropFile, ['.pd-root', pic, 'off-panel.png', 'image/png'])
+        await u.waitForTimeout(800)
+        const offCards = await u.evaluate(hostFileCards, 'off-panel.png')
+        check('T1 no require.async: a picture dropped on the panel is swallowed (no DSH attachment) and nothing opens', offDrop.dropPrevented && offDrop.hostSaw.length === 0 && offCards === 0 && await u.locator('.pd-v-home').count() === 1 && await u.locator('.pd-lazy, .pd-pic').count() === 0 && asked === 0, JSON.stringify({ ...offDrop, offCards }))
+        const offChat = await u.evaluate(dropFile, ['[contenteditable=true]', pic, 'off-chat.png', 'image/png'])
+        const offChatCard = await u.waitForFunction(hostFileCards, 'off-chat.png', { timeout: 8000 }).then(() => true, () => false)
+        check('T1 no require.async: a picture dropped on the chat input is still a DSH attachment', offChatCard && offChat.hostSaw.includes('drop'), JSON.stringify({ offChatCard, ...offChat }))
       }
       await outShot(u, `t1-unsupported-${lang}`)
       await u.locator('.pd-start .pd-big').first().click()

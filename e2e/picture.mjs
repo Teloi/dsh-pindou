@@ -88,3 +88,14 @@ export function pasteFile([selector, b64, name, type]) {
   document.querySelector(selector).dispatchEvent(e)
   return e.defaultPrevented
 }
+
+/**
+ * How many host elements outside the plugin name this file: DSH shows an attached image as a
+ * thumbnail (img alt = file name, remove/retry buttons labelled with it) and other files as a card
+ * with the name as text (ui-attachment ComposerAttachments.tsx).
+ */
+export function hostFileCards(name) {
+  return [...document.querySelectorAll('img, [aria-label], span, div')]
+    .filter(e => !e.closest('.pd-root, .pd-portal'))
+    .filter(e => e.getAttribute('alt') === name || (e.getAttribute('aria-label') ?? '').includes(name) || (e.childElementCount === 0 && e.textContent?.trim() === name)).length
+}

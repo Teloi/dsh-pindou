@@ -90,6 +90,8 @@ export async function readPicture(file: Blob, doc: Document = document, max = DE
 /** The crop: centre and zoom over the decoded picture (zoom 1 = the largest centred square). */
 export interface View { readonly cx: number, readonly cy: number, readonly zoom: number }
 
+const ZONE_DRAGS = ['dragenter', 'dragleave', 'drop'] as const
+
 export function clampView(w: number, h: number, v: View): View {
   const zoom = Math.min(ZOOM_MAX, Math.max(1, v.zoom))
   const half = Math.min(w, h) / zoom / 2
@@ -144,6 +146,20 @@ export function PicturePage(props: PictureProps): ReactElement {
   const [over, setOver] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const zone = useRef<HTMLDivElement>(null)
+  // The drop highlight. Native listeners: the panel root stops file drags from propagating (so
+  // DSH never attaches them to the chat), which also keeps them from React's delegated handlers.
+  // A depth count keeps it lit while the pointer crosses the zone's own text and button.
+  useEffect(() => {
+    const el = zone.current
+    let depth = 0
+    const on = (e: DragEvent): void => {
+      depth = e.type === 'dragenter' ? depth + 1 : e.type === 'dragleave' ? depth - 1 : 0
+      setOver(depth > 0)
+    }
+    for (const type of ZONE_DRAGS) el?.addEventListener(type, on)
+    return () => { for (const type of ZONE_DRAGS) el?.removeEventListener(type, on) }
+  // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the zone is rendered only while there is no picture
+  }, [pic])
   const crop = useRef<HTMLDivElement>(null)
   const cropCanvas = useRef<HTMLCanvasElement>(null)
   const preview = useRef<HTMLCanvasElement>(null)
@@ -272,7 +288,7 @@ export function PicturePage(props: PictureProps): ReactElement {
           aria-label={t('drop')} aria-describedby="pd-pic-err pd-pic-note" data-error={error ?? undefined} data-over={over || undefined}
           onClick={pick}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick() } }}
-          onDragEnter={() => { setOver(true) }} onDragLeave={() => { setOver(false) }} onDrop={() => { setOver(false) }}>
+>
           <span className="pd-pic-ic" aria-hidden>{icon}</span>
           <span>{t('drop')}</span>
           <span className="pd-btn" aria-hidden>{t('choose')}</span>
