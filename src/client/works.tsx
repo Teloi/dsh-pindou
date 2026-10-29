@@ -1,0 +1,343 @@
+/**
+ * The works wall (spec §18.4, U1). This module is the lazy chunk
+ * lib/client.works.js: the wall page, the home row's thumbnails, the detail
+ * card and the delete-with-undo toast. Collecting on iron and withdrawing on
+ * un-iron are the store's job (game-store.ts), so they never wait for this chunk.
+ *
+ * It may not import the entry's modules (scripts/async-chunks.ts): the store,
+ * the bead renderer, the decoder and the export/copy actions come in through
+ * `kit` (types only are imported), and it carries its own strings and styles.
+ */
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import type { StoredWork, Template } from '../core/index.ts'
+import { addWork, cleanWorks, removeWork, type Work } from '../core/works.ts'
+import type { Env } from './ui/context.tsx'
+import type { WorksKit } from './ui/Works.tsx'
+import { WORKS_CSS } from './works-styles.ts'
+
+const STRINGS = {
+  zh: {
+    wall: '我的作品', empty: '熨烫过的作品会住在这里', go: '去拼一个', tpl: '模板', free: '自由拼', ai: 'AI 生成', picture: '图片转图纸',
+    export: '导出 PNG', copy: '复制图片', again: '再拼一次', del: '删除', close: '关闭', deleted: '已删除作品', undo: '撤销', all: '全部 ›',
+  },
+  en: {
+    wall: 'My works', empty: 'Your ironed pieces will live here', go: 'Make one', tpl: 'Pattern', free: 'Free play', ai: 'AI pattern', picture: 'Picture',
+    export: 'Export PNG', copy: 'Copy image', again: 'Bead it again', del: 'Delete', close: 'Close', deleted: 'Work deleted', undo: 'Undo', all: 'All ›',
+  },
+} as const
+export const WORKS_STRINGS = STRINGS
+
+const STYLE_ID = 'dsh-pindou-works-styles'
+/** Spec §18.4: the delete toast stays 5 s (paused while hovered or focused), like 清空. */
+export const UNDO_MS = 5000
+/** Home row: 56px thumbnails, 8px apart. */
+const THUMB = 56
+const GAP = 8
+
+/** What every part of the chunk gets from the entry. */
+export interface WorksProps {
+  readonly env: Env
+  readonly kit: WorksKit
+  /** The wall as the entry holds it (ids checked only). */
+  readonly wall: readonly StoredWork[]
+}
+
+/**
+ * The valid works, oldest first. A wall with broken entries is written back
+ * cleaned (only the broken ones go), once, from an effect.
+ */
+function useWorks({ env, wall }: WorksProps): readonly Work[] {
+  const clean = useMemo(() => cleanWorks(wall), [wall])
+  useEffect(() => { if (clean.dropped) env.store.setWall(clean.works) }, [clean, env])
+  return clean.works
+}
+
+/** 再拼一次: a new game from the work's source (spec §18.4); see game-store.ts §4.3 for how a source resumes. */
+export function replay(env: Env, kit: WorksKit, w: Work): void {
+  const s = w.s
+  if (s === null) { env.store.startFree(); return }
+  if (s.startsWith('template:')) { env.store.follow(s.slice(9)); return }
+  const d = kit.decode(w.p ?? w.b, w.n)
+  if (d.ok) env.store.startPicture(d.board, s.startsWith('board:p-') ? 'p-' : '')
+}
+
+function useStyles(): void {
+  useLayoutEffect(() => {
+    if (document.getElementById(STYLE_ID)) return
+    const el = document.createElement('style')
+    el.id = STYLE_ID
+    el.textContent = WORKS_CSS
+    document.head.append(el)
+  }, [])
+}
+
+/** 「模板 · 爱心 · 10 月 29 日」 */
+export function workLabel(w: Work, lang: 'zh' | 'en', template: (id: string) => Template | undefined): string {
+  const t = STRINGS[lang]
+  const d = new Date(w.i)
+  const date = lang === 'zh' ? `${d.getMonth() + 1} 月 ${d.getDate()} 日` : d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+  const s = w.s
+  const tpl = s?.startsWith('template:') ? template(s.slice(9)) : undefined
+  const src = s === null ? t.free : s.startsWith('template:') ? `${t.tpl} · ${tpl ? tpl[lang] : s.slice(9)}` : s.startsWith('board:p-') ? t.picture : t.ai
+  return `${src} · ${date}`
+}
+
+/** Month heading: 「2026 年 10 月」 / "October 2026". */
+export function monthLabel(at: number, lang: 'zh' | 'en'): string {
+  const d = new Date(at)
+  return lang === 'zh' ? `${d.getFullYear()} 年 ${d.getMonth() + 1} 月` : d.toLocaleDateString('en', { month: 'long', year: 'numeric' })
+}
+
+/** Newest first, one group per calendar month. */
+export function byMonth(wall: readonly Work[]): Array<{ key: string; at: number; works: Work[] }> {
+  const groups: Array<{ key: string; at: number; works: Work[] }> = []
+  for (const w of wall.toReversed()) {
+    const d = new Date(w.i)
+    const key = `${d.getFullYear()}-${d.getMonth()}`
+    const last = groups.at(-1)
+    if (last?.key === key) last.works.push(w)
+    else groups.push({ key, at: w.i, works: [w] })
+  }
+  return groups
+}
+
+/** The piece drawn ironed (no PNG made): the export bitmap, scaled into a small canvas. */
+function Piece({ kit, w, css }: { readonly kit: WorksKit; readonly w: Work; readonly css: number }): ReactElement {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const c = ref.current
+    const d = kit.decode(w.b, w.n)
+    const ctx = c?.getContext('2d')
+    if (!c || !d.ok || !ctx) return
+    const px = Math.round(css * (globalThis.devicePixelRatio || 1))
+    c.width = px
+    c.height = px
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(kit.render(document, d.board, true, false), 0, 0, px, px)
+  }, [kit, w, css])
+  return <canvas ref={ref} width={css} height={css} aria-hidden />
+}
+
+/** A thumbnail tapped on the home row opens its detail card on the wall page. */
+let openOnArrival: number | null = null
+
+/** Home section (spec §18.4): 「我的作品 · N」, 全部 ›, and as many thumbnails as fit on one line, newest first. */
+export function WorksRow(props: WorksProps & { readonly fade: boolean }): ReactElement {
+  const { env, kit, fade } = props
+  useStyles()
+  const wall = useWorks(props)
+  const ref = useRef<HTMLDivElement>(null)
+  const [fit, setFit] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = (): void => { setFit(Math.max(1, Math.floor((el.clientWidth + GAP) / (THUMB + GAP)))) }
+    measure()
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : undefined
+    ro?.observe(el)
+    return () => { ro?.disconnect() }
+  }, [])
+  const shown = wall.slice(-fit).toReversed()
+  return (
+    <section className="pd-works">
+      <h3 className="pd-sec">
+        <span>{env.t('homeWorks')} · {wall.length}</span>
+        <button type="button" className="pd-link" onClick={() => { env.store.go('works') }}>{STRINGS[env.lang].all}</button>
+      </h3>
+    <div ref={ref} className={fade && !env.reducedMotion() ? 'pd-wrow pd-fade' : 'pd-wrow'}>
+      {fit === 0
+        ? null
+        : shown.map(w => (
+          <button key={w.i} type="button" className="pd-wt" aria-label={workLabel(w, env.lang, kit.template)}
+            onClick={() => { openOnArrival = w.i; env.store.go('works') }}>
+            <Piece kit={kit} w={w} css={THUMB - 8} />
+          </button>
+        ))}
+    </div>
+    </section>
+  )
+}
+
+const FOCUSABLE = 'button:not([disabled]),[tabindex="0"]'
+
+/**
+ * Detail card (spec §18.4): over the page inside the panel, not a modal; Tab
+ * stays inside the card, Esc closes it and focus goes back to the work.
+ */
+function Detail({ env, kit, w, onClose, onDelete }: { readonly env: Env; readonly kit: WorksKit; readonly w: Work; readonly onClose: () => void; readonly onDelete: () => void }): ReactElement {
+  const t = STRINGS[env.lang]
+  const ref = useRef<HTMLDivElement>(null)
+  const d = kit.decode(w.b, w.n)
+  const board = d.ok ? d.board : undefined
+  useEffect(() => { ref.current?.querySelector<HTMLElement>('[data-primary]')?.focus() }, [])
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key === 'Escape') { e.stopPropagation(); onClose(); return }
+    if (e.key !== 'Tab') return
+    const list = [...(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])]
+    const i = list.indexOf(document.activeElement as HTMLElement)
+    const next = e.shiftKey ? (i <= 0 ? list.at(-1) : list[i - 1]) : (i === list.length - 1 ? list[0] : list[i + 1])
+    e.preventDefault()
+    next?.focus()
+  }
+  const label = workLabel(w, env.lang, kit.template)
+  return (
+    <div ref={ref} className="pd-wdet" role="dialog" aria-modal="false" aria-label={label} onKeyDown={onKeyDown}>
+      <button type="button" className="pd-btn pd-wclose" onClick={onClose}>{t.close}</button>
+      <div className="pd-wbig"><Piece kit={kit} w={w} css={304} /></div>
+      <p className="pd-wmeta">{label}</p>
+      <div className="pd-wacts">
+        {board ? <button type="button" className="pd-btn pd-primary" data-primary onClick={() => { kit.exportBoard(env, { board, target: w.s }) }}>{t.export}</button> : null}
+        {board && kit.copySupported() ? <button type="button" className="pd-btn" onClick={() => { kit.copyBoard(env, board) }}>{t.copy}</button> : null}
+        <button type="button" className="pd-btn" onClick={() => { replay(env, kit, w) }}>{t.again}</button>
+        <button type="button" className="pd-btn pd-wdel" onClick={onDelete}>{t.del}</button>
+      </div>
+    </div>
+  )
+}
+
+/** The delete toast: 撤销 for 5 s; hovering or focusing it holds the clock (like the panel's toast). */
+function UndoToast({ lang, onUndo, onDone }: { readonly lang: 'zh' | 'en'; readonly onUndo: () => void; readonly onDone: () => void }): ReactElement {
+  const t = STRINGS[lang]
+  const [held, setHeld] = useState(0)
+  const left = useRef(UNDO_MS)
+  useEffect(() => {
+    if (held > 0) return
+    const started = Date.now()
+    const id = setTimeout(onDone, left.current)
+    return () => { clearTimeout(id); left.current = Math.max(0, left.current - (Date.now() - started)) }
+  }, [held, onDone])
+  const hold = (on: boolean) => (): void => { setHeld(h => Math.max(0, h + (on ? 1 : -1))) }
+  return (
+    <div className="pd-toast" role="status" data-held={held > 0 || undefined}
+      onPointerEnter={hold(true)} onPointerLeave={hold(false)} onFocus={hold(true)} onBlur={hold(false)}>
+      <span>{t.deleted}</span>
+      <button type="button" onClick={onUndo}>{t.undo}</button>
+    </div>
+  )
+}
+
+/** The nearest work one row up or down (by position on screen, across month groups). */
+function verticalNeighbour(items: readonly HTMLElement[], from: HTMLElement, down: boolean): HTMLElement | undefined {
+  const r = from.getBoundingClientRect()
+  const cx = r.left + r.width / 2
+  const rows = items.filter((el) => {
+    const b = el.getBoundingClientRect()
+    return down ? b.top > r.top + 4 : b.top < r.top - 4
+  })
+  if (rows.length === 0) return undefined
+  const tops = rows.map(el => el.getBoundingClientRect().top)
+  const rowTop = down ? Math.min(...tops) : Math.max(...tops)
+  const row = rows.filter(el => Math.abs(el.getBoundingClientRect().top - rowTop) < 4)
+  return row.reduce((best, el) => {
+    const b = el.getBoundingClientRect(), bb = best.getBoundingClientRect()
+    return Math.abs(b.left + b.width / 2 - cx) < Math.abs(bb.left + bb.width / 2 - cx) ? el : best
+  })
+}
+
+/**
+ * The wall page (spec §18.4). The grid is one Tab stop (roving tabindex): arrow
+ * keys move, Enter opens the detail card, Delete deletes (with the undo toast).
+ */
+export function WorksPage(props: WorksProps): ReactElement {
+  const { env, kit } = props
+  useStyles()
+  const wall = useWorks(props)
+  const t = STRINGS[env.lang]
+  const [open, setOpen] = useState<number | null>(() => { const id = openOnArrival; openOnArrival = null; return id })
+  const [active, setActive] = useState<number | null>(null)
+  const [undo, setUndo] = useState<{ readonly w: Work; readonly seq: number } | null>(null)
+  const grid = useRef<HTMLDivElement>(null)
+  const refocus = useRef<number | null>(null)
+  const groups = byMonth(wall)
+  const order = groups.flatMap(g => g.works)
+  const current = order.find(w => w.i === active) ?? order[0]
+  const detail = wall.find(w => w.i === open)
+
+  // focus follows the roving tab stop after a move, a close or a delete
+  useEffect(() => {
+    if (refocus.current === null) return
+    const id = refocus.current
+    refocus.current = null
+    const el = grid.current?.querySelector<HTMLElement>(`[data-work="${id}"]`) ?? grid.current?.querySelector<HTMLElement>('[data-work]')
+    el?.focus()
+  })
+
+  // one toast at a time: the newest wins (a panel toast retires the undo toast, a delete the panel's)
+  const panelToast = env.store.getSnapshot().toast
+  const [seenToast, setSeenToast] = useState(panelToast)
+  if (panelToast !== seenToast) { setSeenToast(panelToast); if (panelToast) setUndo(null) }
+
+  const remove = (w: Work): void => {
+    env.store.hideToast()
+    const i = order.indexOf(w)
+    const next = order[i + 1] ?? order[i - 1]
+    env.store.setWall(removeWork(wall, w.i))
+    setOpen(null)
+    setActive(next?.i ?? null)
+    refocus.current = next?.i ?? null
+    setUndo(u => ({ w, seq: (u?.seq ?? 0) + 1 }))
+  }
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-work]')
+    if (!el || !current) return
+    const items = [...(grid.current?.querySelectorAll<HTMLElement>('[data-work]') ?? [])]
+    const i = items.indexOf(el)
+    let to: HTMLElement | undefined
+    if (e.key === 'ArrowRight') to = items[i + 1]
+    else if (e.key === 'ArrowLeft') to = items[i - 1]
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') to = verticalNeighbour(items, el, e.key === 'ArrowDown')
+    else if (e.key === 'Home') to = items[0]
+    else if (e.key === 'End') to = items.at(-1)
+    else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault()
+      const w = order.find(x => String(x.i) === el.dataset['work'])
+      if (w) remove(w)
+      return
+    } else return
+    e.preventDefault()
+    if (to) { setActive(Number(to.dataset['work'])); to.focus() }
+  }
+
+  return (
+    <>
+      {wall.length === 0
+        ? (
+          <div className="pd-wempty">
+            <span aria-hidden />
+            <p>{t.empty}</p>
+            <button type="button" className="pd-btn pd-primary" onClick={() => { env.store.go('home') }}>{t.go}</button>
+          </div>
+        )
+        : (
+          <div ref={grid} className="pd-wall" role="group" aria-label={t.wall} onKeyDown={onKeyDown}>
+            {groups.map(g => (
+              <section key={g.key}>
+                <h3 className="pd-sec">{monthLabel(g.at, env.lang)}</h3>
+                <div className="pd-wcols">
+                  {g.works.map(w => (
+                    <button key={w.i} type="button" className="pd-wc" data-work={w.i} tabIndex={w === current ? 0 : -1}
+                      aria-label={workLabel(w, env.lang, kit.template)}
+                      onFocus={() => { setActive(w.i) }}
+                      onClick={() => { setActive(w.i); setOpen(w.i) }}>
+                      <Piece kit={kit} w={w} css={112} />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      {detail
+        ? <Detail env={env} kit={kit} w={detail} onClose={() => { refocus.current = detail.i; setOpen(null) }} onDelete={() => { remove(detail) }} />
+        : null}
+      {undo
+        ? (
+          <UndoToast key={undo.seq} lang={env.lang}
+            onUndo={() => { env.store.setWall(addWork(env.store.works() as Work[], undo.w)); refocus.current = undo.w.i; setActive(undo.w.i); setUndo(null) }}
+            onDone={() => { setUndo(null) }} />
+        )
+        : null}
+    </>
+  )
+}

@@ -130,8 +130,21 @@ describe('check:bundle on lazy chunks', () => {
     expect(readFileSync(join(ROOT, 'lib/client.picture.js'), 'utf8')).toContain('VP8X')
   })
 
+  it('the committed lib: the works wall is a lazy chunk; collecting stays in the entry (spec §18.4/§18.6)', () => {
+    const shipped = readFileSync(join(ROOT, 'lib/client.js'), 'utf8')
+    const works = readFileSync(join(ROOT, 'lib/client.works.js'), 'utf8')
+    expect(shipped).toMatch(/require\.async\(["'`]\.\/client\.works\.js["'`]\)/)
+    // the wall page, its copy and the per-work validation live only in the chunk
+    for (const s of ['熨烫过的作品会住在这里', 'Bead it again', 'dsh-pindou-works-styles']) {
+      expect(shipped, s).not.toContain(s)
+      expect(works, s).toContain(s)
+    }
+    // the store writes the wall under its own key, from the entry
+    expect(shipped).toContain('dsh-pindou:works')
+  })
+
   it('custom properties: the committed lib ships short names only, each defined (scripts/css-vars.ts)', () => {
-    const shipped = ['client.js', 'client.picture.js'].map(f => readFileSync(join(ROOT, 'lib', f), 'utf8')).join('')
+    const shipped = ['client.js', 'client.picture.js', 'client.works.js'].map(f => readFileSync(join(ROOT, 'lib', f), 'utf8')).join('')
     expect(shipped).not.toMatch(/--pd-/)
     expect(shipped).toContain(`var(${CSS_VARS['--pd-surface']})`)
   })
@@ -154,7 +167,7 @@ describe('check:bundle on lazy chunks', () => {
   })
 
   it('class names: the committed lib ships short names only (scripts/css-classes.ts)', () => {
-    const shipped = ['client.js', 'client.picture.js'].map(f => readFileSync(join(ROOT, 'lib', f), 'utf8')).join('')
+    const shipped = ['client.js', 'client.picture.js', 'client.works.js'].map(f => readFileSync(join(ROOT, 'lib', f), 'utf8')).join('')
     expect(shipped.match(/(?<![\w$-])pd-[\w-]*\w/g)).toBeNull()
     expect(shipped).toContain(`.${CSS_CLASSES['pd-root']}{`)
   })

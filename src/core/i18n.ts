@@ -38,6 +38,8 @@ const COPY = {
   homePictureDesc: ['照片变成图纸', 'A photo becomes a pattern'],
   needNewerDsh: ['需要新版 DSH', 'Requires a newer DSH'],
   loadRetry: ['加载失败，点此重试', 'Couldn’t load · Retry'],
+  homeWorks: ['我的作品', 'My works'],
+  homeWorksDesc: ['熨烫过的都在这里', 'All you’ve ironed'],
   myPattern: ['我的图纸', 'My pattern'],
   homeTemplates: ['模板', 'Patterns'],
   homeCount: ['{n} 个', '{n}'],

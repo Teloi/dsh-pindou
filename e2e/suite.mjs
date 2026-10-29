@@ -325,7 +325,7 @@ function splitWords(el) {
   }
   return out
 }
-/** The three start cards as laid out now (`lineCount` is `lines`, `split` is `splitWords`, passed in: all run in the page): size, title and description lines, what is cut (design I1/C1). */
+/** The four start cards as laid out now (`lineCount` is `lines`, `split` is `splitWords`, passed in: all run in the page): size, title and description lines, what is cut (design I1/C1). */
 const startCards = (lineCount, split) => [...document.querySelectorAll('.pd-start .pd-big')].map((c) => {
   const b = c.querySelector('b'), d = c.querySelector('b + span'), box = c.getBoundingClientRect()
   const lh = d.getClientRects()[0] ? d.scrollHeight / Math.max(1, lineCount(d)) : 16
@@ -338,8 +338,8 @@ const startCards = (lineCount, split) => [...document.querySelectorAll('.pd-star
 })
 /**
  * I1/C1 at each panel width: titles never cut (Chinese on one line; English may wrap at a space), a
- * status line (需要新版 DSH / 加载失败) in full, other descriptions at most two whole lines, three
- * equal cards in one row at least 64 px (72 px icon-on-top below 480).
+ * status line (需要新版 DSH / 加载失败) in full, other descriptions at most two whole lines, four
+ * equal cards at least 64 px (72 px icon-on-top below 480): two rows of two below 560, one row from 560 (spec §18.4).
  */
 async function cardsFit(p, label, widths = [300, 360, 420, 640, 900], shots = []) {
   const all = []
@@ -351,9 +351,10 @@ async function cardsFit(p, label, widths = [300, 360, 420, 640, 900], shots = []
     const min = px < 480 ? 72 : 64
     const cut = cards.filter(c => c.titleCut || c.titleSplit.length > 0 || (label.startsWith('zh') && c.titleLines !== 1) || c.titleLines > 2
       || (c.status ? c.subCut : c.subShown > 2 || (c.subCut && c.clamp !== '2')))
-    const ok = cards.length === 3 && cut.length === 0 && Math.max(...hs) - Math.min(...hs) <= 1 && Math.max(...ws) - Math.min(...ws) <= 1
-      && Math.min(...hs) >= min && new Set(cards.map(c => c.top)).size === 1
-    check(`I1/C1 (${label}) panel ${px}px: card titles whole (wrapped only at spaces), status line whole, descriptions ≤ 2 lines, three equal cards ≥ ${min}px`, ok, JSON.stringify(cut.length ? cut : cards.map(c => [c.w, c.h, c.titleLines, c.subLines, c.subShown])))
+    const rows = px >= 560 ? 1 : 2
+    const ok = cards.length === 4 && cut.length === 0 && Math.max(...hs) - Math.min(...hs) <= 1 && Math.max(...ws) - Math.min(...ws) <= 1
+      && Math.min(...hs) >= min && new Set(cards.map(c => c.top)).size === rows
+    check(`I1/C1 (${label}) panel ${px}px: card titles whole (wrapped only at spaces), status line whole, descriptions ≤ 2 lines, four equal cards ≥ ${min}px in ${rows} row${rows > 1 ? 's' : ''}`, ok, JSON.stringify(cut.length ? cut : cards.map(c => [c.w, c.h, c.titleLines, c.subLines, c.subShown])))
     all.push({ px, cards })
     if (shots.includes(px)) await outShot(p, `c1-home-${label}-${px}`, { clip: await p.locator('.pd-start').boundingBox() })
   }
@@ -466,11 +467,279 @@ async function guideRingSection() {
   }
 }
 
-// E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings (the rest of the suite is unchanged)
+// ── W. my works (spec §18.4) and its lazy chunk on the start page (design decision 01:37, an exception to §18.6) ──
+const WORK_CHUNK = /\/dsh-pindou\/client\.works\.js\?/
+/** `n` valid works, oldest first, one a day up to 2026-06-01 (sources cycle free / pattern / picture / AI). */
+function seedWorks(n) {
+  const end = Date.parse('2026-06-01T09:00:00+08:00'), hex = '0123456789abcdef', srcs = [null, 'template:heart', 'board:p-1', 'board:w-1', 'template:cat']
+  return Array.from({ length: n }, (_w, k) => ({
+    i: end - (n - 1 - k) * 86_400_000, n: 16, s: srcs[k % 5],
+    b: Array.from({ length: 256 }, (_, c) => { const x = c % 16, y = c >> 4; return Math.abs(x - 7.5) + Math.abs(y - 7.5) < 7 ? hex[(k + ((x + y) >> 2)) % 16] : '.' }).join(''),
+  }))
+}
+/** Init script: the wall (raw JSON string) written once per tab, before the plugin reads it. */
+const seedInit = (json, extra = '') => `if (!sessionStorage.getItem('w')) { sessionStorage.setItem('w', '1'); localStorage.setItem('dsh-pindou:works', ${JSON.stringify(json)}); ${extra} }`
+/** The home section as laid out now (evaluated in the page). */
+const worksRow = () => {
+  const s = document.querySelector('.pd-v-home .pd-works')
+  if (!s) return null
+  const r = s.getBoundingClientRect(), row = s.querySelector('.pd-wrow'), h = s.querySelector('h3')
+  const thumbs = [...s.querySelectorAll('.pd-wt')]
+  return {
+    h: Math.round(r.height * 4) / 4, head: Math.round(h.getBoundingClientRect().height * 4) / 4, rowH: Math.round(row.getBoundingClientRect().height * 4) / 4,
+    title: (h.querySelector('span') ?? h).textContent, btn: row.querySelector('button:not(.pd-wt)')?.textContent ?? null, text: row.textContent, thumbs: thumbs.length,
+    first: thumbs[0]?.getAttribute('aria-label') ?? null, fits: Math.floor((row.clientWidth + 8) / 64),
+    anim: thumbs[0] ? `${getComputedStyle(thumbs[0]).animationName}/${getComputedStyle(thumbs[0]).animationDuration}` : null,
+    toast: document.querySelectorAll('.pd-toast').length,
+  }
+}
+const wallCount = p => p.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:works') ?? '[]').length)
+const backHome = async (p) => { await p.locator('.pd-head .pd-ib').first().click(); await p.locator('.pd-v-home').waitFor(); await p.waitForTimeout(200) }
+const worksCard = p => p.locator('.pd-start .pd-big').nth(3)
+/** A shot of the home section, scrolled into the panel's view first. */
+const rowShot = async (p, name, auditOpts) => { const s = p.locator('.pd-v-home .pd-works'); await s.scrollIntoViewIfNeeded(); await outShot(p, name, { clip: await s.boundingBox() }, auditOpts) }
+const setWidth = async (p, px) => { await p.evaluate(v => { document.querySelector('.pd-root').style.width = v ? `${v}px` : '' }, px); await p.waitForTimeout(300) }
+
+async function worksSection() {
+  const errorsBefore = pageErrors.length
+  // 1. a slow chunk: the row holds its height while loading, thumbnails fade in (150 ms), loaded once per session
+  {
+    const w = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(JSON.stringify(seedWorks(60))))
+    let asked = 0
+    await w.route(WORK_CHUNK, async (route) => { asked++; await new Promise(r => { setTimeout(r, 4000) }); await route.continue() })
+    await startSession(w, '看看 README')
+    await w.locator('.pd-entry').click()
+    await w.locator('.pd-v-home .pd-works').waitFor()
+    const loading = await w.evaluate(worksRow)
+    await rowShot(w, 'w-row-loading', { text: false })
+    await w.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+    const loaded = await w.evaluate(worksRow)
+    check('W §18.4 home row while the chunk loads: 「我的作品 · 60」 over an empty 56 px row, no toast', loading.title === '我的作品 · 60' && loading.rowH === 56 && loading.thumbs === 0 && loading.btn === null && loading.toast === 0, JSON.stringify(loading))
+    check('W placeholder height = loaded height (nothing below moves when the thumbnails arrive)', loading.h === loaded.h && loading.head === loaded.head && loaded.rowH === 56, JSON.stringify({ loading, loaded }))
+    check('W loaded: as many thumbnails as fit on one line, newest first (6 月 1 日), 全部 ›', loaded.thumbs === loaded.fits && loaded.first?.endsWith('6 月 1 日') && loaded.btn === null && await w.locator('.pd-v-home .pd-works h3 .pd-link').textContent() === '全部 ›', JSON.stringify(loaded))
+    check('W thumbnails that arrive on screen fade in over 150 ms', /^\S+\/0\.15s$/.test(loaded.anim ?? '') && !loaded.anim.startsWith('none'), loaded.anim)
+    await rowShot(w, 'w-row-loaded')
+    // to the wall and back, to a game and back: no new request, no fade, no placeholder
+    await w.locator('.pd-v-home .pd-works h3 .pd-link').click()
+    await w.locator('.pd-wall .pd-wc').first().waitFor()
+    await backHome(w)
+    const again1 = await w.evaluate(worksRow)
+    await w.locator('.pd-tpl').first().click()
+    await w.locator('.pd-board').waitFor()
+    await backHome(w)
+    const again2 = await w.evaluate(worksRow)
+    check('W back on the start page (twice): the chunk is not requested again, thumbnails at once, no fade', asked === 1 && again1.thumbs === loaded.thumbs && again2.thumbs === loaded.thumbs && again1.anim.startsWith('none') && again2.anim.startsWith('none') && again2.h === loaded.h, JSON.stringify({ asked, again1, again2 }))
+    // reduced motion: a fresh session, the chunk arrives on screen without the fade
+    await w.context().close()
+    const r = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light', reducedMotion: 'reduce' }, 'zh', seedInit(JSON.stringify(seedWorks(5))))
+    await r.route(WORK_CHUNK, async (route) => { await new Promise(res => { setTimeout(res, 800) }); await route.continue() })
+    await startSession(r, '看看 README')
+    await r.locator('.pd-entry').click()
+    await r.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+    const still = await r.evaluate(worksRow)
+    check('W reduced motion: thumbnails appear without the fade', still.anim?.startsWith('none') && still.thumbs === 5, JSON.stringify(still))
+    await r.context().close()
+  }
+  // 2. the chunk fails: title + the retry line at the same height, no toast; Space and Enter retry
+  {
+    let mode = 'fail', fetches = 0
+    const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(JSON.stringify(seedWorks(3))))
+    await f.route(WORK_CHUNK, (route) => { fetches++; return mode === 'fail' ? route.abort('internetdisconnected') : route.continue() })
+    await startSession(f, '看看 README')
+    await openPanel(f)
+    await f.locator('.pd-v-home .pd-works .pd-wrow button').waitFor({ timeout: 10000 })
+    const failed = await f.evaluate(worksRow)
+    check('W chunk failed: 「我的作品 · 3」 and 「加载失败，点此重试」 in the same 56 px row, no toast', failed.title === '我的作品 · 3' && failed.btn === '加载失败，点此重试' && failed.rowH === 56 && failed.toast === 0 && failed.thumbs === 0, JSON.stringify(failed))
+    await rowShot(f, 'w-row-failed')
+    await f.locator('.pd-v-home .pd-works .pd-wrow button').focus()
+    await f.keyboard.press('Space')
+    await f.waitForTimeout(500)
+    const failed2 = await f.evaluate(worksRow)
+    check('W Space on the retry fetches again (still offline: same row, still no toast)', fetches === 2 && failed2.btn === '加载失败，点此重试' && failed2.h === failed.h && failed2.toast === 0, JSON.stringify({ fetches, failed2 }))
+    mode = 'ok'
+    await f.locator('.pd-v-home .pd-works .pd-wrow button').focus()
+    await f.keyboard.press('Enter')
+    await f.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+    const back = await f.evaluate(worksRow)
+    check('W Enter on the retry loads the row (same height, 3 thumbnails)', fetches === 3 && back.thumbs === 3 && back.h === failed.h, JSON.stringify({ fetches, back }))
+    await f.context().close()
+    const caused = pageErrors.splice(errorsBefore)
+    check('W the only errors during the failure run are the aborted chunk loads', caused.every(e => /client\.works\.js|ERR_INTERNET_DISCONNECTED|Failed to fetch|net::/i.test(e)), caused.slice(0, 3).join(' | '))
+  }
+  // 3. a host without require.async: title + 「需要新版 DSH」, same height, nothing to press; the card is off
+  for (const lang of ['zh', 'en']) {
+    const u = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, lang, `${NO_ASYNC_REQUIRE};${seedInit(JSON.stringify(seedWorks(3)))}`)
+    await startSession(u, lang === 'zh' ? '看看 README' : 'Hello', lang)
+    await openPanel(u)
+    const off = await u.evaluate(worksRow)
+    const want = lang === 'zh' ? '需要新版 DSH' : 'Requires a newer DSH'
+    const card = await worksCard(u).evaluate(b => ({ lazy: b.dataset.lazy, aria: b.getAttribute('aria-disabled'), text: b.textContent }))
+    check(`W (${lang}) no require.async: the row says 「${want}」 at the same height, not interactive; the works card is off`, off.text === want && off.btn === null && off.rowH === 56 && off.title === (lang === 'zh' ? '我的作品 · 3' : 'My works · 3') && card.lazy === 'unsupported' && card.aria === 'true' && card.text.endsWith(want), JSON.stringify({ off, card }))
+    await rowShot(u, `w-row-unsupported-${lang}`)
+    await u.context().close()
+  }
+  // 4. the wall page: keyboard, detail card, delete + undo, export, 再拼一次; from a home thumbnail
+  {
+    const k = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(JSON.stringify(seedWorks(60))))
+    await startSession(k, '看看 README')
+    await openPanel(k)
+    await worksCard(k).click()
+    await k.locator('.pd-wall .pd-wc').first().waitFor({ timeout: 10000 })
+    const page = await k.evaluate(() => ({ title: document.querySelector('.pd-head h2')?.textContent, months: [...document.querySelectorAll('.pd-wall h3')].map(h => h.textContent), n: document.querySelectorAll('.pd-wall .pd-wc').length, tabbable: document.querySelectorAll('.pd-wall .pd-wc[tabindex="0"]').length }))
+    check('W wall page: 「我的作品」, 60 works, newest month first (6 月, 5 月, 4 月), one Tab stop', page.title === '我的作品' && page.n === 60 && page.months.join('|') === '2026 年 6 月|2026 年 5 月|2026 年 4 月' && page.tabbable === 1, JSON.stringify(page))
+    const focused = () => k.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent)
+    await k.locator('.pd-wall .pd-wc').first().focus()
+    await k.keyboard.press('ArrowRight')
+    const right = await focused()
+    await k.keyboard.press('ArrowDown')
+    const down = await focused()
+    await k.keyboard.press('End')
+    const end = await focused()
+    await k.keyboard.press('Home')
+    const home = await focused()
+    check('W wall keys: → next, ↓ next row, End last (oldest), Home first (newest)', right?.endsWith('5 月 31 日') && down !== right && end?.endsWith('4 月 3 日') && home?.endsWith('6 月 1 日'), JSON.stringify({ right, down, end, home }))
+    await k.keyboard.press('Enter')
+    await k.locator('.pd-wdet').waitFor()
+    const det = await k.evaluate(() => ({ role: document.querySelector('.pd-wdet')?.getAttribute('role'), label: document.querySelector('.pd-wdet')?.getAttribute('aria-label'), focus: document.activeElement?.textContent, btns: [...document.querySelectorAll('.pd-wdet button')].map(b => b.textContent) }))
+    check('W Enter opens the detail card: a dialog named after the work, focus on 导出 PNG; 关闭, 导出 PNG, 复制图片, 再拼一次, 删除', det.role === 'dialog' && det.label?.endsWith('6 月 1 日') && det.focus === '导出 PNG' && det.btns.join('|') === '关闭|导出 PNG|复制图片|再拼一次|删除', JSON.stringify(det))
+    await outShot(k, 'w-detail-keyboard')
+    const trap = []
+    for (let i = 0; i < 6; i++) { await k.keyboard.press('Tab'); trap.push(await k.evaluate(() => !!document.activeElement?.closest('.pd-wdet'))) }
+    check('W Tab stays inside the detail card', trap.every(Boolean), JSON.stringify(trap))
+    await k.keyboard.press('Escape')
+    await k.waitForTimeout(150)
+    check('W Esc closes the card and focus goes back to the work', await k.locator('.pd-wdet').count() === 0 && (await focused())?.endsWith('6 月 1 日'))
+    await k.keyboard.press('Enter')
+    await k.locator('.pd-wdet').waitFor()
+    await k.locator('.pd-wdet .pd-primary').click()
+    const exported = await k.waitForFunction(() => !!document.querySelector('.pd-toast, .pd-preview'), undefined, { timeout: 5000 }).then(() => true, () => false)
+    check('W 导出 PNG from the card: the piece is saved (toast) or offered (preview)', exported)
+    await k.keyboard.press('Escape')
+    await k.waitForTimeout(150)
+    if (await k.locator('.pd-preview').count()) { await k.keyboard.press('Escape'); await k.waitForTimeout(150) }
+    if (await k.locator('.pd-wdet').count()) { await k.keyboard.press('Escape'); await k.waitForTimeout(150) }
+    await k.locator('.pd-wall .pd-wc').first().focus()
+    await k.keyboard.press('Delete')
+    await k.waitForTimeout(200)
+    const del = { stored: await wallCount(k), shown: await k.locator('.pd-wall .pd-wc').count(), toast: (await k.locator('.pd-toast').allTextContents()).join('|'), focus: await focused() }
+    check('W Delete removes the work at once (stored 59), 「已删除作品 撤销」, focus on the next work', del.stored === 59 && del.shown === 59 && del.toast === '已删除作品撤销' && del.focus?.endsWith('5 月 31 日'), JSON.stringify(del))
+    await outShot(k, 'w-deleted-toast')
+    await k.locator('.pd-toast button', { hasText: '撤销' }).click()
+    await k.waitForTimeout(200)
+    check('W 撤销 brings it back (stored 60) and focus returns to it', await wallCount(k) === 60 && (await focused())?.endsWith('6 月 1 日'))
+    // 再拼一次 on a pattern work (6 月 1 日 is index 59: template:cat)
+    await k.keyboard.press('Enter')
+    await k.locator('.pd-wdet').waitFor()
+    await k.locator('.pd-wdet button', { hasText: '再拼一次' }).click()
+    await k.locator('.pd-board').waitFor()
+    await k.waitForTimeout(300)
+    const replayed = await k.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:v1') ?? '{}'))
+    check('W 再拼一次 follows the work\'s pattern again (template:cat, an empty board)', replayed.target === 'template:cat' && replayed.mode === 'play' && !replayed.ironed, JSON.stringify({ target: replayed.target, mode: replayed.mode }))
+    await backHome(k)
+    // a home thumbnail opens its card on the wall page
+    await k.locator('.pd-v-home .pd-wt').nth(1).click()
+    await k.locator('.pd-wdet').waitFor({ timeout: 5000 })
+    check('W a home thumbnail opens that work\'s card on the wall page', (await k.locator('.pd-wdet').getAttribute('aria-label'))?.endsWith('5 月 31 日'))
+    await k.context().close()
+  }
+  // 5. ironing collects, 取消熨烫 withdraws, the empty wall, and a broken wall
+  {
+    const c = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+    await startSession(c, '看看 README')
+    await openPanel(c)
+    check('W no works: no row on the start page', await c.locator('.pd-v-home .pd-works').count() === 0)
+    await worksCard(c).click()
+    await c.locator('.pd-wempty').waitFor({ timeout: 10000 })
+    check('W empty wall: 「熨烫过的作品会住在这里」 and 去拼一个', (await c.locator('.pd-wempty').textContent()) === '熨烫过的作品会住在这里去拼一个')
+    await outShot(c, 'w-empty-zh-light')
+    await c.locator('.pd-wempty button').click()
+    await c.locator('.pd-v-home').waitFor()
+    await c.locator('.pd-start .pd-big').first().click()
+    await c.locator('.pd-board').waitFor()
+    for (let i = 0; i < 3; i++) await c.locator('.pd-board .pd-cell').nth(i * 17).click()
+    await c.locator('.pd-foot .pd-warm').click()
+    await c.locator('.pd-overlay.pd-result').waitFor({ timeout: 8000 })
+    const ironed = await wallCount(c)
+    await c.locator('.pd-overlay.pd-result .pd-ghost').click()
+    await c.waitForTimeout(200)
+    const withdrawn = await wallCount(c)
+    await c.locator('.pd-foot .pd-warm').click()
+    await c.locator('.pd-overlay.pd-result').waitFor({ timeout: 8000 })
+    await backHome(c)
+    const row = await c.evaluate(worksRow)
+    check('W ironing puts the piece on the wall at once, 取消熨烫 takes it off, ironing again puts it back; home shows 「我的作品 · 1」', ironed === 1 && withdrawn === 0 && await wallCount(c) === 1 && row?.title === '我的作品 · 1', JSON.stringify({ ironed, withdrawn, row }))
+    await c.context().close()
+    // broken entries: only those go (written back cleaned); unreadable JSON is an empty wall and the game still saves
+    const good = seedWorks(3)
+    const broken = JSON.stringify([good[0], { i: 'x' }, good[1], { i: 5, n: 16, b: 'zz', s: null }, null, good[2]])
+    const b = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(broken))
+    await startSession(b, '看看 README')
+    await openPanel(b)
+    await b.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+    await b.waitForTimeout(200)
+    const cleaned = await b.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:works')).map(x => x.i))
+    const brow = await b.evaluate(worksRow)
+    check('W broken entries in storage: only they are dropped (3 of 6 kept, written back), 「我的作品 · 3」', cleaned.join() === good.map(x => x.i).join() && brow.title === '我的作品 · 3' && brow.thumbs === 3, JSON.stringify({ cleaned, brow }))
+    await b.context().close()
+    const j = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit('{oops'))
+    await startSession(j, '看看 README')
+    await openPanel(j)
+    const none = await j.locator('.pd-v-home .pd-works').count()
+    await j.locator('.pd-start .pd-big').first().click()
+    await j.locator('.pd-board').waitFor()
+    await j.locator('.pd-board .pd-cell').first().click()
+    await j.locator('.pd-foot .pd-warm').click()
+    await j.locator('.pd-overlay.pd-result').waitFor({ timeout: 8000 })
+    const saved = await j.evaluate(() => ({ game: JSON.parse(localStorage.getItem('dsh-pindou:v1') ?? '{}').ironed, wall: JSON.parse(localStorage.getItem('dsh-pindou:works') ?? 'null')?.length }))
+    check('W unreadable wall JSON: no row; ironing saves the game and starts a fresh wall of 1', none === 0 && saved.game === true && saved.wall === 1, JSON.stringify({ none, saved }))
+    await j.context().close()
+  }
+  // 6. walkthrough: light/dark × zh/en, 300–900 wide, home row and wall page (60 works), fade settled before each shot
+  for (const scheme of ['light', 'dark']) {
+    for (const lang of ['zh', 'en']) {
+      const v = await newPage({ viewport: { width: 1280, height: 900 }, colorScheme: scheme }, lang, seedInit(JSON.stringify(seedWorks(60))))
+      await startSession(v, lang === 'zh' ? '看看 README' : 'Hello', lang)
+      await openPanel(v)
+      // the host's full-screen sidebar, so a panel up to 900 px is all on screen (a wider .pd-root than its
+      // sidebar would be clipped, and its crop would take in the host's clock)
+      await v.getByRole('button', { name: HOST[lang].full }).first().click()
+      await v.waitForTimeout(800)
+      const room = Math.round((await panelBox(v))?.width ?? 0)
+      check(`W (${lang} ${scheme}) walkthrough: the full-screen sidebar has room for a 900 px panel`, room >= 900, `width ${room}`)
+      await v.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+      const fits = []
+      for (const px of [300, 360, 420, 480, 560, 640, 900]) {
+        await setWidth(v, px)
+        const row = await v.evaluate(worksRow)
+        fits.push([px, row.thumbs, row.fits, row.rowH])
+        if ([300, 420, 640, 900].includes(px)) await rowShot(v, `w-home-${lang}-${scheme}-${px}`)
+      }
+      check(`W (${lang} ${scheme}) home row 300–900: one line of whole thumbnails at every width`, fits.every(([, n, fit, h]) => n === fit && n >= 3 && h === 56), JSON.stringify(fits))
+      await setWidth(v, null)
+      await v.locator('.pd-v-home .pd-works h3 .pd-link').click()
+      await v.locator('.pd-wall .pd-wc').first().waitFor()
+      const cols = []
+      for (const px of [300, 359, 360, 420, 560, 561, 640, 900]) {
+        await setWidth(v, px)
+        cols.push([px, await v.evaluate(() => getComputedStyle(document.querySelector('.pd-wcols')).gridTemplateColumns.split(' ').length)])
+        if ([300, 420, 640, 900].includes(px)) await outShot(v, `w-wall-${lang}-${scheme}-${px}`, { clip: await v.locator('.pd-root').boundingBox() })
+      }
+      check(`W (${lang} ${scheme}) wall columns: 3 below 360, 4 to 560, 6 above`, cols.map(c => c[1]).join() === '3,3,4,4,4,6,6,6', JSON.stringify(cols))
+      await setWidth(v, null)
+      await v.locator('.pd-wall .pd-wc').first().click()
+      await v.locator('.pd-wdet').waitFor()
+      await outShot(v, `w-detail-${lang}-${scheme}`, { clip: await v.locator('.pd-root').boundingBox() })
+      await v.context().close()
+    }
+  }
+}
+
+// E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
 try {
   sections: {
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
+  if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
   // ── T1. picture to pattern (spec §18.2) + lazy modules (spec §18.6), in the real product ──
   log('T1. picture to pattern')
   {
@@ -488,8 +757,8 @@ try {
     check('T1 panel never opened: a file dropped on the chat input becomes a DSH attachment', closedCard && closedDrop.dropPrevented && closedDrop.hostSaw.includes('drop'), JSON.stringify({ closedCard, ...closedDrop }))
     await openPanel(q)
     const live = await pictureCard(q).evaluate(b => ({ lazy: b.dataset.lazy, off: b.getAttribute('aria-disabled'), text: b.textContent, h: Math.round(b.getBoundingClientRect().height) }))
-    check('T1 a host with require.async: the third card is live (「图片转图纸 · 照片变成图纸」, 64 tall), nothing fetched before opening',
-      live.lazy === 'idle' && live.off === null && live.text === '图片转图纸照片变成图纸' && live.h === 64 && chunkResponses.length === 0, JSON.stringify(live))
+    check('T1 a host with require.async: the third card is live (「图片转图纸 · 照片变成图纸」, ≥ 64 tall; sizes checked by cardsFit), nothing fetched before opening',
+      live.lazy === 'idle' && live.off === null && live.text === '图片转图纸照片变成图纸' && live.h >= 64 && chunkResponses.length === 0, JSON.stringify(live))
     await outShot(q, 't1-home-cards')
     await pictureCard(q).click()
     await q.locator('.pd-pic-drop').waitFor({ timeout: 10000 })
@@ -833,6 +1102,8 @@ try {
   }
 
   if (ONLY === 't1') break sections
+  log('W. my works (spec §18.4)')
+  await worksSection()
   // ── A. desktop light: busy pill above the composer, entry busy dot ──
   log('A. busy pill (1280×800, light)')
   const p = await newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'light' })

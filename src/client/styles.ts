@@ -152,8 +152,8 @@ const PANEL = `
 .pd-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
 .pd-view{max-width:calc(var(--pd-board-max) + 2 * var(--pd-pad));margin:0 auto;padding:12px var(--pd-pad) var(--pd-pad);display:flex;flex-direction:column;animation:pd-view-in var(--pd-t) var(--pd-ease)}
 @keyframes pd-view-in{from{opacity:0;transform:translateX(8px)}}
-/* start page: three equal entry cards, 64 high, icon left (spec §18.1); narrower than 360: icon on top, 72 high */
-.pd-start{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:16px}
+/* start page: four equal entry cards (§18.1 + the works wall), 2×2, one row from 560 wide; 64 high, icon left; narrow: icon on top, 72 high */
+.pd-start{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;gap:8px;margin-bottom:16px}
 .pd-big{border:1px solid var(--pd-border);background:var(--pd-surface-raised);border-radius:var(--pd-radius-card);padding:8px 10px;text-align:left;cursor:pointer;display:grid;grid:auto auto/28px minmax(0,1fr);align-content:center;gap:1px 8px;min-height:64px;transition:background var(--pd-t-fast),transform var(--pd-t-fast)}
 @media (hover:hover){.pd-big:hover{background:var(--pd-hover)}}
 .pd-big:active{transform:scale(.98)}
@@ -171,6 +171,10 @@ const PANEL = `
 .pd-lazy{display:grid;justify-items:center}
 .pd-skel{width:100%;max-width:var(--pd-board-max);aspect-ratio:1;border-radius:var(--pd-radius-board);background:var(--pd-surface)}
 .pd-sec{font-size:12px;color:var(--pd-text-3);margin:0 0 8px;font-weight:500;display:flex;justify-content:space-between}
+/* my works (spec §18.4): title + one row of 56px thumbnails; the row keeps its height while the chunk loads, fails or is unsupported */
+.pd-works{margin-top:16px}
+.pd-works .pd-sec{min-height:var(--pd-hit);align-items:center;margin:0 0 4px}
+.pd-wrow{height:56px;display:flex;gap:8px;align-items:center;overflow:hidden;font-size:12px;color:var(--pd-text-3)}
 .pd-tpls{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;list-style:none;margin:0;padding:0}
 .pd-tpl{width:100%;border:1px solid var(--pd-border-subtle);background:var(--pd-surface);border-radius:var(--pd-radius-card);padding:8px 6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;transition:background var(--pd-t-fast),transform var(--pd-t-fast),box-shadow var(--pd-t-fast)}
 @media (hover:hover){.pd-tpl:hover{background:var(--pd-hover);box-shadow:0 0 0 1px var(--pd-border)}}
@@ -361,6 +365,7 @@ const RESPONSIVE = `
 /* wide sidebar (spec §3.1): 4 template columns, home max 640, play column max 480 */
 @container pd (min-width: 560px){
   .pd-tpls{grid-template-columns:repeat(4,1fr)}
+  .pd-start{grid-template-columns:repeat(4,minmax(0,1fr))}
   .pd-view.pd-v-home{max-width:640px}
 }
 /* host full-screen sidebar below 768px (spec §3.2): bigger swatches, iron/export move into the toolbar */

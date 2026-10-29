@@ -131,5 +131,20 @@
   "pd-wrong": "pdea",
   "pd-nocfg": "pdeb",
   "pd-pic": "pdec",
-  "pd-pic-ic": "pded"
+  "pd-pic-ic": "pded",
+  "pd-wrow": "pdee",
+  "pd-wt": "pdef",
+  "pd-wc": "pdeg",
+  "pd-wcols": "pdeh",
+  "pd-wdet": "pdei",
+  "pd-works": "pdej",
+  "pd-wacts": "pdek",
+  "pd-wall": "pdel",
+  "pd-wbig": "pdem",
+  "pd-wempty": "pden",
+  "pd-fade": "pdeo",
+  "pd-w-in": "pdep",
+  "pd-wclose": "pdeq",
+  "pd-wdel": "pder",
+  "pd-wmeta": "pdes"
 }

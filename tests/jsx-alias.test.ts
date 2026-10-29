@@ -22,7 +22,7 @@ describe('JSX runtime aliases (scripts/jsx-alias.ts)', () => {
   })
 
   it('the committed lib calls the runtime through the aliases only', () => {
-    for (const f of ['client.js', 'client.picture.js']) {
+    for (const f of ['client.js', 'client.picture.js', 'client.works.js']) {
       const code = readFileSync(join(ROOT, 'lib', f), 'utf8')
       expect(code, f).not.toMatch(/\(0,\s*\w+\.jsxs?\)\(/)
       expect(code, f).toMatch(/require\("react\/jsx-runtime"\),(\w+)=\w+\.jsx,\w+=\w+\.jsxs/)

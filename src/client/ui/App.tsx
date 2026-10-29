@@ -13,6 +13,7 @@ import { HomeView } from './Home.tsx'
 import { useLazy } from './LazyView.tsx'
 import { PictureView } from './Picture.tsx'
 import { PlayView } from './Play.tsx'
+import { WorksView } from './Works.tsx'
 
 const TOAST_TEXT: Record<ToastKey, MessageKey> = {
   cleared: 'toastCleared', newGame: 'toastNewGame', locked: 'toastLocked', exported: 'toastExported', exportFailed: 'toastExportFailed',
@@ -278,14 +279,14 @@ export function App(): ReactElement {
         {s.mode !== 'home'
           ? <button type="button" className="pd-ib" aria-label={t('back')} title={t('back')} onClick={() => { store.go('home') }}><IconBack /></button>
           : null}
-        {s.mode === 'picture' ? <h2>{t('homePicture')}</h2> : null}
+        {s.mode === 'picture' || s.mode === 'works' ? <h2>{t(s.mode === 'works' ? 'homeWorks' : 'homePicture')}</h2> : null}
         <span className="pd-spacer" />
         <button type="button" className="pd-ib" data-pd-menu-btn aria-label={t('settings')} title={t('settings')}
           aria-haspopup="menu" aria-expanded={menu} onClick={() => { setMenu(m => !m) }}><IconMore /></button>
       </header>
       {menu ? <Menu onClose={() => { setMenu(false) }} /> : null}
       <div className="pd-scroll" ref={scroller}>
-        {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : s.mode === 'picture' ? <PictureView file={dropped} onTaken={taken} /> : <PlayView />}
+        {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : s.mode === 'picture' ? <PictureView file={dropped} onTaken={taken} /> : s.mode === 'works' ? <WorksView /> : <PlayView />}
       </div>
       <Preview />
       <Toast />

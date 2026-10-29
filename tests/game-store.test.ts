@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createBoard, EMPTY, encode, findTemplate, getCell, SafeStore, setCell, STORAGE_KEY, TEMPLATES, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
+import { createBoard, EMPTY, encode, findTemplate, getCell, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
 import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi } from '../src/client/game-store.ts'
 
 function mem(): StorageLike & { data: Map<string, string> } {
@@ -682,5 +682,132 @@ describe('v1.6 §4.3 source keys', () => {
     store.undo()
     expect(store.getSnapshot()).toMatchObject({ target: 'template:heart', ironed: true })
     expect(progress(store)).toBe(3)
+  })
+})
+
+/** Paint a bead and iron, at once (reduced motion). */
+const ironOne = (store: GameStore, x = 0): void => { store.startFree(); store.applyAt(x % 16, 0); store.iron() }
+const wallOf = (backend: { data: Map<string, string> }): Array<{ i: number }> => JSON.parse(backend.data.get(WORKS_KEY) ?? '[]')
+
+describe('GameStore works wall (spec §18.4)', () => {
+
+  it('ironing puts the piece on the wall at once (its own key), un-ironing takes it off', () => {
+    const backend = mem()
+    const { store } = make({ backend, reduced: true })
+    ironOne(store)
+    const w = store.works()
+    expect(w).toHaveLength(1)
+    expect(store.getSnapshot().work).toBe(w[0]!.i)
+    expect(wallOf(backend)).toEqual(w)
+    expect(w[0]).toMatchObject({ n: 16, s: null, b: encode(store.board) })
+    store.unIron()
+    expect(store.works()).toEqual([])
+    expect(wallOf(backend)).toEqual([])
+    expect(store.getSnapshot().work).toBeNull()
+  })
+
+  it('the 61st piece pushes the oldest off; ids stay unique when ironed in the same millisecond', () => {
+    const { store } = make({ reduced: true })
+    for (let k = 0; k < 61; k++) ironOne(store, k)
+    const ids = store.works().map(w => w.i)
+    expect(ids).toHaveLength(60)
+    expect(new Set(ids).size).toBe(60)
+    expect(ids[0]).toBe(1_000_001)
+  })
+
+  it('withdraws by id after a reload: the reloaded game still knows its piece', () => {
+    const backend = mem()
+    const first = make({ backend, reduced: true })
+    ironOne(first.store, 1)
+    ironOne(first.store, 2)
+    const mine = first.store.getSnapshot().work
+    first.advance(400)
+    const again = make({ backend, reduced: true })
+    expect(again.store.getSnapshot()).toMatchObject({ ironed: true, work: mine })
+    expect(again.store.works()).toHaveLength(2)
+    again.store.unIron()
+    expect(again.store.works().map(w => w.i)).not.toContain(mine)
+    expect(again.store.works()).toHaveLength(1)
+    expect(wallOf(backend)).toHaveLength(1)
+  })
+
+  it('a full quota refuses the wall, never the game: the game still saves and storage stays ok', () => {
+    const backend = mem()
+    const set = backend.setItem
+    backend.setItem = (k, v) => { if (k === WORKS_KEY) throw new Error('QuotaExceededError'); set(k, v) }
+    const { store, advance } = make({ backend, reduced: true })
+    ironOne(store)
+    expect(store.works()).toHaveLength(1)
+    expect(backend.data.has(WORKS_KEY)).toBe(false)
+    advance(400)
+    expect(JSON.parse(backend.data.get(STORAGE_KEY)!)).toMatchObject({ ironed: true, work: store.works()[0]!.i })
+    expect(store.getSnapshot().storage).toBe('ok')
+    expect(store.getSnapshot().toast).toBeNull()
+  })
+
+  it('migration: a save from before the wall (no works key, no work id) collects its ironed piece once', () => {
+    const board = setCell(createBoard(16), 2, 2, 5)
+    const backend = mem()
+    backend.data.set(STORAGE_KEY, JSON.stringify({ v: 1, size: 16, board: encode(board), color: 5, tool: 'paint', mode: 'play', target: null, pattern: null, ironed: true }))
+    const { store, advance } = make({ backend })
+    expect(store.works()).toHaveLength(1)
+    expect(store.works()[0]).toMatchObject({ b: encode(board), s: null })
+    expect(store.getSnapshot().work).toBe(store.works()[0]!.i)
+    advance(400)
+    // saved with its id: the next load does not collect it again
+    expect(make({ backend }).store.works()).toHaveLength(1)
+  })
+
+  it('migration: no works key and nothing ironed is an empty wall, and nothing is written', () => {
+    const backend = mem()
+    backend.data.set(STORAGE_KEY, JSON.stringify({ v: 1, size: 16, board: encode(createBoard(16)), color: 5, tool: 'paint', mode: 'home', target: null, pattern: null, ironed: false }))
+    const { store } = make({ backend })
+    expect(store.works()).toEqual([])
+    expect(backend.data.has(WORKS_KEY)).toBe(false)
+    // a damaged board under 「ironed」 falls back to a blank one: nothing to collect
+    const broken = mem()
+    broken.data.set(STORAGE_KEY, JSON.stringify({ v: 2, size: 16, board: 'zz', ironed: true }))
+    expect(make({ backend: broken }).store.works()).toEqual([])
+  })
+
+  it('corrupt wall storage: broken JSON or a non-array is an empty wall; entries without an id are left out', () => {
+    for (const bad of ['{', '"x"', '{"i":1}', 'null', '7']) {
+      const backend = mem()
+      backend.data.set(WORKS_KEY, bad)
+      expect(make({ backend }).store.works()).toEqual([])
+    }
+    const backend = mem()
+    backend.data.set(WORKS_KEY, JSON.stringify([{ i: 5, n: 12, b: 'x', s: null }, null, { i: 'x' }, { n: 12 }]))
+    const { store } = make({ backend, reduced: true })
+    expect(store.works().map(w => w.i)).toEqual([5])
+    // a new piece goes after the newest id; validation of each entry is the wall page's (core/works.ts)
+    ironOne(store)
+    expect(store.works().map(w => w.i)).toEqual([5, 1_000_000])
+  })
+
+  it('leaving mid-iron still collects the piece (once), for the game it belongs to', () => {
+    const { store, advance } = make()
+    store.startFree()
+    store.applyAt(0, 0)
+    store.iron()
+    expect(store.works()).toHaveLength(0)
+    store.startFree()
+    expect(store.works()).toHaveLength(1)
+    advance(IRON_MS)
+    expect(store.works()).toHaveLength(1)
+  })
+
+  it('a pattern from a picture or AI keeps its guide, so 再拼一次 can follow it again; templates only their id', () => {
+    const { store } = make({ reduced: true })
+    const guide = setCell(createBoard(12), 1, 1, 7)
+    store.startPicture(guide)
+    store.applyAt(1, 1)
+    store.iron()
+    expect(store.works()[0]).toMatchObject({ s: expect.stringMatching(/^board:p-/), p: encode(guide), n: 12 })
+    store.follow('heart')
+    store.applyAt(0, 0)
+    store.iron()
+    expect(store.works()[1]).toMatchObject({ s: 'template:heart' })
+    expect(store.works()[1]).not.toHaveProperty('p')
   })
 })

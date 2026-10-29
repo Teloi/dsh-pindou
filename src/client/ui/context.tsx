@@ -14,6 +14,8 @@ export interface Env {
   readonly settings?: () => SettingsOpener
   /** Picture to pattern, the lazy chunk lib/client.picture.js (spec §18.2/§18.6). */
   readonly picture?: Lazy<typeof import('../picture.tsx')>
+  /** The works wall, the lazy chunk lib/client.works.js (spec §18.4/§18.6). */
+  readonly works?: Lazy<typeof import('../works.tsx')>
 }
 
 export const EnvContext = createContext<Env | null>(null)

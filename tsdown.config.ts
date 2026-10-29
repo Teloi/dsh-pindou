@@ -70,7 +70,7 @@ const client: UserConfig = {
     // Comments and whitespace in the stylesheet stay in the source only (scripts/minify-css.ts).
     name: 'dsh-client-css-minify',
     transform(code: string, id: string) {
-      return id.replaceAll('\\', '/').match(/\/src\/client\/(?:picture-)?styles\.ts$/) ? { code: minifyCssModule(code), map: null } : null
+      return id.replaceAll('\\', '/').match(/\/src\/client\/(?:picture-|works-)?styles\.ts$/) ? { code: minifyCssModule(code), map: null } : null
     },
   }, {
     // The stylesheet's custom properties ship under their short names (scripts/css-vars.ts),
