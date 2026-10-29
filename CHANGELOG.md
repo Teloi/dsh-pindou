@@ -12,7 +12,7 @@ These review suggestions were left out of 0.1.0 on purpose:
 - **Wrap the stylesheet in `@scope (.pd-root, .pd-portal)` (design S12)**: nothing leaks out today (a unit test rejects any selector without the `pd-` prefix), and host styles leaking in are now handled by the isolation layer. `@scope` would change cascade proximity for all ~260 rules, so it needs its own visual pass on every screen rather than a late fix.
 - **Coach card placement (design N11)**: the card covers the bottom two rows of the board. Spec §4.2 places it exactly there ("卡片覆盖豆板下部，不遮挡调色盘"), so moving it above the board or before the first template needs the spec changed first; left as specified.
 - **Light-mode ghost dots for White and Cream**: the dark-theme rings (N10) bring every colour to ≥ 3:1 on the dark board. On the light board White and Cream ghosts stay below 3:1 as designed (a guide, not content); a light-mode ring needs a design decision.
-- **Replaced games survive a reload**: games kept for undo after switching patterns (N1) live in memory only; the current game is saved as before. Persisting the stack would change the storage format.
+- **Replaced games survive a reload** (known limitation of 0.1.0, see below): persist the games kept for undo after switching patterns (N1), so that undo still reaches them after a reload. This changes the storage format.
 - **Pin GitHub Actions to commit SHAs**: CI uses major-version tags (`actions/checkout@v4` and so on). Pinning needs a Renovate/Dependabot rule to keep the SHAs current; otherwise they go stale.
 
 ## [0.1.0] - 2026-10-29
@@ -31,6 +31,10 @@ First release of 拼豆小憩 · Bead Break.
 - Chinese and English UI; follows the host's light/dark theme; full-width pane below 768 px.
 - Shortcut `pindou.toggle` (⌘⌥K / Ctrl+Alt+K in the desktop app; no Web default because DSH uses it for session search).
 - CI (lint, typecheck, tests, build, `lib/` freshness, bundle shape) and an E2E run against DSH Web from source.
+
+### Known limitations
+
+- **Replaced games are kept in memory only.** When you switch to another pattern, the game it replaces stays one undo step away (up to 5 games), but only until the page reloads or the app restarts: after a reload those replaced games are gone for good and cannot be brought back. The current game is always saved and restored. Planned for 0.1.1.
 
 ### Fixed before release (review round 1)
 
