@@ -28,3 +28,9 @@ describe('zoom slider (design I2)', () => {
     expect(ratio([229, 229, 229], bg)).toBeLessThan(3) // rgba(0,0,0,.10) on white
   })
 })
+
+describe('b1 S9: the adjust page is one centred column', () => {
+  it('S9: everything under the crop frame is as wide as the board at most, and centred with it', () => {
+    expect(PICTURE_CSS).toMatch(/\.pd-pic>:not\(\.pd-sr\)\{width:100%;max-width:var\(--pd-board-max\);margin-inline:auto\}/)
+  })
+})
