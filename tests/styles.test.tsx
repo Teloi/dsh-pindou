@@ -154,6 +154,15 @@ describe('§18.5 acceptance (design R3-1): 16 colours × light/dark × normal/se
   })
 })
 
+describe('R3-2: the toast never sits over the bottom controls', () => {
+  it('is anchored to the top, under the header, over the read-only status row', () => {
+    expect(CSS).toMatch(/\.pd-toast\{position:absolute;left:50%;top:calc\(env\(safe-area-inset-top,0px\) \+ var\(--pd-header-h\) \+ 4px\);/)
+  })
+  it('no rule anchors it to the bottom (footer, palette and Iron/Export live there at every height)', () => {
+    expect(CSS).not.toMatch(/\.pd-toast\{[^}]*bottom:/)
+  })
+})
+
 describe('style isolation', () => {
   it('every element and pseudo-element under the panel and portals is reset to round corners and border-box', () => {
     expect(CSS).toContain('.pd-root *,.pd-root *::before,.pd-root *::after,.pd-portal *,.pd-portal *::before,.pd-portal *::after{box-sizing:border-box;corner-shape:round}')

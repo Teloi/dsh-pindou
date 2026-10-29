@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
-import { auditPanel, guideRings, settlePlugin } from './audit.mjs'
+import { auditPanel, guideRings, settlePlugin, toastCovers } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -508,6 +508,8 @@ try {
   const toastBox = await p.locator('.pd-toast').boundingBox()
   const ironBox = await p.locator('.pd-foot button.pd-warm').boundingBox()
   check('S8 undo toast does not overlap the footer', !!toastBox && !!ironBox && toastBox.y + toastBox.height <= ironBox.y, JSON.stringify({ toast: toastBox?.y, iron: ironBox?.y }))
+  const tc = await p.evaluate(toastCovers)
+  check('R3-2 the undo toast covers no control or bead cell (1280×800)', !!tc && tc.covered.length === 0, JSON.stringify(tc))
   await shot(p, 'clear-undo-toast', undefined, OUT)
   await p.locator('.pd-toast button').click()
   await p.waitForTimeout(300)
@@ -657,6 +659,25 @@ try {
   await outShot(sh, 'short-620')
   await sh.context().close()
 
+  // ── G2. short window toast (design R3-2): below 700 px tall the clear/undo toast must not
+  // cover the palette, Iron/Export or any other control; desktop panel and the 420-wide full-screen pane ──
+  log('G2. short toast')
+  for (const [w, h, theme] of [[1280, 620, 'light'], [420, 620, 'light'], [420, 620, 'dark'], [1280, 699, 'light']]) {
+    const tp = await newPage({ viewport: { width: w, height: h }, colorScheme: theme })
+    await startSession(tp, '看看 README')
+    await openPanel(tp)
+    await playFirstTemplate(tp)
+    await placeBeads(tp, 6)
+    await tp.locator('.pd-tools button[aria-label="清空"]').click()
+    await tp.locator('.pd-toast').waitFor()
+    await tp.waitForTimeout(300)
+    const cov = await tp.evaluate(toastCovers)
+    const pal = await tp.evaluate(() => [...document.querySelectorAll('.pd-palette .pd-sw')].filter(e => e.getBoundingClientRect().height > 0).length)
+    check(`R3-2 ${w}×${h} ${theme}: the clear toast covers no swatch, Iron/Export or other control (${pal} swatches visible)`, !!cov && cov.covered.length === 0 && pal === 16, JSON.stringify(cov))
+    await outShot(tp, `r3-2-toast-${w}x${h}-${theme}`)
+    await tp.context().close()
+  }
+
   // ── H. not configured: honest card on entry, disabled input, settings shortcut ──
   log('H. not configured')
   for (const [label, init] of [['linux', undefined], ['macos', () => { Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' }) }]]) {
@@ -753,6 +774,8 @@ try {
   const toastTxt = await j.locator('.pd-toast').textContent().catch(() => '')
   check('N1 a different template starts a new game with an undo toast', /已开始新的一局/.test(toastTxt ?? '') && (await progressText(j) ?? '').startsWith('0/'), toastTxt)
   await outShot(j, 'n1-other-template-toast')
+  const jc = await j.evaluate(toastCovers)
+  check('R3-2 the other-template toast covers no control or bead cell', !!jc && jc.covered.length === 0, JSON.stringify(jc))
   const undoHit = await hitBox(j, '.pd-toast button')
   check('N6 toast 「撤销」 hit area ≥ 32 × 32', big(undoHit), JSON.stringify(undoHit))
   await j.locator('.pd-toast button').click()

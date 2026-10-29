@@ -216,3 +216,18 @@ export async function settlePlugin() {
   const right = Math.min(innerWidth, Math.ceil(Math.max(...rects.map(r => r.right)))), bottom = Math.min(innerHeight, Math.ceil(Math.max(...rects.map(r => r.bottom))))
   return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : null
 }
+
+// Design R3-2: what the visible toast covers — any control of the panel (buttons, swatches,
+// focusable elements) or bead cell of the board, other than the toast's own button. Returns
+// null when no toast is shown.
+export function toastCovers() {
+  const toast = document.querySelector('.pd-root .pd-toast')
+  if (!toast) return null
+  const t = toast.getBoundingClientRect()
+  const hit = r => r.width > 0 && r.height > 0 && r.left < t.right && r.right > t.left && r.top < t.bottom && r.bottom > t.top
+  const sel = 'button, [role=radio], [role=switch], input, textarea, a[href], [tabindex]:not([tabindex="-1"]), .pd-board .pd-cell'
+  const covered = [...document.querySelectorAll(`.pd-root :is(${sel})`)]
+    .filter(el => !toast.contains(el) && el !== toast && getComputedStyle(el).visibility !== 'hidden' && hit(el.getBoundingClientRect()))
+    .map(el => `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} ${el.getAttribute('aria-label') ?? (el.textContent ?? '').trim().slice(0, 12)}`)
+  return { toast: [Math.round(t.left), Math.round(t.top), Math.round(t.width), Math.round(t.height)], covered: [...new Set(covered)] }
+}

@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - **Guide dots on the light board are visible for every colour (spec §18.5, O3; was planned for 0.1.1).** The per-colour ring that the dark theme already draws (N10) now has a light-board table too: each colour is darkened toward ink until it stands out, then faded back to just 3.2:1 against the board, and drawn as a 1px inner ring, which stays under the selected-colour halo so selected guides keep ≥ 3:1 as well (R3-1: before, only Black passed when selected). White and Cream were the ones reported, but measured on the light board Yellow, Lime, Pink, Tan, Sky, Orange, Gray and Teal also fell short of 3:1 even at full strength, so all 16 get a ring. Unit tests recompute both tables and check all 16 colours × light/dark × normal/selected; the E2E run seeds a pattern with every colour and measures the computed ring against the real board in light and dark, normal and selected.
+- **The toast no longer covers the palette or Iron/Export (design R3-2).** It was anchored just above the footer, and the play view stacks board, tools, palette and footer down to the bottom edge, so on short windows (and, as the new check found, at 1280×800 too) it sat on swatches. It now drops from the top, under the header, over the read-only status row. E2E checks at 1280×800, 1280×699, 1280×620 and 420×620 (light and dark) assert that no swatch, button or bead cell intersects the toast.
 
 ### Planned for 0.1.1
 
