@@ -459,6 +459,26 @@ describe('design walkthrough round 2 fixes (r3)', () => {
     vi.useRealTimers()
   })
 
+  it('v1.6 §4.3: back to the same template keeps the 已清空 toast; its 撤销 restores the beads and focuses the board', async () => {
+    const { done } = await mount()
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-coach .pd-btn')!.click() })
+    const grid = (): HTMLElement => host.querySelector<HTMLElement>('[role=grid]')!
+    await act(async () => { grid().dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
+    await act(async () => { host.querySelector<HTMLButtonElement>('[role=toolbar] button[aria-label="清空"]')!.click() })
+    const text = host.querySelector('.pd-toast')!.textContent
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-head .pd-ib[aria-label="返回"]')!.click() })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
+    expect(host.querySelector('.pd-toast')?.textContent).toBe(text)
+    const undo = host.querySelector<HTMLButtonElement>('.pd-toast button')!
+    undo.focus()
+    await act(async () => { undo.click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 5)) })
+    expect(grid().querySelectorAll('.pd-bead').length).toBe(1)
+    expect(document.activeElement).toBe(grid())
+    await done()
+  })
+
   it('N8: the done card swaps in for tools + palette + footer, in the flow, with ≥32px actions', async () => {
     const { done } = await mount()
     await act(async () => { host.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
