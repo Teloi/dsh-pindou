@@ -32,6 +32,11 @@ const FFMPEG = process.env.FFMPEG ?? 'ffmpeg'
 const SELFCHECK = process.env.E2E_SELFCHECK_DIR ? resolve(process.env.E2E_SELFCHECK_DIR) : null
 // Chrome serialises `corner-shape: round` as superellipse(1)
 const ROUND = new Set(['round', 'superellipse(1)'])
+// Every page's clock starts at one fixed instant and then runs in real time, so nothing on screen
+// depends on when the run happens. Not a frozen clock (clock.setFixedTime): elapsed-time logic
+// such as the 1.5 s AI cooldown would never see time pass and refuse every second request.
+// E2E_CLOCK=real turns it off.
+const FIXED_NOW = process.env.E2E_CLOCK === 'real' ? null : new Date('2026-06-01T10:00:00+08:00')
 
 const log = (...a) => { process.stdout.write(`${a.join(' ')}\n`) }
 const checks = []
@@ -92,6 +97,7 @@ async function newPage(opts, lang = 'zh', init) {
   if (init) await ctx.addInitScript(init)
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(url).origin })
   const p = await ctx.newPage()
+  if (FIXED_NOW) { await p.clock.install({ time: FIXED_NOW }); await p.clock.resume() }
   p.on('pageerror', (e) => { pageErrors.push(String(e)) })
   p.on('console', (m) => { if (m.type() === 'error' && /pindou/i.test(m.text())) pageErrors.push(m.text()) })
   await p.goto(url)
@@ -297,6 +303,8 @@ try {
     await pictureCard(q).click()
     await q.locator('.pd-pic-drop').waitFor({ timeout: 10000 })
     check('T1 opening the page fetches lib/client.picture.js from DSH once (200) and it runs', chunkResponses.join() === '200', chunkResponses.join())
+    // measure once the page has slid in
+    await q.evaluate(() => Promise.all(document.getAnimations().filter(a => a.animationName === 'pd-view-in').map(a => a.finished)))
     const empty = await q.evaluate(() => ({
       title: document.querySelector('.pd-head h2')?.textContent,
       back: !!document.querySelector('.pd-head .pd-ib'),
@@ -304,6 +312,7 @@ try {
       accept: document.querySelector('.pd-pic-file')?.accept,
       note: document.querySelector('.pd-pic-note')?.textContent,
       square: (() => { const r = document.querySelector('.pd-pic-drop').getBoundingClientRect(); return Math.abs(r.width - r.height) < 1 && r.width <= 480 })(),
+      zoneBox: (() => { const r = document.querySelector('.pd-pic-drop').getBoundingClientRect(); const s = document.querySelector('.pd-root').getBoundingClientRect(); return [r.width, r.height, s.width, s.height] })(),
       dashed: getComputedStyle(document.querySelector('.pd-pic-drop')).borderTopStyle,
       noteColor: getComputedStyle(document.querySelector('.pd-pic-note')).color,
       text3: getComputedStyle(document.querySelector('.pd-root')).getPropertyValue('--pd-text-3').trim(),
@@ -312,10 +321,19 @@ try {
       empty.title === '图片转图纸' && empty.back && empty.square && empty.dashed === 'dashed' && empty.zone === '拖入、粘贴或选择一张图片选择图片' && empty.accept === 'image/*' && empty.note === '图片只在本机处理，不会上传', JSON.stringify(empty))
     await outShot(q, 't1-empty')
     // keyboard: Enter on the zone opens the system picker
+    // Playwright turns file-chooser interception on asynchronously when the first 'filechooser'
+    // listener is added; a key press sent in the same tick (Promise.all with waitForEvent) can
+    // reach Chrome first, and the picker then opens natively, with no event (≈1 in 4 in a bare
+    // page). So the listener is installed and a round trip made before the key is pressed.
+    const choosers = []
+    q.on('filechooser', (c) => { choosers.push(c) })
+    await q.evaluate(() => 0)
     await q.locator('.pd-pic-drop').focus()
     const zoneFocus = await focusDesc(q)
-    const [chooser] = await Promise.all([q.waitForEvent('filechooser', { timeout: 6000 }).catch(() => null), q.keyboard.press('Enter')])
-    check('T1 Enter on the drop zone opens the file picker', !!chooser, zoneFocus)
+    await q.keyboard.press('Enter')
+    await q.waitForFunction(() => true)
+    for (let i = 0; i < 50 && !choosers.length; i++) await q.waitForTimeout(20)
+    check('T1 Enter on the drop zone opens the file picker', choosers.length === 1, `${zoneFocus}; choosers ${choosers.length}`)
     // errors: refused before any decode
     const alertText = () => q.locator('#pd-pic-err').textContent()
     await q.locator('.pd-pic-file').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello, not a picture') })
