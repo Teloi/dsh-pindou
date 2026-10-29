@@ -49,9 +49,10 @@ const client: UserConfig = {
   dts: false,
   clean: false,
   sourcemap: false,
-  // Whitespace and syntax only: identifiers stay readable for review, and the
-  // gzip budget (scripts/check-bundle.mjs) still holds with room to spare.
-  minify: { compress: true, mangle: false, codegen: { removeWhitespace: true } },
+  // Local identifiers are mangled (property names, exports and the CSS class names
+  // stay as written), which is what keeps the gzip budget (scripts/check-bundle.mjs)
+  // roomy; review the readable source in src/, not lib/.
+  minify: { compress: true, mangle: true, codegen: { removeWhitespace: true } },
   deps: {
     neverBundle: PLATFORM_MODULES,
     alwaysBundle: (id: string) => !PLATFORM_MODULES.includes(id),
