@@ -550,6 +550,29 @@ describe('drop and paste (spec §18.2)', () => {
     expect((bitmap.mock.calls[0]![0] as File).name).toBe('b.png')
   })
 
+  it('I4: opened from the keyboard, focus lands on the drop zone, never the hidden file input', async () => {
+    const { card } = await panel(ready())
+    card().focus()
+    await act(async () => { card().click() }) // Enter / Space on a focused <button> is a click
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-drop')).not.toBeNull() })
+    await flush(5)
+    expect(document.activeElement?.outerHTML.slice(0, 120)).toBe(host.querySelector('.pd-pic-drop')?.outerHTML.slice(0, 120))
+    expect(document.activeElement?.classList.contains('pd-pic-file')).toBe(false)
+  })
+
+  it('I4: a picture pasted while the card has focus: focus stays on something Tab reaches, never the file input', async () => {
+    const { card, rootEl } = await panel(ready())
+    card().focus()
+    await act(async () => { rootEl().dispatchEvent(pasteEvent([file(pngHead(600, 600), 'p.png', 'image/png')])) })
+    await vi.waitFor(() => { expect(host.querySelector('.pd-pic-crop')).not.toBeNull() })
+    await flush(5)
+    const a = document.activeElement as HTMLElement | null
+    expect(a === null || a === document.body).toBe(false)
+    expect(a?.classList.contains('pd-pic-file')).toBe(false)
+    expect(a!.tabIndex).toBeGreaterThanOrEqual(0)
+    expect(a!.closest('[aria-hidden=true]')).toBeNull()
+  })
+
   it('C5: on the picture page a non-image drop is taken (and explained), a paste works directly', async () => {
     const { card } = await panel(ready())
     await act(async () => { card().click() })

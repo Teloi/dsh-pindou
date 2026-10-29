@@ -343,6 +343,16 @@ try {
     check('T1 empty state: header 「图片转图纸」 with back, square dashed zone ≤ 480, 「拖入、粘贴或选择一张图片」/「选择图片」, accept image/*, the privacy note',
       empty.title === '图片转图纸' && empty.back && empty.square && empty.dashed === 'dashed' && empty.zone === '拖入、粘贴或选择一张图片选择图片' && empty.accept === 'image/*' && empty.note === '图片只在本机处理，不会上传', JSON.stringify(empty))
     await outShot(q, 't1-empty')
+    // design I4: opened from the keyboard, focus is on the drop zone (with a visible ring), not the 1 px file input
+    const pointerFocus = await focusDesc(q)
+    await q.locator('.pd-head .pd-ib').first().click()
+    await q.locator('.pd-v-home').waitFor()
+    await pictureCard(q).focus()
+    await q.keyboard.press('Enter')
+    await q.locator('.pd-pic-drop').waitFor()
+    await q.waitForFunction(() => document.activeElement?.closest('.pd-pic-drop, .pd-pic-file') || null, null, { timeout: 2000 }).catch(() => null)
+    const keyFocus = await q.evaluate(() => { const a = document.activeElement; return { zone: a?.classList.contains('pd-pic-drop'), visible: a?.matches(':focus-visible'), tab: a?.tabIndex, hidden: !!a?.closest('[aria-hidden=true]'), ring: a ? getComputedStyle(a).outlineStyle : '' } })
+    check('T1 I4 opened with Enter: focus on the drop zone (Tab-reachable, focus-visible), not the hidden file input', keyFocus.zone && keyFocus.visible && keyFocus.tab === 0 && !keyFocus.hidden, JSON.stringify({ keyFocus, pointerFocus }))
     // keyboard: Enter on the zone opens the system picker
     // Playwright turns file-chooser interception on asynchronously when the first 'filechooser'
     // listener is added; a key press sent in the same tick (Promise.all with waitForEvent) can

@@ -34,6 +34,17 @@ describe('focus helpers', () => {
     $('.pd-head').remove()
     expect(fallbackTarget(r)).toBe(r)
   })
+  it('fallback skips what Tab never reaches (aria-hidden, tabindex=-1) and takes a role=button (design I4)', () => {
+    host.innerHTML = '<div class="pd-root" tabindex="-1"><header class="pd-head"><button id="h">h</button></header><div class="pd-view">'
+      + '<span aria-hidden="true"><button id="ah">x</button></span><input id="file" type="file" tabindex="-1" aria-hidden="true"><input id="neg" tabindex="-1">'
+      + '<div role="button" tabindex="0" id="zone">drop</div><button id="later">later</button></div></div>'
+    const r = $('.pd-root')
+    expect(fallbackTarget(r)?.id).toBe('zone')
+    $('#zone').remove()
+    expect(fallbackTarget(r)?.id).toBe('later')
+    $('#later').remove()
+    expect(fallbackTarget(r)?.id).toBe('h') // never the hidden file input
+  })
   it('returnFocus never steals focus that is somewhere real, and prefers the given candidates', () => {
     host.innerHTML = '<div class="pd-root" tabindex="-1"><input id="outside"><div class="pd-view"><button id="v">v</button><button id="p">p</button></div></div>'
     $('#outside').focus()

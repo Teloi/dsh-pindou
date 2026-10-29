@@ -183,6 +183,14 @@ export function PicturePage(props: PictureProps): ReactElement {
     setView({ cx: w / 2, cy: h / 2, zoom: 1 })
   }, [])
 
+  // Opened from the card (keyboard or pointer): focus the drop zone, the page's one action
+  // (design I4). Only when focus is already in the panel; never pulled from the chat.
+  const empty = useRef(file === null)
+  useEffect(() => {
+    const z = zone.current
+    if (empty.current && z?.closest('.pd-root')?.contains(z.ownerDocument.activeElement)) z.focus({ preventScroll: true })
+  }, [])
+
   // a picture dropped or pasted on the panel: take it over (the entry then lets go of it)
   useEffect(() => {
     if (!file) return
