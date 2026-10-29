@@ -483,7 +483,8 @@ export class GameStore {
     if (this.locked) return
     if (!canUndo(this.state.history)) { this.restorePreviousGame(); return }
     this.last = null
-    this.set({ history: undo(this.state.history) })
+    // the step an undo toast offers is gone now (or no longer the last one): the toast goes too (R3-3)
+    this.set({ history: undo(this.state.history), ...this.dropUndoToast() })
     this.afterChange()
   }
 

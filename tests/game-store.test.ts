@@ -71,6 +71,31 @@ describe('GameStore', () => {
     expect(getCell(store.board, 1, 1)).not.toBe(EMPTY)
   })
 
+  it('R3-3: Ctrl+Z that undoes the clear takes the 「已清空 撤销」 toast with it (its 撤销 would undo one step more)', () => {
+    const { store } = make()
+    store.startFree()
+    for (let x = 0; x < 11; x++) store.applyAt(x, 0)
+    store.clear()
+    expect(store.getSnapshot().toast).toMatchObject({ key: 'cleared', undo: true })
+    store.undo() // Ctrl+Z
+    expect(store.board.cells.filter(c => c !== EMPTY)).toHaveLength(11)
+    expect(store.getSnapshot().toast).toBeNull()
+    // and the redo brings the clear back without a toast to undo it twice
+    store.redo()
+    expect(store.board.cells.every(c => c === EMPTY)).toBe(true)
+    expect(store.getSnapshot().toast).toBeNull()
+  })
+
+  it('R3-3: a toast with nothing to undo (exported, copied …) stays through a Ctrl+Z', () => {
+    const { store } = make()
+    store.startFree()
+    store.applyAt(1, 1)
+    store.applyAt(2, 2)
+    store.showToast('copied')
+    store.undo()
+    expect(store.getSnapshot().toast).toMatchObject({ key: 'copied', undo: false })
+  })
+
   it('follows a template to completion, irons, records done and unirons', () => {
     const { store, advance } = make()
     store.follow('heart')
