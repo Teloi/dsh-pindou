@@ -589,6 +589,15 @@ describe('v1.6 §4.3 source keys', () => {
     expect(getCell(store.board, 0, 0)).not.toBe(EMPTY)
   })
 
+  it('a full but unironed board resumes on its card, with the done card back', () => {
+    const { store } = make()
+    store.follow('heart'); store.dismissOverlay(); store.fillTarget()
+    const full = store.board
+    store.go('home'); store.follow('heart')
+    expect(store.board).toBe(full)
+    expect(store.getSnapshot()).toMatchObject({ complete: true, overlay: 'done', ironed: false })
+  })
+
   it('mid-iron the same template is a new game; the ironing finishes on the old one', () => {
     const { store, advance } = make()
     store.follow('heart'); store.dismissOverlay()
