@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { COLOR_COUNT, type MessageKey } from '../../core/index.ts'
 import type { ToastKey } from '../game-store.ts'
+import { useFocusGuard, useFocusReturn } from '../focus.ts'
 import { IconBack, IconMore } from '../icons.tsx'
 import { AiView } from './Ai.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
@@ -24,12 +25,15 @@ function isTyping(el: EventTarget | null): boolean {
   return el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el as HTMLInputElement).type !== 'checkbox')
 }
 
+const menuButton = (el: HTMLElement): Element | null | undefined => el.closest('.pd-root')?.querySelector('[data-pd-menu-btn]')
+
 function Menu({ onClose }: { readonly onClose: () => void }): ReactElement {
   const { store, t } = useEnv()
   const s = useGame()
   const ref = useRef<HTMLDivElement>(null)
+  // Focus the first item; Esc or an item that closes the menu gives focus back to ⋯ (focus.ts).
+  useFocusReturn(ref, true, '[role=menuitemcheckbox],[role=menuitem]', menuButton)
   useEffect(() => {
-    ref.current?.querySelector<HTMLElement>('[role=menuitemcheckbox],[role=menuitem]')?.focus()
     const close = (e: PointerEvent): void => {
       if (ref.current && !ref.current.contains(e.target as Node) && !(e.target as Element).closest?.('[data-pd-menu-btn]')) onClose()
     }
@@ -92,15 +96,15 @@ function Toast(): ReactElement | null {
 function Preview(): ReactElement | null {
   const { store, t } = useEnv()
   const preview = useGame().preview
-  const close = useRef<HTMLButtonElement>(null)
-  useEffect(() => { if (preview) close.current?.focus() }, [preview])
+  const ref = useRef<HTMLDivElement>(null)
+  useFocusReturn(ref, preview?.url ?? null, 'button')
   if (!preview) return null
   return (
-    <div className="pd-preview" role="dialog" aria-modal="false" aria-label={t('exportPng')}
+    <div ref={ref} className="pd-preview" role="dialog" aria-modal="false" aria-label={t('exportPng')}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); store.setPreview(null) } }}>
       <p className="pd-d">{t('previewTitle')}</p>
       <img src={preview.url} alt={preview.name} />
-      <button ref={close} type="button" className="pd-btn" onClick={() => { store.setPreview(null) }}>{t('previewClose')}</button>
+      <button type="button" className="pd-btn" onClick={() => { store.setPreview(null) }}>{t('previewClose')}</button>
     </div>
   )
 }
@@ -135,6 +139,7 @@ export function App(): ReactElement {
   const scroller = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
   usePanelVisibility(root)
+  useFocusGuard(root)
   // oxlint-disable-next-line react/exhaustive-effect-dependencies -- scroll to top whenever the view changes
   useEffect(() => { scroller.current?.scrollTo?.({ top: 0 }) }, [s.mode])
 
@@ -166,10 +171,10 @@ export function App(): ReactElement {
     }
   }
 
-  const live = s.celebrateAt !== null ? t('celebrate') : ''
+  const live = s.complete ? t('celebrate') : ''
   return (
     <div ref={root} className={cx('pd-root', s.prefs.showCodes && 'pd-codes')} onKeyDown={onKeyDown} data-mode={s.mode}
-      role="region" aria-label={t('appName')}>
+      role="region" aria-label={t('appName')} tabIndex={-1}>
       <header className="pd-head">
         {s.mode !== 'home'
           ? <button type="button" className="pd-ib" aria-label={t('back')} title={t('back')} onClick={() => { store.go('home') }}><IconBack /></button>

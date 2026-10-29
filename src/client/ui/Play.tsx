@@ -1,10 +1,11 @@
 /** The play view: status line, board, toolbar, palette, footer and the under-board cards. */
-import { useEffect, useRef, type CSSProperties, type ReactElement } from 'react'
+import { useRef, type CSSProperties, type ReactElement } from 'react'
 import {
   BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, PALETTE, remainingByColor, type Tool,
 } from '../../core/index.ts'
 import { IconBrush, IconCopy, IconEraser, IconFill, IconIron, IconPicker, IconRedo, IconSparkle, IconTrash, IconUndo, IconDownload } from '../icons.tsx'
 import { canCopyImage, copyPng, downloadBlob, exportBlob, exportFileName, saveRoute } from '../render.ts'
+import { useFocusReturn } from '../focus.ts'
 import { BoardView } from './Board.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 
@@ -59,7 +60,9 @@ function StatusLine(): ReactElement {
         <strong title={name}>{name}</strong>
         {ai?.usage ? <span className="pd-tokens">{t('aiTokens', { n: ai.usage.input + ai.usage.output })}</span> : null}
         {ai?.cached ? <span className="pd-tokens">{t('aiTokensCached')}</span> : null}
-        {c && c.wrong > 0 ? <span className="pd-warn">{t('playWrong', { n: c.wrong })}</span> : null}
+        {c && c.wrong > 0
+          ? <span className="pd-warn">{t(c.matched === c.total ? 'playOneStep' : 'playWrong', { n: c.wrong })}</span>
+          : null}
         {c
           ? <span className="pd-r">{t('playProgress', { ok: c.matched, total: c.total, pct: c.percent })}</span>
           : (
@@ -186,41 +189,40 @@ function Footer(): ReactElement {
   const empty = s.history.present.cells.every(c => c === EMPTY)
   const ironing = s.ironingSince !== null
   const isAi = s.target?.startsWith('ai:') ?? false
+  // The result card carries export / copy itself; don't show them twice (spec §4.6).
+  const dup = s.overlay === 'result'
   return (
     <div className="pd-foot">
       {isAi && !s.ironed
-        ? <button type="button" className="pd-btn pd-ghost" disabled={ironing || s.celebrateAt !== null} onClick={() => { store.fillTarget() }}><IconSparkle />{t('fillBoard')}</button>
+        ? <button type="button" className="pd-btn pd-ghost" disabled={ironing || s.complete} onClick={() => { store.fillTarget() }}><IconSparkle />{t('fillBoard')}</button>
         : null}
       <button type="button" className="pd-btn pd-warm pd-grow pd-io" disabled={empty || s.ironed || ironing} aria-busy={ironing}
         onClick={() => { store.iron() }}>
         <IconIron />{ironing ? t('ironing') : t('iron')}
       </button>
-      <button type="button" className="pd-btn pd-io" disabled={empty} onClick={() => { exportBoard(env) }}><IconDownload />{t('exportPng')}</button>
-      {copySupported()
+      {dup ? null : <button type="button" className="pd-btn pd-io" disabled={empty} onClick={() => { exportBoard(env) }}><IconDownload />{t('exportPng')}</button>}
+      {copySupported() && !dup
         ? <button type="button" className="pd-btn pd-io pd-icon-only" disabled={empty} aria-label={t('copyImage')} title={t('copyImage')} onClick={() => { copyBoard(env) }}><IconCopy /></button>
         : null}
     </div>
   )
 }
 
-function OverlayCard(): ReactElement | null {
+function OverlayCard({ only }: { readonly only: 'coach' | 'other' }): ReactElement | null {
   const env = useEnv()
   const { store, t } = env
   const s = useGame()
   const ref = useRef<HTMLDivElement>(null)
-  const kind = s.overlay
-  useEffect(() => {
-    // Move focus to the card's primary action; it never covers the board.
-    ref.current?.querySelector<HTMLButtonElement>('[data-primary]')?.focus({ preventScroll: true })
-  // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refocus when the card kind changes
-  }, [kind])
+  const kind = s.overlay !== null && (s.overlay === 'coach') === (only === 'coach') ? s.overlay : null
+  // Focus moves to the card's primary action and comes back to whatever opened it (focus.ts).
+  useFocusReturn(ref, kind)
   if (kind === null) return null
   const board = s.history.present
   const beads = board.cells.filter(c => c !== EMPTY).length
   const colors = new Set(board.cells.filter(c => c !== EMPTY)).size
   const title = kind === 'coach' ? t('coachTitle') : kind === 'done' ? t('doneTitle') : t('resultTitle')
   return (
-    <div ref={ref} className="pd-overlay" role="dialog" aria-modal="false" aria-labelledby="pd-ov-t"
+    <div ref={ref} className={cx('pd-overlay', kind === 'coach' && 'pd-coach', kind === 'result' && 'pd-result')} role="dialog" aria-modal="false" aria-labelledby="pd-ov-t"
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); store.dismissOverlay() } }}>
       <p className="pd-t" id="pd-ov-t">{kind === 'result' ? '✨ ' : kind === 'done' ? '🎉 ' : ''}{title}</p>
       {kind === 'coach' ? <p className="pd-d">{t('coachBody')}</p> : null}
@@ -253,12 +255,12 @@ export function PlayView(): ReactElement {
   return (
     <div className="pd-view">
       <StatusLine />
-      <BoardView />
+      <BoardView overlay={<OverlayCard only="coach" />} />
       <div className="pd-under">
         <Toolbar />
         <Palette />
         <Footer />
-        <OverlayCard />
+        <OverlayCard only="other" />
       </div>
     </div>
   )

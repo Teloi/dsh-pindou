@@ -4,13 +4,25 @@
  * Right button erases, Alt picks (spec §6). Ironing is pure CSS driven by
  * per-bead delay (--pd-d) and per-corner radius variables.
  */
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactElement } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactElement, type ReactNode } from 'react'
 import { codeOf, EMPTY, PALETTE, type Board as BoardData, type Tool } from '../../core/index.ts'
 import { cornerRadii } from '../render.ts'
 import { cx, useEnv, useGame } from './context.tsx'
 
-const MAX_BOARD = 480
+export const MAX_BOARD = 480
+/** Spec §3.3: on short panels the board shrinks first, down to this side. */
+export const MIN_BOARD = 140
 const PAD = 6
+const PULSE_MS = 1040
+
+/**
+ * Spec §3.4: A = min(content width, content height − the other blocks), capped
+ * at 480 and floored at 140; cell = floor((A − 12) / N).
+ */
+export function cellSize(width: number, availHeight: number, n: number): number {
+  const a = Math.max(MIN_BOARD, Math.min(width, availHeight, MAX_BOARD))
+  return Math.max(4, Math.floor((a - PAD * 2) / n))
+}
 
 interface CellProps {
   readonly id: string
@@ -22,9 +34,18 @@ interface CellProps {
   readonly label: string
   readonly delay: number
   readonly corners: string
+  /** Erase animation allowed (not ironed, motion allowed). */
+  readonly fx: boolean
 }
 
-const Cell = memo(function Cell({ id, value, ghost, hot, wrong, cur, label, delay, corners }: CellProps): ReactElement {
+const Cell = memo(function Cell({ id, value, ghost, hot, wrong, cur, label, delay, corners, fx }: CellProps): ReactElement {
+  // Erase (spec §7.3, 90 ms): keep the old bead for one shrink-and-fade.
+  const [prev, setPrev] = useState(value)
+  const [leaving, setLeaving] = useState(EMPTY)
+  if (prev !== value) {
+    setPrev(value)
+    setLeaving(fx && value === EMPTY && prev !== EMPTY ? prev : EMPTY)
+  }
   const g = value === EMPTY && ghost !== EMPTY
   const style = g ? ({ '--pd-gc': PALETTE[ghost]!.hex, '--pd-gl': lightLabel(ghost) } as CSSProperties) : undefined
   let bead: ReactElement | null = null
@@ -39,6 +60,8 @@ const Cell = memo(function Cell({ id, value, ghost, hot, wrong, cur, label, dela
       '--pd-rbl': bl === '1' ? '42%' : '0',
     } as CSSProperties
     bead = <span className="pd-bead" style={bs} />
+  } else if (leaving !== EMPTY) {
+    bead = <span className="pd-bead pd-out" style={{ '--pd-c': PALETTE[leaving]!.hex } as CSSProperties} onAnimationEnd={() => { setLeaving(EMPTY) }} />
   }
   return (
     <div
@@ -62,7 +85,7 @@ function lightLabel(c: number): string {
   return l > 150 ? 'rgba(0,0,0,.65)' : 'rgba(255,255,255,.9)'
 }
 
-export function BoardView(): ReactElement {
+export function BoardView({ overlay }: { readonly overlay?: ReactNode }): ReactElement {
   const { store, t, lang, reducedMotion } = useEnv()
   const s = useGame()
   const board = s.history.present
@@ -75,18 +98,28 @@ export function BoardView(): ReactElement {
   const [cursorState, setCursor] = useState({ x: Math.floor(n / 2), y: Math.floor(n / 2) })
   const [kbd, setKbd] = useState(false)
 
-  // Square board scales with the container up to ~480 px: cell = floor((A − 12) / N).
+  // Square board sized by width and by the height left for it (spec §3.3/§3.4),
+  // so status, toolbar, palette and Iron stay visible without scrolling.
   useLayoutEffect(() => {
     const el = wrapRef.current
     if (!el) return
+    const scroller = el.closest<HTMLElement>('.pd-scroll')
+    const view = el.closest<HTMLElement>('.pd-view')
     const measure = (): void => {
-      const a = Math.min(el.clientWidth || 300, MAX_BOARD)
-      setCell(Math.max(8, Math.floor((a - PAD * 2) / n)))
+      const grid = boardRef.current
+      let avail = Number.POSITIVE_INFINITY
+      if (scroller && view && grid && scroller.clientHeight > 0) {
+        const others = view.getBoundingClientRect().height - grid.getBoundingClientRect().height
+        avail = scroller.clientHeight - others
+      }
+      setCell(cellSize(el.clientWidth || 300, avail, n))
     }
     measure()
     if (typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(measure)
     ro.observe(el)
+    if (scroller) ro.observe(scroller)
+    if (view) ro.observe(view)
     return () => { ro.disconnect() }
   }, [n])
 
@@ -96,9 +129,21 @@ export function BoardView(): ReactElement {
   const ironing = s.ironingSince !== null
   const ironed = s.ironed || ironing
   const celebrateAt = s.celebrateAt
+  const pulseAt = s.pulseAt
 
-  // Celebration: 18 confetti beads (WAAPI), skipped under reduced motion.
-  // Fires once per completion stamp; the colours are read at that moment.
+  // Colour switch on a pattern: that colour's remaining cells pulse 520 ms × 2.
+  useEffect(() => {
+    const el = boardRef.current
+    if (!el || pulseAt === null || reducedMotion()) return
+    el.classList.remove('pd-pulse')
+    void el.offsetWidth // restart the animation on rapid switches
+    el.classList.add('pd-pulse')
+    const timer = setTimeout(() => { el.classList.remove('pd-pulse') }, PULSE_MS)
+    return () => { clearTimeout(timer); el.classList.remove('pd-pulse') }
+  }, [pulseAt, reducedMotion])
+
+  // Celebration after ironing (spec §4.6): 18 confetti beads (WAAPI), 1.1–1.4 s,
+  // skipped under reduced motion. Fires once per stamp; colours read at that moment.
   const latest = useRef({ board, target })
   useEffect(() => { latest.current = { board, target } })
   useEffect(() => {
@@ -123,7 +168,7 @@ export function BoardView(): ReactElement {
         { transform: 'translate(0,0) scale(.4)', opacity: 1 },
         { transform: `translate(${Math.cos(ang) * dist}px,${Math.sin(ang) * dist - 20}px) scale(1)`, opacity: 1, offset: 0.6 },
         { transform: `translate(${Math.cos(ang) * dist}px,${Math.sin(ang) * dist + 30}px) scale(.8)`, opacity: 0 },
-      ], { duration: 1400, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'forwards' })
+      ], { duration: 1100 + Math.round(Math.random() * 300), easing: 'cubic-bezier(.2,.7,.4,1)', fill: 'forwards' })
     }
     const timer = setTimeout(() => { for (const el of nodes) el.remove() }, 1500)
     return () => { clearTimeout(timer); for (const el of nodes) el.remove() }
@@ -192,6 +237,7 @@ export function BoardView(): ReactElement {
   const colorName = (c: number): string => (c === EMPTY ? t('emptyCell') : lang === 'zh' ? PALETTE[c]!.zh : PALETTE[c]!.en)
   const rows: ReactElement[] = []
   const showGuide = s.prefs.showGuide
+  const fx = !ironed && !reducedMotion()
   for (let y = 0; y < n; y++) {
     const cells: ReactElement[] = []
     for (let x = 0; x < n; x++) {
@@ -214,6 +260,7 @@ export function BoardView(): ReactElement {
           label={label}
           delay={Math.round(((x + y) * 780) / (2 * n - 2))}
           corners={corners}
+          fx={fx}
         />,
       )
     }
@@ -224,6 +271,7 @@ export function BoardView(): ReactElement {
   const style = { '--pd-n': n, '--pd-cell': `${cell}px` } as CSSProperties
   return (
     <div className="pd-boardwrap" ref={wrapRef}>
+      <div className="pd-boardbox">
       <div
         ref={boardRef}
         role="grid"
@@ -249,6 +297,8 @@ export function BoardView(): ReactElement {
         {rows}
         {ironing ? <div className="pd-sweep" aria-hidden /> : null}
         {empty ? <div className="pd-empty" aria-hidden><span>{t('playEmpty')}</span></div> : null}
+      </div>
+      {overlay}
       </div>
       <span id={`${uid}-help`} className="pd-sr">{t('boardHelp')}</span>
     </div>

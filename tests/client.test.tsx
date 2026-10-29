@@ -5,12 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject, KIND, langOf, SHORTCUT_ID, type ClientContext } from '../src/client/index.tsx'
 import { HINT_DELAY_MS, resetHintCounts } from '../src/client/entry.tsx'
 import { STYLE_ID } from '../src/client/styles.ts'
+import { settingsOpener } from '../src/client/settings.ts'
+import { cellSize } from '../src/client/ui/Board.tsx'
 import { canCopyImage, copyPng, exportFileName, cornerRadii, saveRoute } from '../src/client/render.ts'
-import { createBoard, setCell, STORAGE_KEY } from '../src/core/index.ts'
+import { createBoard, defaultState, findTemplate, serializeState, setCell, STORAGE_KEY } from '../src/core/index.ts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-function fakeCtx() {
+function fakeCtx(face: Record<string, unknown> = {}) {
   const disposers: Array<() => unknown> = []
   const slots: Array<{ options: Record<string, unknown>; component: ComponentType<never> }> = []
   const tabs: Array<Record<string, unknown>> = []
@@ -31,7 +33,7 @@ function fakeCtx() {
     },
     sidebarRightTabs: { register: (def) => { tabs.push(def); return () => {} } },
     sidebarRight: { openTab },
-    shortcuts: { register: (cmd) => { shortcuts.push(cmd); return () => {} } },
+    shortcuts: { ...face, register: (cmd) => { shortcuts.push(cmd); return () => {} } },
   }
   const setLang = (l: string): void => { active = l; for (const fn of listeners) fn() }
   const dispose = (): void => { for (const d of disposers.toReversed()) d() }
@@ -43,6 +45,21 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
   localStorage.clear(); host = document.createElement('div'); document.body.append(host) })
 afterEach(() => { vi.restoreAllMocks(); host.remove(); document.body.innerHTML = '' })
+
+/** Split a selector list on top-level commas only (not inside :where()/:is()). */
+function splitTop(list: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of list) {
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+    if (ch === ',' && depth === 0) { out.push(cur); cur = ''; continue }
+    cur += ch
+  }
+  out.push(cur)
+  return out
+}
 
 describe('client apply', () => {
   it('declares its services and registers tab, body, header entry, busy pill and shortcut', () => {
@@ -62,7 +79,7 @@ describe('client apply', () => {
     // every selector is scoped by a pd- class (keyframes / @property / at-rule preludes aside)
     const selectors = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@property[^}]*\}/g, '').replace(/@keyframes[^{]*\{(?:[^{}]*\{[^}]*\})*\s*\}/g, '')
       .match(/(?:^|\})\s*([^{}@]+)\{/g)!.map(m => m.replace(/^\}?\s*/, '').replace(/\{$/, '').trim())
-      .flatMap(sel => sel.split(',').map(x => x.trim())).filter(x => x !== '' && !/^(from|to|\d+%)/.test(x))
+      .flatMap(sel => splitTop(sel).map(x => x.trim())).filter(x => x !== '' && !/^(from|to|\d+%)/.test(x))
     expect(selectors.filter(x => !x.includes('.pd-'))).toEqual([])
     // custom properties are our own (--pd-*) or host aliases read with fallbacks
     expect([...new Set(css.match(/--[a-z][\w-]*/g))].filter(v => !/^--(pd|dsw|ds)-/.test(v))).toEqual([])
@@ -178,6 +195,154 @@ describe('client apply', () => {
     await act(async () => { root.unmount() })
     f.dispose()
     vi.unstubAllGlobals()
+  })
+})
+
+const settingsEntry = { id: 'settings.open', label: 'Open settings', keys: 'Ctrl Alt ,', aria: 'Control+Alt+Comma', binding: { code: 'Comma', modifiers: ['control', 'alt'] } }
+const webShortcuts = { runtime: 'web', platform: 'windows', catalog: { getSnapshot: () => [settingsEntry] } }
+
+async function renderAi(status: Record<string, unknown>, face: Record<string, unknown> = {}) {
+  const f = fakeCtx(face)
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })))
+  apply(f.ctx)
+  const Body = f.slots[0]!.component as ComponentType
+  const root = createRoot(host)
+  await act(async () => { root.render(<Body />) })
+  await act(async () => { host.querySelectorAll<HTMLButtonElement>('.pd-big')[1]!.click() })
+  await act(async () => { await new Promise(r => setTimeout(r, 10)) })
+  const done = async (): Promise<void> => { await act(async () => { root.unmount() }); f.dispose(); vi.unstubAllGlobals() }
+  return { done }
+}
+
+describe('design walkthrough fixes', () => {
+  it('I3/I4: not configured → input and chips disabled, primary 「打开 DSH 设置」 fires the settings shortcut', async () => {
+    const { done } = await renderAi({ configured: false, route: 'host', model: 'deepseek-v4-flash', verified: true }, webShortcuts)
+    const card = host.querySelector('.pd-nocfg')!
+    const open = [...card.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '打开 DSH 设置')!
+    expect(open.className).toContain('pd-primary')
+    expect([...card.querySelectorAll('button.pd-ghost')].map(b => b.textContent)).toEqual(['先玩模板'])
+    expect(card.textContent).toContain('按 Ctrl Alt , 打开 DSH 设置 → 模型')
+    expect(host.querySelector('textarea')!.disabled).toBe(true)
+    expect([...host.querySelectorAll<HTMLButtonElement>('.pd-chip')].every(b => b.disabled)).toBe(true)
+    expect(document.activeElement).toBe(open)
+    const seen: KeyboardEvent[] = []
+    const spy = (e: KeyboardEvent): void => { seen.push(e) }
+    window.addEventListener('keydown', spy)
+    await act(async () => { open.click() })
+    window.removeEventListener('keydown', spy)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ code: 'Comma', ctrlKey: true, altKey: true, metaKey: false, shiftKey: false })
+    await done()
+  })
+
+  it('I4: no usable settings shortcut → no fake button, honest manual steps, 「重新检测」 is primary', async () => {
+    const { done } = await renderAi({ configured: false, route: 'none' })
+    const card = host.querySelector('.pd-nocfg')!
+    expect(card.textContent).not.toContain('打开 DSH 设置按')
+    expect([...card.querySelectorAll('button')].map(b => b.textContent)).toEqual(['重新检测', '先玩模板'])
+    expect(card.querySelector('.pd-primary')?.textContent).toBe('重新检测')
+    expect(card.textContent).toContain('插件没法直接帮你打开模型设置')
+    await done()
+  })
+
+  it('I3/S5: unverified credentials show the first-run hint; the token estimate carries the model as a tooltip', async () => {
+    const { done } = await renderAi({ configured: true, route: 'host', model: 'deepseek-v4-flash', verified: false })
+    expect(host.textContent).toContain('首次生成会检测模型配置')
+    const meta = [...host.querySelectorAll('.pd-tokens')].find(e => e.textContent === '约 300–900 tokens')!
+    expect(meta.getAttribute('title')).toBe('模型：deepseek-v4-flash')
+    expect(host.querySelector('textarea')!.disabled).toBe(false)
+    await done()
+  })
+
+  it('I2: focus never falls back to <body> after coach, clear, toast undo, menu Esc and Back', async () => {
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
+    const grid = host.querySelector<HTMLElement>('[role=grid]')!
+    const coach = host.querySelector('.pd-boardbox .pd-overlay.pd-coach')!
+    expect(coach).not.toBeNull()
+    expect(document.activeElement?.textContent).toBe('开始拼')
+    await act(async () => { (document.activeElement as HTMLButtonElement).click() })
+    expect(document.activeElement).toBe(grid)
+    await act(async () => { grid.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
+    const clear = host.querySelector<HTMLButtonElement>('[role=toolbar] button[aria-label="清空"]')!
+    clear.focus()
+    await act(async () => { clear.click() })
+    expect(document.activeElement).toBe(grid)
+    const undo = host.querySelector<HTMLButtonElement>('.pd-toast button')!
+    undo.focus()
+    await act(async () => { undo.click() })
+    expect(document.activeElement).not.toBe(document.body)
+    expect(grid.querySelectorAll('.pd-bead').length).toBe(1)
+    const menuBtn = host.querySelector<HTMLButtonElement>('[data-pd-menu-btn]')!
+    await act(async () => { menuBtn.click() })
+    expect(document.activeElement?.closest('[role=menu]')).not.toBeNull()
+    await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(host.querySelector('[role=menu]')).toBeNull()
+    expect(document.activeElement).toBe(menuBtn)
+    // Back removes itself: focus lands in the home view, not on <body>
+    const back = host.querySelector<HTMLButtonElement>('.pd-head .pd-ib[aria-label="返回"]')!
+    back.focus()
+    await act(async () => { back.click() })
+    expect(host.querySelector('.pd-tpl')).not.toBeNull()
+    expect(document.activeElement).not.toBe(document.body)
+    expect(host.contains(document.activeElement)).toBe(true)
+    await act(async () => { root.unmount() })
+    f.dispose()
+  })
+
+  it('S6: every target right but one stray bead → "还差一步", 99%, no done card', async () => {
+    const heart = findTemplate('heart')!
+    // the stray bead sits on an empty corner of the pattern
+    const board = setCell(heart.board, 0, 0, 4)
+    localStorage.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board, target: 'heart', mode: 'play', coached: true }))
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    expect(host.querySelector('.pd-warn')?.textContent).toBe('还差一步：擦掉 1 颗放错的豆')
+    expect(host.querySelector('[role=progressbar]')?.getAttribute('aria-valuenow')).toBe('99')
+    expect(host.querySelector('.pd-overlay.pd-done')).toBeNull()
+    await act(async () => { root.unmount() })
+    f.dispose()
+  })
+
+  it('S11: each template button is named by its visible text first (WCAG 2.5.3)', async () => {
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    const tpls = [...host.querySelectorAll<HTMLButtonElement>('.pd-tpl')]
+    expect(tpls).toHaveLength(12)
+    for (const b of tpls) {
+      expect(b.hasAttribute('aria-label')).toBe(false)
+      const visible = b.querySelector('.pd-nm')!.textContent!
+      expect(b.textContent!.startsWith(visible)).toBe(true)
+    }
+    await act(async () => { root.unmount() })
+    f.dispose()
+  })
+
+  it('I9: board side follows width and the height left over, 140..480', () => {
+    expect(cellSize(640 - 32, Number.POSITIVE_INFINITY, 12)).toBe(39)
+    expect(cellSize(608, Number.POSITIVE_INFINITY, 16)).toBe(29)
+    expect(cellSize(608, Number.POSITIVE_INFINITY, 24)).toBe(19)
+    expect(cellSize(268, 900, 16)).toBe(16)
+    expect(cellSize(608, 300, 16)).toBe(18)
+    expect(cellSize(608, 20, 16)).toBe(8)
+  })
+
+  it('I4: settings opener only on DOM keyboard adapters with a bound shortcut', () => {
+    expect(settingsOpener(undefined)).toEqual({})
+    expect(settingsOpener({ runtime: 'web', catalog: { getSnapshot: () => [{ ...settingsEntry, binding: null }] } })).toEqual({})
+    expect(settingsOpener({ runtime: 'desktop', platform: 'macos', catalog: { getSnapshot: () => [settingsEntry] } })).toEqual({ keys: 'Ctrl Alt ,' })
+    expect(typeof settingsOpener({ runtime: 'desktop', platform: 'linux', catalog: { getSnapshot: () => [settingsEntry] } }).open).toBe('function')
+    expect(settingsOpener({ runtime: 'web', catalog: { getSnapshot: () => { throw new Error('x') } } })).toEqual({})
   })
 })
 

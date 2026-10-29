@@ -42,14 +42,15 @@ export function HomeView(): ReactElement {
               <button
                 type="button"
                 className="pd-tpl"
-                aria-label={t('tplAria', { name, size: tpl.board.size, n: tpl.colors, diff: tpl.difficulty }) + (done ? `，${t('tplDone')}` : '')}
                 onClick={() => { store.follow(tpl.id) }}
               >
                 <Thumb tpl={tpl} />
                 <span className="pd-nm">{name}</span>
-                <span className="pd-meta" aria-hidden>
+                <span className="pd-meta">
                   {t('tplMeta', { n: tpl.colors })}
-                  <span className="pd-diff">{[1, 2, 3].map(d => <i key={d} className={d <= tpl.difficulty ? 'pd-on' : undefined} />)}</span>
+                  {/* the accessible name starts with the visible text (WCAG 2.5.3) */}
+                  <span className="pd-sr">{t('tplSr', { size: tpl.board.size, diff: tpl.difficulty })}{done ? t('tplSrDone') : ''}</span>
+                  <span className="pd-diff" aria-hidden>{[1, 2, 3].map(d => <i key={d} className={d <= tpl.difficulty ? 'pd-on' : undefined} />)}</span>
                 </span>
                 {done ? <span className="pd-done" aria-hidden><IconCheck /></span> : null}
               </button>
