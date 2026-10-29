@@ -5,6 +5,14 @@ import type { RepairIssue } from './repair.ts'
 export const GENERATE_PATH = '/api/pindou.generate'
 /** Document-relative form for the browser (keeps working under a mount path). */
 export const GENERATE_ROUTE = GENERATE_PATH.slice(1)
+export const STATUS_PATH = '/api/pindou.status'
+export const STATUS_ROUTE = STATUS_PATH.slice(1)
+
+export interface StatusResponse {
+  readonly configured: boolean
+  readonly route: 'mock' | 'host' | 'direct' | 'none'
+  readonly model?: string | undefined
+}
 
 export interface GenerateRequest {
   readonly prompt: string
