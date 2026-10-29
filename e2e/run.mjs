@@ -909,6 +909,13 @@ try {
   check('demo GIF written', gif.status === 0)
 
   // ── C. dark theme follows the host ──
+  // The section-A chat turn streams for FAKE_LLM_CHAT_MS and then ends on the host's clock, which
+  // turns the entry's busy dot off. Left alone that happens somewhere in C/D, depending on machine
+  // speed, so two runs of the same build crop a different entry (det. run m-1/m-2: ai-filled-light).
+  // Pin it instead: every B shot is taken while the turn still runs (asserted), and C starts once
+  // it has ended (waited for), so each crop's entry state is the same in every run.
+  check('B shots all show the busy entry: the section-A turn is still running at the end of B', await p.locator('.pd-entry.pd-busy').count() === 1)
+  await p.locator('.pd-entry.pd-busy').waitFor({ state: 'detached', timeout: 60000 })
   log('C. dark')
   await p.emulateMedia({ colorScheme: 'dark' })
   await p.waitForTimeout(600)
