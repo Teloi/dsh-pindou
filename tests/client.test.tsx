@@ -500,7 +500,7 @@ describe('design walkthrough round 2 fixes (r3)', () => {
     expect(CSS).toContain('.pd-overlay .pd-acts .pd-btn{min-height:var(--pd-hit)}')
     expect(CSS).toMatch(/\.pd-overlay\{position:relative;/)
     // the toast is absolutely centred; without max-content its box shrinks to half the panel and 撤销 wraps at 300 px
-    expect(CSS).toMatch(/\.pd-toast\{[^}]*width:max-content;max-width:calc\(100% - 24px\)/)
+    expect(CSS).toMatch(/\.pd-toast\{[^}]*width:max-content;max-width:calc\(100% - 32px\)/)
     expect(CSS).toContain('.pd-toast button{flex:none;white-space:nowrap;')
     await again.done()
   })

@@ -163,6 +163,29 @@ describe('R3-2: the toast never sits over the bottom controls', () => {
   })
 })
 
+/** The declarations of the first top-level rule for exactly `sel`. */
+function cssRule(sel: string): string {
+  const m = new RegExp(`(?:^|\\n|\\})${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\{([^}]*)\\}`).exec(CSS)
+  expect(m, sel).not.toBeNull()
+  return m![1]!
+}
+
+describe('toast width (spec v2.0 22:15): one line, at most panel width − 32, ellipsis', () => {
+  it('the toast is at most the panel width minus 32', () => {
+    expect(cssRule('.pd-toast')).toContain('max-width:calc(100% - 32px)')
+  })
+  it('its text never wraps and ends in an ellipsis when cut', () => {
+    const text = cssRule('.pd-toast>span')
+    for (const decl of ['min-width:0', 'white-space:nowrap', 'overflow:hidden', 'text-overflow:ellipsis']) expect(text).toContain(decl)
+  })
+  it('the undo button keeps its size (never squeezed by the text)', () => {
+    expect(cssRule('.pd-toast button')).toMatch(/flex:none;white-space:nowrap/)
+  })
+  it('no later rule widens the toast again', () => {
+    expect([...CSS.matchAll(/\.pd-toast\{[^}]*max-width:([^;}]*)/g)].map(m => m[1])).toEqual(['calc(100% - 32px)'])
+  })
+})
+
 describe('style isolation', () => {
   it('every element and pseudo-element under the panel and portals is reset to round corners and border-box', () => {
     expect(CSS).toContain('.pd-root *,.pd-root *::before,.pd-root *::after,.pd-portal *,.pd-portal *::before,.pd-portal *::after{box-sizing:border-box;corner-shape:round}')

@@ -245,3 +245,32 @@ export function toastCovers() {
     .map(el => `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} ${el.getAttribute('aria-label') ?? (el.textContent ?? '').trim().slice(0, 12)}`)
   return { toast: [Math.round(t.left), Math.round(t.top), Math.round(t.width), Math.round(t.height)], covered: [...new Set(covered)] }
 }
+
+// Spec v2.0 (22:15): put a long message into the visible toast and measure it. The toast must
+// stay one line, at most panel width − 32, cut with an ellipsis, without moving the status row.
+export async function toastLongLine(text) {
+  const root = document.querySelector('.pd-root')
+  const toast = root?.querySelector('.pd-toast')
+  const span = toast?.querySelector(':scope > span')
+  if (!root || !toast || !span) return null
+  const status = root.querySelector('.pd-status')
+  const before = status?.getBoundingClientRect().height ?? 0
+  span.textContent = text
+  await new Promise(r => { requestAnimationFrame(() => { requestAnimationFrame(r) }) })
+  const t = toast.getBoundingClientRect()
+  const panel = root.getBoundingClientRect()
+  const cs = getComputedStyle(span)
+  const lineH = Number.parseFloat(cs.lineHeight) || Number.parseFloat(cs.fontSize) * 1.4
+  const range = document.createRange()
+  range.selectNodeContents(span)
+  const lines = new Set([...range.getClientRects()].map(r => Math.round(r.top))).size
+  const btn = toast.querySelector('button')
+  return {
+    lines,
+    spanH: Math.round(span.getBoundingClientRect().height), lineH: Math.round(lineH),
+    width: Math.round(t.width), limit: Math.round(panel.width - 32),
+    cut: span.scrollWidth > span.clientWidth, ellipsis: cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap',
+    button: btn ? btn.scrollWidth <= Math.ceil(btn.getBoundingClientRect().width) : true,
+    statusBefore: Math.round(before), statusAfter: Math.round(status?.getBoundingClientRect().height ?? 0),
+  }
+}

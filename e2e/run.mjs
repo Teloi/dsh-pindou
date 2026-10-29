@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
-import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers } from './audit.mjs'
+import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers, toastLongLine } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -665,19 +665,30 @@ try {
   // ── G2. short window toast (design R3-2): below 700 px tall the clear/undo toast must not
   // cover the palette, Iron/Export or any other control; desktop panel and the 420-wide full-screen pane ──
   log('G2. short toast')
-  for (const [w, h, theme] of [[1280, 620, 'light'], [420, 620, 'light'], [420, 620, 'dark'], [1280, 699, 'light']]) {
-    const tp = await newPage({ viewport: { width: w, height: h }, colorScheme: theme })
-    await startSession(tp, '看看 README')
+  // spec v2.0 (22:15): a long message stays one line within panel width − 32, cut with …
+  const LONG = {
+    zh: '浏览器存储暂时不可用，这一局的进度和设置都不会保存，请稍后再试或者导出一张图片留底',
+    en: 'Browser storage is unavailable right now, so neither this board nor your settings will be saved — export a picture to keep it',
+  }
+  for (const [w, h, theme, lang = 'zh'] of [[1280, 620, 'light'], [420, 620, 'light'], [420, 620, 'dark'], [1280, 699, 'light'], [420, 620, 'light', 'en']]) {
+    const tp = await newPage({ viewport: { width: w, height: h }, colorScheme: theme }, lang)
+    await startSession(tp, lang === 'zh' ? '看看 README' : 'Hello', lang)
     await openPanel(tp)
     await playFirstTemplate(tp)
     await placeBeads(tp, 6)
-    await tp.locator('.pd-tools button[aria-label="清空"]').click()
+    await tp.locator(`.pd-tools button[aria-label="${lang === 'zh' ? '清空' : 'Clear'}"]`).click()
     await tp.locator('.pd-toast').waitFor()
     await tp.waitForTimeout(300)
     const cov = await tp.evaluate(toastCovers)
     const pal = await tp.evaluate(() => [...document.querySelectorAll('.pd-palette .pd-sw')].filter(e => e.getBoundingClientRect().height > 0).length)
     check(`R3-2 ${w}×${h} ${theme}: the clear toast covers no swatch, Iron/Export or other control (${pal} swatches visible)`, !!cov && cov.covered.length === 0 && pal === 16, JSON.stringify(cov))
-    await outShot(tp, `r3-2-toast-${w}x${h}-${theme}`)
+    await outShot(tp, `r3-2-toast-${w}x${h}-${theme}${lang === 'en' ? '-en' : ''}`)
+    if (w === 420 && theme === 'light') {
+      const tl = await tp.evaluate(toastLongLine, LONG[lang])
+      check(`toast ${lang} 420×620: a long message stays one line, ≤ panel − 32 wide, ends in …, status row unchanged`,
+        !!tl && tl.lines === 1 && tl.spanH <= tl.lineH * 1.5 && tl.width <= tl.limit && tl.cut && tl.ellipsis && tl.button && tl.statusAfter === tl.statusBefore, JSON.stringify(tl))
+      await outShot(tp, `toast-long-420x620-${lang}`)
+    }
     await tp.context().close()
   }
 

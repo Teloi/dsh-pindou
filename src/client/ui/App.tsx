@@ -106,7 +106,8 @@ function ToastView({ toast }: { toast: NonNullable<GameState['toast']> }): React
     <div className="pd-toast" role="status" data-held={held > 0 || undefined}
       onPointerEnter={hold(true)} onPointerLeave={hold(false)}
       onFocus={hold(true)} onBlur={hold(false)}>
-      <span>{t(TOAST_TEXT[toast.key], toast.params)}</span>
+      {/* the whole text stays in the DOM (read out by role=status) and in the tooltip when it is cut */}
+      <span title={t(TOAST_TEXT[toast.key], toast.params)}>{t(TOAST_TEXT[toast.key], toast.params)}</span>
       {toast.undo
         ? (
           <button type="button" onClick={(e) => {

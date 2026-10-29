@@ -326,10 +326,11 @@ const CONTROLS = `
 .pd-mi[aria-checked=true] .pd-sw2::after{transform:translateX(12px)}
 .pd-menu hr{border:0;border-top:1px solid var(--pd-border-subtle);margin:4px 0}
 .pd-keys{margin:4px 8px 6px;padding:0;list-style:none;font-size:11.5px;color:var(--pd-text-2);display:flex;flex-direction:column;gap:3px}
-/* toast (design R3-2): drops from the top over the (read-only) status row. The play view stacks board → tools → palette → footer to the bottom edge at every height, so any bottom anchor lands on swatches or Iron/Export (seen at 1280×800 too, not only below 700 px) */
-.pd-toast{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + var(--pd-header-h) + 4px);transform:translateX(-50%);background:var(--pd-toast-bg);color:var(--pd-toast-label);font-size:12.5px;border-radius:10px;padding:5px 6px 5px 12px;display:flex;gap:10px;align-items:center;z-index:40;width:max-content;max-width:calc(100% - 24px);box-shadow:0 6px 20px rgba(0,0,0,.18);animation:pd-toast-in var(--pd-t) var(--pd-ease)}
+/* toast (design R3-2, spec v2.0): at most panel width − 32, drops from the top over the (read-only) status row. The play view stacks board → tools → palette → footer to the bottom edge at every height, so any bottom anchor lands on swatches or Iron/Export (seen at 1280×800 too, not only below 700 px) */
+.pd-toast{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + var(--pd-header-h) + 4px);transform:translateX(-50%);background:var(--pd-toast-bg);color:var(--pd-toast-label);font-size:12.5px;border-radius:10px;padding:5px 6px 5px 12px;display:flex;gap:10px;align-items:center;z-index:40;width:max-content;max-width:calc(100% - 32px);box-shadow:0 6px 20px rgba(0,0,0,.18);animation:pd-toast-in var(--pd-t) var(--pd-ease)}
 @keyframes pd-toast-in{from{opacity:0;transform:translate(-50%,-8px)}}
-.pd-toast>span{min-width:0}
+/* one line, never wraps: a long message ends in … rather than growing over the title/progress row (spec v2.0, 22:15) */
+.pd-toast>span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pd-toast button{flex:none;white-space:nowrap;border:0;background:rgb(255 255 255 / .14);color:inherit;border-radius:6px;padding:0 10px;min-height:var(--pd-hit);font-size:12px;cursor:pointer;font-weight:600}
 body[data-ds-dark-theme] .pd-toast button{background:rgb(0 0 0 / .08)}
 .pd-preview{position:absolute;inset:var(--pd-header-h) 0 0;z-index:35;background:var(--pd-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:var(--pd-pad);text-align:center}
