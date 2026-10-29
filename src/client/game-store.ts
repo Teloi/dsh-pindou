@@ -158,7 +158,8 @@ export class GameStore {
   /** Games left by undoing a switch, for redo; any edit drops them. */
   private nextGames: GameSnap[] = []
   /** Live visibility of the panel (set by the mounted panel), read when a result lands. */
-  private visibilityProbe: (() => boolean) | null = null
+  /** Each mounted panel's probe → its last "on screen" report. */
+  private readonly panels = new Map<() => boolean, boolean>()
 
   constructor(private readonly deps: GameDeps) {
     this.now = deps.now ?? Date.now
@@ -213,23 +214,32 @@ export class GameStore {
     this.set({ ai: { ...this.state.ai, ...patch } }, false)
   }
 
-  /** The panel reports its visibility; showing it clears the "fresh result" dot. */
-  setPanelVisible(visible: boolean): void {
-    if (visible === this.state.panelVisible) return
-    this.set({ panelVisible: visible, ...(visible ? { fresh: false } : {}) }, false)
+  /**
+   * Every mounted panel (split view, several sessions) registers a synchronous
+   * "am I on screen" probe. The panel counts as visible while ANY registered
+   * panel is on screen, so a hidden or later-mounted panel never overrides a
+   * visible one, and removing one panel never unregisters another. `check`
+   * re-samples this panel; `remove` unregisters it (on unmount). A result that
+   * lands between two reports is judged on the live probes (spec §15.1-3).
+   * Showing a panel clears the "fresh result" dot.
+   */
+  addPanel(probe: () => boolean): { readonly check: () => void; readonly remove: () => void } {
+    this.panels.set(probe, false)
+    return {
+      check: () => this.seePanels(probe),
+      // once deleted, `probe` matches no key: nothing is re-read, the rest are OR'd
+      remove: () => { this.panels.delete(probe); this.seePanels(probe) },
+    }
   }
 
-  /**
-   * The mounted panel registers a synchronous "am I on screen" check, so a
-   * result that lands between two visibility reports is judged on the live
-   * state (spec §15.1-3), not on the last sample. `null` unregisters.
-   */
-  setVisibilityProbe(probe: (() => boolean) | null): void { this.visibilityProbe = probe }
-
-  private panelOnScreen(): boolean {
-    let visible = this.state.panelVisible
-    try { if (this.visibilityProbe) visible = this.visibilityProbe() } catch { /* keep the last report */ }
-    if (visible !== this.state.panelVisible) this.setPanelVisible(visible)
+  /** Re-read the registered probe `only` (omitted: every probe), then OR the reports. */
+  private seePanels(only?: () => boolean): boolean {
+    for (const p of this.panels.keys()) {
+      // a throwing probe keeps its last report
+      if (!only || p === only) try { this.panels.set(p, p()) } catch { /* keep */ }
+    }
+    const visible = [...this.panels.values()].includes(true)
+    if (visible !== this.state.panelVisible) this.set({ panelVisible: visible, fresh: this.state.fresh && !visible }, false)
     return visible
   }
 
@@ -682,7 +692,7 @@ export class GameStore {
 
   /** A generated pattern becomes the faint guide on a fresh board, like a template. */
   private finishAi(result: AiResult): void {
-    this.set({ ai: { ...this.state.ai, phase: 'done', error: undefined, result }, fresh: !this.panelOnScreen() }, false)
+    this.set({ ai: { ...this.state.ai, phase: 'done', error: undefined, result }, fresh: !this.seePanels() }, false)
     // every generation is its own board, even when the picture is the same (spec v1.6 §4.3)
     this.startPattern(`board:${this.now().toString(36)}${(++this.boardSeq).toString(36)}`, result.board)
   }

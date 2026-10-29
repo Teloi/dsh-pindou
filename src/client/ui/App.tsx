@@ -157,8 +157,9 @@ export function panelOnScreen(el: HTMLElement): boolean {
  * Report whether the (kept-mounted) panel is on screen (spec §15.1-3). Event
  * driven, so the report is never a tick late: size changes, viewport
  * intersection, and the host's hide/collapse attributes on any ancestor; a
- * slow tick stays as a safety net. The store also gets a live probe, so a
- * result that lands between two reports is judged on the current state.
+ * slow tick stays as a safety net. The panel registers a live probe with the
+ * store (one per mounted panel, OR'd), so a result that lands between two
+ * reports is judged on the current state.
  */
 function usePanelVisibility(ref: { readonly current: HTMLElement | null }): void {
   const { store } = useEnv()
@@ -166,9 +167,9 @@ function usePanelVisibility(ref: { readonly current: HTMLElement | null }): void
     const el = ref.current
     if (!el) return
     const doc = el.ownerDocument
-    const check = (): void => { store.setPanelVisible(panelOnScreen(el)) }
+    // This panel's own registration: OR'd with every other mounted panel's, dropped on unmount.
+    const { check, remove } = store.addPanel(() => panelOnScreen(el))
     check()
-    store.setVisibilityProbe(() => panelOnScreen(el))
     const win = doc.defaultView
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(check) : undefined
     ro?.observe(el)
@@ -181,8 +182,7 @@ function usePanelVisibility(ref: { readonly current: HTMLElement | null }): void
     return () => {
       ro?.disconnect(); io?.disconnect(); mo?.disconnect(); clearInterval(id)
       doc.removeEventListener('visibilitychange', check)
-      store.setVisibilityProbe(null)
-      store.setPanelVisible(false)
+      remove()
     }
   }, [ref, store])
 }

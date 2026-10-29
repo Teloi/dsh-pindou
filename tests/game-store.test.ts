@@ -203,10 +203,11 @@ describe('GameStore AI', () => {
     await store.generate()
     expect(store.getSnapshot().fresh).toBe(true)
     expect(entryDot(store.getSnapshot(), false)).toBe('progress')
-    store.setPanelVisible(true)
+    const tab = store.addPanel(() => true)
+    tab.check()
     expect(store.getSnapshot().fresh).toBe(false)
     expect(entryDot(store.getSnapshot(), false)).toBeNull()
-    store.setPanelVisible(false)
+    tab.remove()
     // free play with beads on the board counts as unfinished
     store.startFree(); store.applyAt(0, 0)
     expect(entryDot(store.getSnapshot(), false)).toBe('progress')
@@ -481,24 +482,95 @@ describe('N9 entry dot uses the live panel visibility', () => {
     const board = setCell(createBoard(12), 1, 1, 2)
     const ok = { ok: true, size: 12, flat: encode(board), issues: [], repaired: false, usage: { input: 1, output: 1 }, model: 'm', finish: 'stop' } as GenerateResponse
     const { store, advance } = make({ api: { generate: async () => ok, status: async () => ({ configured: true, route: 'host' }) } })
-    store.setPanelVisible(true)
-    let live = false
-    store.setVisibilityProbe(() => live)
+    let live = true
+    const panel = store.addPanel(() => live)
+    panel.check()
+    live = false
     store.setAiSize(12); store.setAiPrompt('猫')
     await store.generate()
     expect(store.getSnapshot()).toMatchObject({ fresh: true, panelVisible: false })
     expect(entryDot(store.getSnapshot(), false)).toBe('progress')
     live = true
-    store.setPanelVisible(true)
+    panel.check()
     expect(entryDot(store.getSnapshot(), false)).toBeNull()
+    panel.remove()
     // visible at landing: no dot; a throwing probe keeps the last report
-    store.setVisibilityProbe(() => { throw new Error('gone') })
+    const gone = store.addPanel(() => { throw new Error('gone') })
+    const shown = store.addPanel(() => true)
+    shown.check()
     advance(AI_COOLDOWN_MS)
     store.setAiPrompt('狗')
     await store.generate()
     expect(store.getSnapshot().ai.phase).toBe('done')
     expect(store.getSnapshot().fresh).toBe(false)
-    store.setVisibilityProbe(null)
+    gone.remove(); shown.remove()
+  })
+})
+
+type Panels = Record<'visible' | 'hidden', ReturnType<GameStore['addPanel']>>
+/** Register one visible and one hidden panel, in the given order. */
+function addPanels(store: GameStore, order: ReadonlyArray<keyof Panels>): Panels {
+  const panels = {} as Panels
+  for (const k of order) panels[k] = store.addPanel(() => k === 'visible')
+  return panels
+}
+const dot = (store: GameStore): ReturnType<typeof entryDot> => entryDot(store.getSnapshot(), false)
+
+describe('entry dot with several mounted panels (split view, several sessions)', () => {
+  const unfinished = (): GameStore => {
+    const { store } = make()
+    store.startFree(); store.applyAt(0, 0)
+    return store
+  }
+
+  for (const order of [['visible', 'hidden'], ['hidden', 'visible']] as const) {
+    it(`one visible + one hidden panel (mounted ${order.join(' then ')}): no dot until both are gone`, () => {
+      const store = unfinished()
+      expect(dot(store)).toBe('progress')
+      const panels = addPanels(store, order)
+      for (const k of order) panels[k].check()
+      expect(dot(store)).toBeNull()
+      // repeated reports in either order never let the hidden panel win
+      for (let i = 0; i < 3; i++) { panels.hidden.check(); expect(dot(store)).toBeNull(); panels.visible.check(); expect(dot(store)).toBeNull() }
+      // unmount the hidden one first: the visible one still holds the dot off
+      panels.hidden.remove()
+      expect(dot(store)).toBeNull()
+      panels.visible.check()
+      expect(dot(store)).toBeNull()
+      panels.visible.remove()
+      expect(dot(store)).toBe('progress')
+    })
+
+    it(`one visible + one hidden panel (mounted ${order.join(' then ')}): unmounting the visible one first lights the dot`, () => {
+      const store = unfinished()
+      const panels = addPanels(store, order)
+      for (const k of order) panels[k].check()
+      expect(dot(store)).toBeNull()
+      panels.visible.remove()
+      expect(dot(store)).toBe('progress')
+      // a stale check from the removed panel does not re-register it
+      panels.visible.check()
+      expect(dot(store)).toBe('progress')
+      panels.hidden.check()
+      expect(dot(store)).toBe('progress')
+      panels.hidden.remove()
+      expect(dot(store)).toBe('progress')
+    })
+  }
+
+  it('a result that lands while one of two panels is visible is not fresh', async () => {
+    const board = setCell(createBoard(12), 1, 1, 2)
+    const ok = { ok: true, size: 12, flat: encode(board), issues: [], repaired: false, usage: { input: 1, output: 1 }, model: 'm', finish: 'stop' } as GenerateResponse
+    const { store } = make({ api: { generate: async () => ok, status: async () => ({ configured: true, route: 'host' }) } })
+    let left = false
+    const a = store.addPanel(() => left)
+    const b = store.addPanel(() => false)
+    a.check(); b.check()
+    left = true // shown since the last report: the live probe decides
+    store.setAiSize(12); store.setAiPrompt('猫')
+    await store.generate()
+    expect(store.getSnapshot()).toMatchObject({ fresh: false, panelVisible: true })
+    a.remove(); b.remove()
   })
 })
 
