@@ -12,11 +12,11 @@ import { spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from 'playwright-core'
 import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers, toastLongLine } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
-import { decodePng } from './compare-shots.mjs'
+import { decodePng, diffPng } from './compare-shots.mjs'
 import { longNames } from './classes-hook.mjs'
 import CSS_VARS from '../scripts/css-vars.json' with { type: 'json' }
 import { contrast, dropFile, HEART, hostFileCards, NO_ASYNC_REQUIRE, pasteFile, png, sliderLook, storedFootprint } from './picture.mjs'
@@ -40,7 +40,11 @@ const ROUND = new Set(['round', 'superellipse(1)'])
 // Every page's clock starts at one fixed instant and then runs in real time, so nothing on screen
 // depends on when the run happens. Not a frozen clock (clock.setFixedTime): elapsed-time logic
 // such as the 1.5 s AI cooldown would never see time pass and refuse every second request.
-// E2E_CLOCK=real turns it off.
+// The DSH server's clock starts at the same instant (e2e/server-clock.mjs): the host stamps chat
+// messages with it. Before a session whose stamp is shot, serverClock() moves it on to the fixed time of
+// day on a later day and that page's clock starts there too, so the stamp reads the fixed time however
+// long the run took to get there.
+// E2E_CLOCK=real turns both off.
 const FIXED_NOW = process.env.E2E_CLOCK === 'real' ? null : new Date('2026-06-01T10:00:00+08:00')
 
 const log = (...a) => { process.stdout.write(`${a.join(' ')}\n`) }
@@ -73,9 +77,15 @@ if (!existsSync(profilePkg) || !readFileSync(profilePkg, 'utf8').includes('"dsh-
 
 // 2. fake LLM + DSH Web
 const llm = await startFakeLlm({ chatMs: Number(process.env.FAKE_LLM_CHAT_MS ?? 30000) })
+const CLOCK_FILE = join(tmpdir(), `pindou-e2e-clock-${process.pid}`)
+const serverClockEnv = FIXED_NOW ? {
+  NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${pathToFileURL(join(REPO, 'e2e/server-clock.mjs')).href}`.trim(),
+  E2E_FIXED_NOW: String(FIXED_NOW.getTime()),
+  E2E_CLOCK_FILE: CLOCK_FILE,
+} : {}
 const dsh = spawn(process.execPath, [DSH_BIN, '--profile', 'web', '--no-open', '--host', '127.0.0.1', '--port', '0'], {
   cwd: WS,
-  env: { ...process.env, DSH_HOME, DEEPSEEK_BASE_URL: llm.url, DEEPSEEK_API_KEY: 'e2e-placeholder' },
+  env: { ...process.env, DSH_HOME, DEEPSEEK_BASE_URL: llm.url, DEEPSEEK_API_KEY: 'e2e-placeholder', ...serverClockEnv },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 let dshLog = ''
@@ -91,6 +101,22 @@ const url = await new Promise((ok, fail) => {
   dsh.on('exit', (code) => { fail(new Error(`DSH exited early (${code})`)) })
 })
 log('DSH Web up on', new URL(url).origin)
+/** Move the server's clock on to the fixed time of day on the next later day, plus `offset` ms
+ * (e2e/server-clock.mjs). Returns that instant (for the page's clock) and the HH:MM its stamps show. */
+let clockDays = 0
+async function serverClock(offset = 0) {
+  if (!FIXED_NOW) return { at: null, hhmm: null }
+  writeFileSync(CLOCK_FILE, String(offset))
+  dsh.kill('SIGUSR2')
+  await new Promise((r) => { setTimeout(r, 200) })
+  const at = new Date(FIXED_NOW.getTime() + ++clockDays * 86_400_000 + offset)
+  return { at, hhmm: `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}` }
+}
+/** The host's stamps on chat messages (leaf text like 「6月1日 10:00」 outside the plugin), with their boxes. */
+const hostStamps = p => p.evaluate(() => [...document.querySelectorAll('body *')]
+  .filter(e => !e.children.length && /\b\d{1,2}:\d{2}\b/.test(e.textContent ?? '') && !e.closest('.pd-root, .pd-portal'))
+  .map((e) => { const r = e.getBoundingClientRect(); return { text: e.textContent.trim(), x: r.left, y: r.top, right: r.right, bottom: r.bottom } })
+  .filter(r => r.right > r.x))
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true })
 const pageErrors = []
@@ -102,12 +128,12 @@ const HOST = {
   en: { choose: 'Choose workspace', add: 'Add workspace…', edit: 'Edit path', open: 'Open', full: 'Fullscreen' },
 }
 
-async function newPage(opts, lang = 'zh', init) {
+async function newPage(opts, lang = 'zh', init, at = FIXED_NOW) {
   const ctx = await browser.newContext({ locale: lang === 'zh' ? 'zh-CN' : 'en-US', deviceScaleFactor: 2, ...opts })
   if (init) await ctx.addInitScript(init)
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(url).origin })
   const p = await ctx.newPage()
-  if (FIXED_NOW) { await p.clock.install({ time: FIXED_NOW }); await p.clock.resume() }
+  if (at) { await p.clock.install({ time: at }); await p.clock.resume() }
   p.on('pageerror', (e) => { pageErrors.push(String(e)) })
   p.on('console', (m) => { if (m.type() === 'error' && /pindou/i.test(m.text())) pageErrors.push(m.text()) })
   await p.goto(url)
@@ -123,7 +149,7 @@ async function startSession(p, text, lang = 'zh') {
   await p.getByRole('button', { name: L.choose }).click()
   await p.waitForTimeout(500)
   // first run: directory picker; later runs: a menu of known workspaces
-  const known = p.getByRole('button', { name: basename(WS), exact: true })
+  const known = p.getByRole('button', { name: basename(WS), exact: true }).or(p.getByRole('menuitem', { name: basename(WS), exact: true }))
   if (await known.count()) {
     await known.last().click()
   } else {
@@ -699,18 +725,71 @@ async function worksSection() {
     await j.context().close()
   }
   // 6. walkthrough: light/dark × zh/en, 300–900 wide, home row and wall page (60 works), fade settled before each shot
+  const walkPage = async (scheme, lang, at) => {
+    const v = await newPage({ viewport: { width: 1280, height: 900 }, colorScheme: scheme }, lang, seedInit(JSON.stringify(seedWorks(60))), at ?? FIXED_NOW)
+    await startSession(v, lang === 'zh' ? '看看 README' : 'Hello', lang)
+    await openPanel(v)
+    await v.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+    return v
+  }
+  // The walkthrough's original crops, docked: the panel's root at 300–900 px. Docked, a root wider than the
+  // sidebar runs past the window's right edge, so its crop stops there (575 of 900 px at 1280 wide) and
+  // never reaches the host chat. Next to it, a crop of the host's stamp on the message just sent: the
+  // host clock on screen, for the determinism check and its counter-proof.
+  const dockedShot = async (v, name) => {
+    const roots = []
+    for (const px of [300, 420, 640, 900]) {
+      await setWidth(v, px)
+      await pluginShot(v, `${name}-${px}`)
+      roots.push([px, Math.round((await v.locator('.pd-root').first().boundingBox())?.width ?? 0)])
+    }
+    await setWidth(v, null)
+    const [stamp] = await hostStamps(v)
+    if (!stamp) return { roots }
+    const clip = { x: Math.floor(stamp.x) - 12, y: Math.floor(stamp.y) - 8, width: Math.ceil(stamp.right - stamp.x) + 24, height: Math.ceil(stamp.bottom - stamp.y) + 16 }
+    const file = join(OUT, 'plugin', `${name}-host-clock.png`)
+    await v.evaluate(settlePlugin)
+    await v.screenshot({ path: file, clip })
+    await v.evaluate(resumePlugin)
+    if (SELFCHECK) copyFileSync(file, join(SELFCHECK, 'plugin', `${name}-host-clock.png`))
+    return { roots, stamp, clip, file }
+  }
   for (const scheme of ['light', 'dark']) {
     for (const lang of ['zh', 'en']) {
-      const v = await newPage({ viewport: { width: 1280, height: 900 }, colorScheme: scheme }, lang, seedInit(JSON.stringify(seedWorks(60))))
-      await startSession(v, lang === 'zh' ? '看看 README' : 'Hello', lang)
-      await openPanel(v)
-      // the host's full-screen sidebar, so a panel up to 900 px is all on screen (a wider .pd-root than its
-      // sidebar would be clipped, and its crop would take in the host's clock)
+      // the stamp shows the fixed time however long the run took to get here
+      const clk = await serverClock(0), at = clk.hhmm
+      const v = await walkPage(scheme, lang, clk.at)
+      const docked = await dockedShot(v, `w-docked-${lang}-${scheme}`)
+      check(`W (${lang} ${scheme}) docked at 300–900 px: the host's stamp on the message (its own crop) shows the fixed clock (${at ?? 'E2E_CLOCK=real'})`,
+        !!docked.stamp && (!at || docked.stamp.text.includes(at)), JSON.stringify({ stamp: docked.stamp?.text, roots: docked.roots }))
+      // permanent counter-proof, on the host-clock crop: the same page again a day on with both clocks at
+      // the fixed time compares pixel-equal; with both clocks a minute ahead it must not, and the
+      // difference must lie inside the stamp
+      if (FIXED_NOW && lang === 'zh' && scheme === 'light' && docked.stamp) {
+        const c1 = await serverClock(0)
+        const w = await walkPage(scheme, lang, c1.at)
+        const same = await dockedShot(w, 'clock-proof-same')
+        await w.context().close()
+        const c2 = await serverClock(60_000)
+        const x = await walkPage(scheme, lang, c2.at)
+        const ahead = await dockedShot(x, 'clock-proof-plus-1min')
+        await x.context().close()
+        const eq = same.file ? diffPng(readFileSync(docked.file), readFileSync(same.file)) : 'no stamp'
+        check('screenshot determinism: the same page again a day on, both clocks at the fixed time: the host-clock crop compares pixel-equal',
+          !!same.stamp?.text.includes(c1.hhmm) && eq === null, JSON.stringify({ stamps: [docked.stamp.text, same.stamp?.text], diff: eq }))
+        const d = same.file && ahead.file ? diffPng(readFileSync(same.file), readFileSync(ahead.file)) : null
+        const st = same.stamp, c = same.clip, S = 2
+        const inStamp = !!d?.box && d.box.x >= Math.floor((st.x - c.x) * S) - 1 && d.box.y >= Math.floor((st.y - c.y) * S) - 1
+          && d.box.x + d.box.width <= Math.ceil((st.right - c.x) * S) + 1 && d.box.y + d.box.height <= Math.ceil((st.bottom - c.y) * S) + 1
+        check('screenshot determinism counter-proof: both clocks one minute ahead show in the stamp, and the comparison finds it there and only there',
+          !!ahead.stamp?.text.includes(c2.hhmm) && !!d && inStamp, JSON.stringify({ stamps: [st?.text, ahead.stamp?.text], diff: d, clip: c }))
+      }
+      // the host's full-screen sidebar, so the 300–900 px row and wall shots show the whole panel (docked,
+      // a root wider than the sidebar is cut off at the window's edge: 575 of 900 px)
       await v.getByRole('button', { name: HOST[lang].full }).first().click()
       await v.waitForTimeout(800)
       const room = Math.round((await panelBox(v))?.width ?? 0)
       check(`W (${lang} ${scheme}) walkthrough: the full-screen sidebar has room for a 900 px panel`, room >= 900, `width ${room}`)
-      await v.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
       const fits = []
       for (const px of [300, 360, 420, 480, 560, 640, 900]) {
         await setWidth(v, px)
@@ -1790,6 +1869,7 @@ try {
   if (SELFCHECK) { writeFileSync(join(SELFCHECK, 'checks.json'), `${JSON.stringify(checks, null, 2)}\n`); copyFileSync(join(OUT, 'audit', 'leaks.json'), join(SELFCHECK, 'style-leaks.json')) }
   await browser.close()
   dsh.kill('SIGTERM')
+  rmSync(CLOCK_FILE, { force: true })
   await llm.close()
 }
 const failed = checks.filter(c => !c.ok)
