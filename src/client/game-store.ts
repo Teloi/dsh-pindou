@@ -49,8 +49,12 @@ export interface GameState {
   readonly ironed: boolean
   /** Iron animation start time, while it runs. */
   readonly ironingSince: number | null
-  /** Set when a pattern is completed; drives the celebration. */
+  /** The followed pattern is complete (every target bead in place). */
+  readonly complete: boolean
+  /** Set when ironing finishes; drives the confetti (spec §4.6). */
   readonly celebrateAt: number | null
+  /** Set when the colour changes on a pattern; pulses that colour's remaining cells (spec §4.5). */
+  readonly pulseAt: number | null
   readonly overlay: Overlay
   readonly toast: { readonly key: ToastKey; readonly undo: boolean; readonly at: number; readonly params?: Readonly<Record<string, string>> } | null
   /** Fallback when downloads are unavailable: the PNG shown in the panel for manual saving. */
@@ -83,6 +87,8 @@ export interface GameDeps {
 
 /** Matches the designer's --pd-t-iron-total (the sweep and the staggered melt). */
 export const IRON_MS = 1200
+/** Spec §4.6: the "done" card waits a beat after the last bead lands. */
+export const DONE_DELAY_MS = 260
 /** Front-end spacing between real generations (spec §10: 5 s); cache hits are free. */
 export const AI_COOLDOWN_MS = 1500
 
@@ -115,6 +121,9 @@ export class GameStore {
   private readonly ct: (handle: unknown) => void
   private saveHandle: unknown = null
   private ironHandle: unknown = null
+  private doneHandle: unknown = null
+  /** A generation said "not configured": keep showing that until the user re-checks. */
+  private notConfiguredSticky = false
   private aiAbort: AbortController | null = null
   private last: { x: number; y: number; value: number } | null = null
   private disposed = false
@@ -139,7 +148,9 @@ export class GameStore {
       targetBoard,
       ironed: saved.ironed,
       ironingSince: null,
+      complete: targetBoard !== null && completion(saved.board, targetBoard).done,
       celebrateAt: null,
+      pulseAt: null,
       overlay: saved.ironed ? 'result' : null,
       toast: storage === 'ok' ? null : { key: storage === 'recovered' ? 'storageRecovered' : 'storageUnavailable', undo: false, at: this.now() },
       prefs: saved.prefs,
@@ -211,6 +222,7 @@ export class GameStore {
     this.flush()
     this.aiAbort?.abort()
     if (this.ironHandle !== null) this.ct(this.ironHandle)
+    this.cancelDone()
     this.disposed = true
     this.listeners.clear()
   }
@@ -229,7 +241,7 @@ export class GameStore {
     this.set({
       mode: 'play',
       ...(fresh ? { history: push(commit(s.history), createBoard(s.history.present.size)) } : {}),
-      target: null, targetBoard: null, ironed: false, celebrateAt: null,
+      target: null, targetBoard: null, ironed: false, complete: false, celebrateAt: null,
       overlay: s.coached ? null : 'coach',
     })
   }
@@ -258,7 +270,11 @@ export class GameStore {
   // ── selection ─────────────────────────────────────────────────────
   setColor(color: number): void {
     if (!isColorIndex(color)) return
-    this.set({ color, tool: this.state.tool === 'erase' || this.state.tool === 'pick' ? 'paint' : this.state.tool })
+    const pulse = color !== this.state.color && this.state.targetBoard !== null && !this.locked
+    this.set({
+      color, tool: this.state.tool === 'erase' || this.state.tool === 'pick' ? 'paint' : this.state.tool,
+      ...(pulse ? { pulseAt: this.now() } : {}),
+    })
   }
 
   setTool(tool: Tool): void { this.set({ tool }) }
@@ -328,7 +344,8 @@ export class GameStore {
 
   clear(): void {
     if (this.locked || this.board.cells.every(c => c === EMPTY)) return
-    this.set({ history: push(commit(this.state.history), clearBoard(this.board)), celebrateAt: null, overlay: null })
+    this.cancelDone()
+    this.set({ history: push(commit(this.state.history), clearBoard(this.board)), complete: false, celebrateAt: null, overlay: null })
     this.showToast('cleared', true)
   }
 
@@ -341,13 +358,32 @@ export class GameStore {
     })
   }
 
-  /** Completion bookkeeping after any committed change. */
+  private cancelDone(): void {
+    if (this.doneHandle !== null) { this.ct(this.doneHandle); this.doneHandle = null }
+  }
+
+  /**
+   * Completion bookkeeping after any committed change. The "done" card follows
+   * the last bead after DONE_DELAY_MS (immediately under reduced motion); the
+   * confetti waits for ironing (spec §4.6).
+   */
   private afterChange(): void {
     const target = this.state.targetBoard
     if (!target) return
     const done = completion(this.board, target).done
-    if (done && this.state.celebrateAt === null) this.set({ celebrateAt: this.now(), overlay: 'done' }, false)
-    else if (!done && this.state.celebrateAt !== null) this.set({ celebrateAt: null, overlay: this.state.overlay === 'done' ? null : this.state.overlay }, false)
+    if (done && !this.state.complete) {
+      this.set({ complete: true }, false)
+      const show = (): void => {
+        this.doneHandle = null
+        if (this.state.complete && !this.locked && this.state.overlay === null && this.state.mode === 'play') this.set({ overlay: 'done' }, false)
+      }
+      this.cancelDone()
+      if (this.deps.reducedMotion?.() ?? false) show()
+      else this.doneHandle = this.st(show, DONE_DELAY_MS)
+    } else if (!done && this.state.complete) {
+      this.cancelDone()
+      this.set({ complete: false, overlay: this.state.overlay === 'done' ? null : this.state.overlay }, false)
+    }
   }
 
   // ── patterns ──────────────────────────────────────────────────────
@@ -360,14 +396,14 @@ export class GameStore {
     this.set({
       mode: 'play',
       history: push(commit(this.state.history), fresh),
-      target, targetBoard: board, ironed: false, ironingSince: null, celebrateAt: null,
+      target, targetBoard: board, ironed: false, ironingSince: null, complete: false, celebrateAt: null,
       color: firstColor(fresh, board, this.state.color),
       tool: 'paint',
       overlay: this.state.coached ? null : 'coach',
     })
   }
 
-  leaveTarget(): void { this.set({ target: null, targetBoard: null, celebrateAt: null }) }
+  leaveTarget(): void { this.cancelDone(); this.set({ target: null, targetBoard: null, complete: false, celebrateAt: null }) }
 
   /** Put every pattern bead in place (AI patterns: "fill board"). Undoable. */
   fillTarget(): void {
@@ -384,11 +420,12 @@ export class GameStore {
     const finish = (): void => {
       this.ironHandle = null
       const t = this.state.target
-      const done = t !== null && findTemplate(t) !== undefined && this.state.celebrateAt !== null && !this.state.done.includes(t)
+      const done = t !== null && findTemplate(t) !== undefined && this.state.complete && !this.state.done.includes(t)
         ? [...this.state.done, t] : this.state.done
-      this.set({ ironed: true, ironingSince: null, overlay: 'result', done })
+      this.set({ ironed: true, ironingSince: null, overlay: 'result', done, celebrateAt: this.now() })
     }
     this.last = null
+    this.cancelDone()
     this.set({ history: commit(this.state.history), overlay: null })
     if (this.deps.reducedMotion?.() ?? false) { finish(); return }
     this.set({ ironingSince: this.now() }, false)
@@ -397,20 +434,26 @@ export class GameStore {
 
   unIron(): void {
     if (this.state.ironingSince !== null || !this.state.ironed) return
-    this.set({ ironed: false, overlay: null })
+    this.set({ ironed: false, overlay: null, celebrateAt: null })
   }
 
   /** "Make another": back to the start page with the ironed piece kept for undo. */
   again(): void {
-    this.set({ mode: 'home', overlay: null })
+    this.set({ mode: 'home', overlay: null, celebrateAt: null })
   }
 
   // ── AI ────────────────────────────────────────────────────────────
   setAiPrompt(prompt: string): void { this.setAi({ prompt: prompt.slice(0, 120), ...(this.state.ai.phase === 'error' ? { phase: 'idle', error: undefined } : {}) }) }
   setAiSize(size: AiSize): void { this.setAi({ size }) }
 
-  async probeStatus(): Promise<void> {
+  /**
+   * Ask the Host whether a generation can work. After a generation reported
+   * "not configured" the answer is kept until the user re-checks (`force`).
+   */
+  async probeStatus(force = false): Promise<void> {
     if (!this.deps.api) { this.setAi({ status: { configured: false, route: 'none' } }); return }
+    if (this.notConfiguredSticky && !force) return
+    this.notConfiguredSticky = false
     try {
       this.setAi({ status: await this.deps.api.status(AbortSignal.timeout(8000)) })
     } catch {
@@ -461,9 +504,10 @@ export class GameStore {
         'not-configured': 'not-configured', busy: 'busy', 'rate-limited': 'rate', parse: 'parse', timeout: 'timeout',
       }
       const error = map[reply.error] ?? 'network'
+      if (error === 'not-configured') this.notConfiguredSticky = true
       this.setAi({
         phase: 'error', error,
-        ...(error === 'not-configured' ? { status: { configured: false, route: 'none' as const } } : {}),
+        ...(error === 'not-configured' ? { status: { configured: false, route: this.state.ai.status?.route ?? 'none', verified: true } } : {}),
       })
       return
     }

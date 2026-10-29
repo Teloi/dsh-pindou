@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createBoard, EMPTY, encode, findTemplate, getCell, SafeStore, setCell, STORAGE_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
-import { AI_COOLDOWN_MS, entryDot, GameStore, IRON_MS, resolveTarget, type GameApi } from '../src/client/game-store.ts'
+import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, resolveTarget, type GameApi } from '../src/client/game-store.ts'
 
 function mem(): StorageLike & { data: Map<string, string> } {
   const data = new Map<string, string>()
@@ -80,16 +80,66 @@ describe('GameStore', () => {
     expect(store.getSnapshot().coached).toBe(true)
     store.fillTarget()
     expect(encode(store.board)).toBe(encode(tpl.board))
+    expect(store.getSnapshot()).toMatchObject({ complete: true, overlay: null, celebrateAt: null })
+    advance(DONE_DELAY_MS)
     expect(store.getSnapshot().overlay).toBe('done')
-    expect(store.getSnapshot().celebrateAt).not.toBeNull()
+    expect(store.getSnapshot().celebrateAt).toBeNull()
     store.iron()
     expect(store.locked).toBe(true)
     store.strokeStart(0, 0)
     expect(store.getSnapshot().toast?.key).toBe('locked')
     advance(IRON_MS)
     expect(store.getSnapshot()).toMatchObject({ ironed: true, overlay: 'result', done: ['heart'] })
+    expect(store.getSnapshot().celebrateAt).not.toBeNull()
     store.unIron()
-    expect(store.getSnapshot().ironed).toBe(false)
+    expect(store.getSnapshot()).toMatchObject({ ironed: false, celebrateAt: null })
+  })
+
+  it('design I5: done card 260 ms after the last bead, confetti only after ironing (also free play)', () => {
+    const { store, advance } = make()
+    store.follow('heart')
+    store.dismissOverlay()
+    store.fillTarget()
+    advance(DONE_DELAY_MS - 1)
+    expect(store.getSnapshot().overlay).toBeNull()
+    advance(1)
+    expect(store.getSnapshot().overlay).toBe('done')
+    // breaking the pattern before the delay cancels the card
+    store.dismissOverlay()
+    store.strokeStart(0, 0, 'erase'); store.strokeEnd()
+    const t = findTemplate('heart')!
+    const firstFilled = t.board.cells.findIndex(c => c !== EMPTY)
+    const x = firstFilled % t.board.size, y = Math.floor(firstFilled / t.board.size)
+    store.strokeStart(x, y, 'erase'); store.strokeEnd()
+    expect(store.getSnapshot().complete).toBe(false)
+    store.setColor(t.board.cells[firstFilled]!)
+    store.strokeStart(x, y); store.strokeEnd()
+    expect(store.getSnapshot().complete).toBe(true)
+    store.strokeStart(x, y, 'erase'); store.strokeEnd()
+    advance(DONE_DELAY_MS)
+    expect(store.getSnapshot().overlay).toBeNull()
+
+    const free = make()
+    free.store.startFree()
+    free.store.applyAt(0, 0)
+    free.store.iron()
+    expect(free.store.getSnapshot().celebrateAt).toBeNull()
+    free.advance(IRON_MS)
+    expect(free.store.getSnapshot().celebrateAt).not.toBeNull()
+  })
+
+  it('design I6: switching colour on a pattern stamps a pulse; same colour or free play does not', () => {
+    const { store } = make()
+    store.startFree()
+    store.setColor(3)
+    expect(store.getSnapshot().pulseAt).toBeNull()
+    store.follow('heart')
+    const before = store.getSnapshot().pulseAt
+    store.setColor(store.getSnapshot().color === 4 ? 2 : 4)
+    expect(store.getSnapshot().pulseAt).not.toBe(before)
+    const stamp = store.getSnapshot().pulseAt
+    store.setColor(store.getSnapshot().color)
+    expect(store.getSnapshot().pulseAt).toBe(stamp)
   })
 
   it('irons immediately under reduced motion', () => {
@@ -207,6 +257,26 @@ describe('GameStore AI', () => {
       advance(AI_COOLDOWN_MS)
     }
     expect(store.getSnapshot().mode).toBe('home')
+  })
+
+  it('design I3: a not-configured generation sticks until the user re-checks', async () => {
+    const status = vi.fn(async () => ({ configured: true, route: 'host' as const, verified: false }))
+    const generate = vi.fn(async (): Promise<GenerateResponse> => ({ ok: false, error: 'not-configured' }))
+    const { store } = make({ api: { generate, status } })
+    store.go('ai')
+    await store.probeStatus()
+    expect(store.getSnapshot().ai.status).toMatchObject({ configured: true, verified: false })
+    store.setAiPrompt('a cat')
+    await store.generate()
+    expect(store.getSnapshot().ai).toMatchObject({ error: 'not-configured', status: { configured: false } })
+    // re-entering the AI page probes again, but the cached answer wins
+    await store.probeStatus()
+    expect(status).toHaveBeenCalledTimes(1)
+    expect(store.getSnapshot().ai.status?.configured).toBe(false)
+    // 「重新检测」 forces a fresh probe
+    await store.probeStatus(true)
+    expect(status).toHaveBeenCalledTimes(2)
+    expect(store.getSnapshot().ai.status?.configured).toBe(true)
   })
 
   it('reports not-configured without an API and empty prompts', async () => {

@@ -34,6 +34,8 @@ export function fetchApi(fetchImpl: typeof fetch = globalThis.fetch.bind(globalT
         configured: data.configured === true,
         route: routes.includes(data.route as never) ? data.route! : 'none',
         model: typeof data.model === 'string' ? data.model.slice(0, 80) : undefined,
+        // older hosts send no flag: treat as verified (no hint) rather than nag
+        verified: data.verified !== false,
       }
     },
   }
