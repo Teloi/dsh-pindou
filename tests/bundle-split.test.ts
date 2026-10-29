@@ -7,6 +7,7 @@ import { gzipSync } from 'node:zlib'
 import type { UserConfig } from 'tsdown'
 import { afterAll, describe, expect, it } from 'vitest'
 import { assertOnlyDynamicChunks, registrationBanner, rewriteDynamicImports } from '../scripts/async-chunks.ts'
+import { CSS_VARS } from '../scripts/css-vars.ts'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const tmp: string[] = []
@@ -126,6 +127,29 @@ describe('check:bundle on lazy chunks', () => {
     expect(shipped).not.toContain('resizeWidth')
     expect(entry).not.toContain('VP8X')
     expect(readFileSync(join(ROOT, 'lib/client.picture.js'), 'utf8')).toContain('VP8X')
+  })
+
+  it('custom properties: the committed lib ships short names only, each defined (scripts/css-vars.ts)', () => {
+    const shipped = ['client.js', 'client.picture.js'].map(f => readFileSync(join(ROOT, 'lib', f), 'utf8')).join('')
+    expect(shipped).not.toMatch(/--pd-/)
+    expect(shipped).toContain(`var(${CSS_VARS['--pd-surface']})`)
+  })
+
+  it('custom properties: a long name left over, an undefined short name, an unknown name or a host token without fallback fail', () => {
+    const a = CSS_VARS['--pd-accent']!, b = CSS_VARS['--pd-border']!, c = CSS_VARS['--pd-c']!
+    const ok = checkBundle(libWith({ 'client.js': entry(`var s=\`.pd-root{${a}:red}.x{color:var(${a});width:var(--dsw-w,1px)}\`,k={"${c}":1},y=\`.y{color:var(${c})}\`;`) }))
+    expect(ok.out).toContain('bundle shape ok')
+    const cases: [string, RegExp][] = [
+      [`.pd-root{--pd-accent:red}`, /long custom property names.*--pd-accent/],
+      [`.x{color:var(${b})}`, new RegExp(`var\\(${b}\\), which nothing that ships defines`)],
+      [`.x{color:var(--zz)}`, /var\(--zz\), which is neither/],
+      [`.x{color:var(--dsw-a)}`, /host token --dsw-a without a fallback/],
+    ]
+    for (const [css, msg] of cases) {
+      const r = checkBundle(libWith({ 'client.js': entry(`var s=\`${css}\`;`) }))
+      expect(r.status, css).toBe(1)
+      expect(r.out, css).toMatch(msg)
+    }
   })
 
   it('a first screen over v0.1 + 1.5 KB fails even below 90% of 40 KB', () => {

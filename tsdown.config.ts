@@ -16,6 +16,7 @@ import { builtinModules } from 'node:module'
 import { defineConfig, type UserConfig } from 'tsdown'
 import pkg from './package.json' with { type: 'json' }
 import { asyncChunksPlugin, registrationBanner } from './scripts/async-chunks.ts'
+import { shortenCssVars } from './scripts/css-vars.ts'
 import { minifyCssModule } from './scripts/minify-css.ts'
 
 const NODE_BUILTINS = new Set([...builtinModules, ...builtinModules.map(id => `node:${id}`)])
@@ -68,6 +69,15 @@ const client: UserConfig = {
     name: 'dsh-client-css-minify',
     transform(code: string, id: string) {
       return id.replaceAll('\\', '/').match(/\/src\/client\/(?:picture-)?styles\.ts$/) ? { code: minifyCssModule(code), map: null } : null
+    },
+  }, {
+    // The stylesheet's custom properties ship under their short names (scripts/css-vars.ts),
+    // in the CSS and in inline `style` keys of every client module, entry and chunks alike.
+    name: 'dsh-client-css-vars',
+    transform(code: string, id: string) {
+      if (!/\/src\/client\/[^?]*\.tsx?$/.test(id.replaceAll('\\', '/'))) return null
+      const out = shortenCssVars(code)
+      return out === code ? null : { code: out, map: null }
     },
   }, asyncChunksPlugin(), {
     name: 'dsh-client-bundle-purity',

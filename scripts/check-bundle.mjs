@@ -7,7 +7,8 @@
 //   through a synchronous require (the host's sync require knows platform modules only;
 //   see scripts/async-chunks.ts);
 // - package.json declares what awesome-dsh-hub and `dsh plugin add` need;
-// - no stray class prefixes or unscoped names leak into the shipped CSS.
+// - no stray class prefixes or unscoped names leak into the shipped CSS;
+// - custom properties ship short (scripts/css-vars.ts): no long name left, none used undefined.
 // - size, gzip at the zlib default level (what CDNs and `gzip` ship), each below 90%
 //   of its budget so there is always headroom for the next change:
 //     first screen  lib/client.js            ≤ 40 KB = 40,960 B (spec §10)
@@ -71,6 +72,27 @@ for (const { f, code } of chunks) checkScript(`${libDir}/${f}`, code, f)
 // a chunk nobody loads is dead weight (or a stale file from an earlier build)
 const loaded = new Set([client, ...chunks.map(c => c.code)].flatMap(code => [...code.matchAll(new RegExp(`\\brequire\\.async\\(${Q}\\./([^"'\`]+)${Q}\\)`, 'g'))].map(m => m[1])))
 for (const { f } of chunks) if (!loaded.has(f)) fail.push(`${libDir}/${f} is never loaded with require.async (stale build output?)`)
+
+// Custom properties ship under their short names (scripts/css-vars.ts, one table: css-vars.json).
+// No long `--pd-` name may be left, and every `var(--…)` must be defined somewhere in what ships
+// (a declaration `--x:`, an `@property --x`, or an inline style key "--x"); host tokens
+// (--ds-*, --dsw-*) are read with a fallback only.
+const SHORT = new Set(Object.values(JSON.parse(readFileSync(new URL('./css-vars.json', import.meta.url), 'utf8'))))
+const shipped = [{ f: `${libDir}/client.js`, code: client }, ...chunks.map(c => ({ f: `${libDir}/${c.f}`, code: c.code }))]
+const defined = new Set(shipped.flatMap(({ code }) => [
+  ...[...code.matchAll(/(?:[{;(\s]|@property )(--[\w-]+)\s*:/g)].map(m => m[1]),
+  ...[...code.matchAll(/@property (--[\w-]+)/g)].map(m => m[1]),
+  ...[...code.matchAll(new RegExp(`${Q}(--[\\w-]+)${Q}`, 'g'))].map(m => m[1]),
+]))
+for (const { f, code } of shipped) {
+  const long = [...new Set(code.match(/--pd-[\w-]*/g) ?? [])]
+  if (long.length) fail.push(`${f} still has long custom property names (add them to scripts/css-vars.json): ${long.join(' ')}`)
+  for (const [, name, fallback] of code.matchAll(/var\((--[\w-]+)\s*(,)?/g)) {
+    if (/^--dsw?-/.test(name)) { if (!fallback) fail.push(`${f} reads host token ${name} without a fallback`) }
+    else if (!SHORT.has(name)) fail.push(`${f} uses var(${name}), which is neither a short name from scripts/css-vars.json nor a host token`)
+    else if (!defined.has(name)) fail.push(`${f} uses var(${name}), which nothing that ships defines`)
+  }
+}
 
 function budget(label, bytes, limit) {
   if (bytes > limit) fail.push(`${label} is ${bytes} B gzip, over the ${limit} B budget`)

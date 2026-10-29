@@ -17,11 +17,14 @@ import { chromium } from 'playwright-core'
 import { auditPanel, guideRings, resumePlugin, settlePlugin, toastCovers, toastLongLine } from './audit.mjs'
 import { startFakeLlm } from './fake-llm.mjs'
 import { decodePng } from './compare-shots.mjs'
+import CSS_VARS from '../scripts/css-vars.json' with { type: 'json' }
 import { contrast, dropFile, HEART, hostFileCards, NO_ASYNC_REQUIRE, pasteFile, png, sliderLook, storedFootprint } from './picture.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DSH_SRC = process.env.DSH_SRC ?? '/home/box/src/deepseek-harness'
 const DSH_BIN = join(DSH_SRC, 'apps/cli/lib/bin.js')
+/** A custom property as it ships (the one short-name table, scripts/css-vars.ts). */
+const cssVar = (name) => { const v = CSS_VARS[name]; if (!v) throw new Error(`${name} is not in scripts/css-vars.json`); return v }
 const CHROME = process.env.CHROME ?? '/usr/bin/google-chrome'
 const DSH_HOME = process.env.E2E_DSH_HOME ?? join(tmpdir(), 'pindou-e2e-home')
 const WS = join(tmpdir(), 'pindou-e2e-ws')
@@ -490,7 +493,7 @@ try {
     check('T1 opening the page fetches lib/client.picture.js from DSH once (200) and it runs', chunkResponses.join() === '200', chunkResponses.join())
     // measure once the page has slid in
     await q.evaluate(() => Promise.all(document.getAnimations().filter(a => a.animationName === 'pd-view-in').map(a => a.finished)))
-    const empty = await q.evaluate(() => ({
+    const empty = await q.evaluate(v => ({
       title: document.querySelector('.pd-head h2')?.textContent,
       back: !!document.querySelector('.pd-head .pd-ib'),
       zone: document.querySelector('.pd-pic-drop')?.textContent,
@@ -500,8 +503,8 @@ try {
       zoneBox: (() => { const r = document.querySelector('.pd-pic-drop').getBoundingClientRect(); const s = document.querySelector('.pd-root').getBoundingClientRect(); return [r.width, r.height, s.width, s.height] })(),
       dashed: getComputedStyle(document.querySelector('.pd-pic-drop')).borderTopStyle,
       noteColor: getComputedStyle(document.querySelector('.pd-pic-note')).color,
-      text3: getComputedStyle(document.querySelector('.pd-root')).getPropertyValue('--pd-text-3').trim(),
-    }))
+      text3: getComputedStyle(document.querySelector('.pd-root')).getPropertyValue(v).trim(),
+    }), cssVar('--pd-text-3'))
     check('T1 empty state: header 「图片转图纸」 with back, square dashed zone ≤ 480, 「拖入、粘贴或选择一张图片」/「选择图片」, accept image/*, the privacy note',
       empty.title === '图片转图纸' && empty.back && empty.square && empty.dashed === 'dashed' && empty.zone === '拖入、粘贴或选择一张图片选择图片' && empty.accept === 'image/*' && empty.note === '图片只在本机处理，不会上传', JSON.stringify(empty))
     await outShot(q, 't1-empty')
@@ -593,7 +596,7 @@ try {
     for (const scheme of ['light', 'dark']) {
       await q.emulateMedia({ colorScheme: scheme })
       await q.waitForTimeout(350)
-      const geo = await range.evaluate(e => { const r = e.getBoundingClientRect(); return { w: r.width, accent: getComputedStyle(e).getPropertyValue('--pd-accent').trim() } })
+      const geo = await range.evaluate((e, v) => { const r = e.getBoundingClientRect(); return { w: r.width, accent: getComputedStyle(e).getPropertyValue(v).trim() } }, cssVar('--pd-accent'))
       const thumbX = 8 + (geo.w - 16) * (0.25 / 3)
       const look = sliderLook(decodePng(await range.screenshot({ animations: 'disabled' })), 2, thumbX)
       check(`T1 I2 zoom slider (${scheme}): track ≥3:1 on the page, the zoomed share in accent, a 16px thumb`, look.trackContrast >= 3 && contrast(look.filled, look.bg) >= 3 && Math.abs(look.thumbCss - 16) <= 1.5, JSON.stringify({ ...look, ...geo }))
@@ -771,12 +774,12 @@ try {
     await f.waitForTimeout(80)
     const early = await f.locator('.pd-skel').count()
     await f.waitForTimeout(220)
-    const skel = await f.evaluate(() => {
+    const skel = await f.evaluate((v) => {
       const s = document.querySelector('.pd-skel')
       if (!s) return null
       const r = s.getBoundingClientRect()
-      return { w: Math.round(r.width), h: Math.round(r.height), bg: getComputedStyle(s).backgroundColor, surface: getComputedStyle(s).getPropertyValue('--pd-surface').trim() }
-    })
+      return { w: Math.round(r.width), h: Math.round(r.height), bg: getComputedStyle(s).backgroundColor, surface: getComputedStyle(s).getPropertyValue(v).trim() }
+    }, cssVar('--pd-surface'))
     check('T1 a slow chunk: no block before 150 ms, then a square --pd-surface skeleton (no spinner)', early === 0 && !!skel && skel.w === skel.h && skel.w > 100, JSON.stringify({ early, skel }))
     await outShot(f, 't1-skeleton', undefined, { text: false })
     await f.locator('.pd-pic-drop').waitFor({ timeout: 10000 })
@@ -904,7 +907,7 @@ try {
   })
   check('I1 computed corner-shape of .pd-bead (and ::before) under .pd-root is round', ROUND.has(shape.bead) && ROUND.has(shape.peg), JSON.stringify(shape))
   // I10: light tertiary text is #6B6F76
-  const t3 = await p.evaluate(() => getComputedStyle(document.querySelector('.pd-root')).getPropertyValue('--pd-text-3').trim())
+  const t3 = await p.evaluate(v => getComputedStyle(document.querySelector('.pd-root')).getPropertyValue(v).trim(), cssVar('--pd-text-3'))
   check('I10 light --pd-text-3 is #6B6F76', t3.toLowerCase() === '#6b6f76', t3)
   // timing probes for I5 (done card +260 ms, confetti only after ironing)
   await p.evaluate(() => {
@@ -1130,10 +1133,10 @@ try {
     await p.evaluate(() => { document.querySelector('.pd-root').style.width = '640px' })
     await p.locator('.pd-tpl').first().click()
     await p.waitForTimeout(400)
-    const bw = await p.evaluate(() => {
+    const bw = await p.evaluate(([cellVar, nVar]) => {
       const b = document.querySelector('.pd-board')
-      return { w: Math.round(b.getBoundingClientRect().width), cell: getComputedStyle(b).getPropertyValue('--pd-cell'), n: Number(getComputedStyle(b).getPropertyValue('--pd-n')) }
-    })
+      return { w: Math.round(b.getBoundingClientRect().width), cell: getComputedStyle(b).getPropertyValue(cellVar), n: Number(getComputedStyle(b).getPropertyValue(nVar)) }
+    }, [cssVar('--pd-cell'), cssVar('--pd-n')])
     const want = Math.floor(468 / bw.n)
     check('I7 board reaches ~480 px at a 640 px panel', bw.w >= 470 && bw.w <= 480 && bw.cell === `${want}px`, JSON.stringify(bw))
     await outShot(p, 'wide-640-board')
@@ -1396,7 +1399,7 @@ try {
     await j.waitForTimeout(300)
     const cc = j.locator('.pd-overlay.pd-coach button')
     if (await cc.count()) { await cc.first().click(); await j.waitForTimeout(150) }
-    ringsChecked.push(...await j.evaluate(() => {
+    ringsChecked.push(...await j.evaluate((gcVar) => {
       // oxlint-disable-next-line unicorn/consistent-function-scoping -- runs inside the page, no outer scope there
       const lum = (c) => { const ch = c.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2] }
       const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
@@ -1405,11 +1408,11 @@ try {
       for (const cell of document.querySelectorAll('.pd-cell.pd-g')) {
         const shadow = getComputedStyle(cell, '::after').boxShadow
         const ring = /rgba?\([^)]*\)/.exec(shadow)?.[0]
-        const gc = cell.style.getPropertyValue('--pd-gc')
+        const gc = cell.style.getPropertyValue(gcVar)
         if (!seen.has(gc)) seen.set(gc, { gc, ring, board, ratio: ring ? Math.round(ratio(ring, board) * 100) / 100 : 0 })
       }
       return [...seen.values()]
-    }))
+    }, cssVar('--pd-gc')))
     if (t === 0) await outShot(j, 'n10-dark-ghosts')
     await j.locator('.pd-head .pd-ib').first().click()
     await j.waitForTimeout(200)
