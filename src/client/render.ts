@@ -59,16 +59,18 @@ export function drawThumb(canvas: HTMLCanvasElement, board: Board, css = 56, dpr
 
 export const EXPORT_CELL = 32
 
-/** Render the export bitmap: 32 px per cell plus a one-cell margin. */
-export function renderExport(doc: Document, board: Board, ironed: boolean, dark: boolean): HTMLCanvasElement {
+/**
+ * Render the export bitmap: 32 px per cell plus a one-cell margin. The works wall
+ * draws its pieces with a whole number of device pixels per cell `o` and no margin `m`.
+ */
+export function renderExport(doc: Document, board: Board, ironed: boolean, dark: boolean, o = EXPORT_CELL, m = o): HTMLCanvasElement {
   const n = board.size
-  const side = (n + 2) * EXPORT_CELL
+  const side = n * o + 2 * m
   const canvas = doc.createElement('canvas')
   canvas.width = side
   canvas.height = side
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('canvas unavailable')
-  const o = EXPORT_CELL
   if (!ironed) {
     ctx.fillStyle = dark ? '#1C1D20' : '#EEF0F3'
     roundRect(ctx, o / 2, o / 2, side - o, side - o, 24)
@@ -77,7 +79,7 @@ export function renderExport(doc: Document, board: Board, ironed: boolean, dark:
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
       if (board.cells[y * n + x] !== EMPTY) continue
       ctx.beginPath()
-      ctx.arc(o + (x + 0.5) * o, o + (y + 0.5) * o, o * 0.11, 0, Math.PI * 2)
+      ctx.arc(m + (x + 0.5) * o, m + (y + 0.5) * o, o * 0.11, 0, Math.PI * 2)
       ctx.fill()
     }
   }
@@ -89,11 +91,11 @@ export function renderExport(doc: Document, board: Board, ironed: boolean, dark:
       const [tl, tr, br, bl] = cornerRadii(board, x, y)
       const r = o * 0.42
       ctx.fillStyle = hex
-      roundRect(ctx, o + x * o - 0.5, o + y * o - 0.5, o + 1, o + 1, [tl ? r : 0, tr ? r : 0, br ? r : 0, bl ? r : 0])
+      roundRect(ctx, m + x * o - 0.5, m + y * o - 0.5, o + 1, o + 1, [tl ? r : 0, tr ? r : 0, br ? r : 0, bl ? r : 0])
       ctx.fill()
       // the same soft inner shade as the panel, so fused light beads keep their texture (design N13)
       if (ctx.createRadialGradient) {
-        const cx = o + (x + 0.5) * o, cy = o + (y + 0.5) * o
+        const cx = m + (x + 0.5) * o, cy = m + (y + 0.5) * o
         const inner = ctx.createRadialGradient(cx, cy, o * 0.22, cx, cy, o * 0.72)
         inner.addColorStop(0, 'rgba(0,0,0,0)')
         inner.addColorStop(1, 'rgba(0,0,0,0.07)')
@@ -101,7 +103,7 @@ export function renderExport(doc: Document, board: Board, ironed: boolean, dark:
         ctx.fill()
       }
     } else {
-      bead(ctx, o + (x + 0.5) * o, o + (y + 0.5) * o, o * 0.44, hex, true)
+      bead(ctx, m + (x + 0.5) * o, m + (y + 0.5) * o, o * 0.44, hex, true)
     }
   }
   return canvas

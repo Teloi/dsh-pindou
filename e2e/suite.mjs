@@ -598,6 +598,41 @@ async function worksSection() {
     const caused = pageErrors.splice(errorsBefore)
     check('W the only errors during the failure run are the aborted chunk loads', caused.every(e => /client\.works\.js|ERR_INTERNET_DISCONNECTED|Failed to fetch|net::/i.test(e)), caused.slice(0, 3).join(' | '))
   }
+  // b4 重要 1/2 (spec 03:30): every bead whole device pixels, nothing scaled, centred; thumbnails 4 px inside their corner. At 2× and 1×.
+  for (const dpr of [2, 1]) {
+    const tag = dpr === 2 ? '' : '@1x', hex = '0123456789abcdef'
+    // the newest work is a full 12×12 board, so its opaque box is exactly the pattern
+    const full = { i: Date.parse('2026-06-01T09:30:00+08:00'), n: 12, s: null, b: Array.from({ length: 144 }, (_, c) => hex[(c % 12 + (c >> 2)) % 16]).join('') }
+    const g = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light', deviceScaleFactor: dpr }, 'zh', seedInit(JSON.stringify([...seedWorks(3), full])))
+    await startSession(g, '看看 README')
+    await openPanel(g)
+    await g.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+    await g.waitForTimeout(300)
+    /** A piece's canvas: bitmap = its own device pixels, the opaque box a whole multiple of n, centred on whole pixels. */
+    const piece = (sel, n) => g.evaluate(([q, m]) => {
+      const c = document.querySelector(q), r = c.getBoundingClientRect(), d = devicePixelRatio
+      const px = c.width, data = c.getContext('2d').getImageData(0, 0, px, px).data
+      let x0 = px, x1 = -1, y0 = px, y1 = -1
+      for (let y = 0; y < px; y++) for (let x = 0; x < px; x++) if (data[(y * px + x) * 4 + 3] > 0) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y) }
+      const k = Math.floor(px / m), side = x1 - x0 + 1
+      const b = c.parentElement.getBoundingClientRect()
+      return {
+        css: c.clientWidth, px, dpr: d, k, side, x0, y0, rows: y1 - y0 + 1,
+        ok: px === Math.round(c.clientWidth * d) && side === m * k && y1 - y0 + 1 === m * k && x0 === Math.floor((px - m * k) / 2) && y0 === x0 && Number.isInteger(r.left * d) && Number.isInteger(r.top * d),
+        inset: Math.min(r.left - b.left, r.top - b.top, b.right - r.right, b.bottom - r.bottom),
+      }
+    }, [sel, n])
+    const thumb = await piece('.pd-v-home .pd-wt canvas', 12)
+    check(`b4 重要 1 (${dpr}×) home thumbnail 12×12: ${46 * dpr} device px, ${Math.floor(46 * dpr / 12)} a bead, centred on whole pixels, 5 css (1 border + 4 padding) inside the round corner`, thumb.ok && thumb.css === 46 && thumb.inset === 5, JSON.stringify(thumb))
+    await rowShot(g, `b4-thumbs${tag}`)
+    await g.locator('.pd-v-home .pd-wt').first().click()
+    await g.locator('.pd-wdet .pd-wbig canvas').waitFor({ timeout: 10000 })
+    await g.waitForTimeout(300)
+    const det = await piece('.pd-wdet .pd-wbig canvas', 12)
+    check(`b4 重要 2 (${dpr}×) 12×12 detail image: ${304 * dpr} device px, ${Math.floor(304 * dpr / 12)} a bead (a whole multiple, not the 448 px export stretched), centred with the rest left empty`, det.ok && det.css === 304, JSON.stringify(det))
+    await outShot(g, `b4-detail-12${tag}`, { clip: await g.locator('.pd-wdet .pd-wbig').boundingBox() })
+    await g.context().close()
+  }
   // 3. a host without require.async: title + 「需要新版 DSH」, same height, nothing to press; the card is off
   for (const lang of ['zh', 'en']) {
     const u = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, lang, `${NO_ASYNC_REQUIRE};${seedInit(JSON.stringify(seedWorks(3)))}`)

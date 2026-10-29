@@ -101,7 +101,18 @@ export function byMonth(wall: readonly Work[]): Array<{ key: string; at: number;
   return groups
 }
 
-/** The piece drawn ironed (no PNG made): the export bitmap, scaled into a small canvas. */
+/**
+ * Where a piece of n×n cells goes in a canvas `css` px wide (b4 重要 1/2): the bitmap is the
+ * canvas's own device pixels, every cell a whole number `k` of them, the pattern centred on
+ * whole pixels with the rest left empty. Nothing is scaled, so nothing blurs.
+ */
+export function pieceFit(css: number, dpr: number, n: number): { readonly px: number, readonly k: number, readonly at: number } {
+  const px = Math.round(css * dpr)
+  const k = Math.max(1, Math.floor(px / n))
+  return { px, k, at: Math.floor((px - n * k) / 2) }
+}
+
+/** The piece drawn ironed (no PNG made), at whole device pixels per cell; redrawn when its box resizes. */
 function Piece({ kit, w, css }: { readonly kit: WorksKit; readonly w: Work; readonly css: number }): ReactElement {
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
@@ -109,11 +120,16 @@ function Piece({ kit, w, css }: { readonly kit: WorksKit; readonly w: Work; read
     const d = kit.decode(w.b, w.n)
     const ctx = c?.getContext('2d')
     if (!c || !d.ok || !ctx) return
-    const px = Math.round(css * (globalThis.devicePixelRatio || 1))
-    c.width = px
-    c.height = px
-    ctx.imageSmoothingQuality = 'high'
-    ctx.drawImage(kit.render(document, d.board, true, false), 0, 0, px, px)
+    const draw = (): void => {
+      const { px, k, at } = pieceFit(c.clientWidth || css, globalThis.devicePixelRatio || 1, w.n)
+      c.width = px
+      c.height = px
+      ctx.drawImage(kit.render(document, d.board, true, false, k, 0), at, at)
+    }
+    draw()
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(draw) : undefined
+    ro?.observe(c)
+    return () => { ro?.disconnect() }
   }, [kit, w, css])
   return <canvas ref={ref} width={css} height={css} aria-hidden />
 }
@@ -161,7 +177,7 @@ export function WorksRow(props: WorksProps & { readonly fade: boolean, readonly 
         : shown.map(w => (
           <button key={w.i} type="button" className="pd-wt" aria-label={workLabel(w, env.lang, kit.template)}
             onClick={() => { openOnArrival = w.i; env.store.go('works') }}>
-            <Piece kit={kit} w={w} css={THUMB - 8} />
+            <Piece kit={kit} w={w} css={THUMB - 10} />
           </button>
         ))}
     </div>
