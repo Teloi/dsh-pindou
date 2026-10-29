@@ -68,7 +68,7 @@ describe('board', () => {
 
 describe('floodFill', () => {
   it('fills a 4-connected region and stops at borders', async () => {
-    const { floodFill, createBoard, setCell, getCell } = await import('../src/core/board.ts')
+    const { floodFill } = await import('../src/core/board.ts')
     let b = createBoard(12)
     for (let y = 0; y < 12; y++) b = setCell(b, 5, y, 3)
     const f = floodFill(b, 0, 0, 7)

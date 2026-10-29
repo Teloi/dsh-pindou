@@ -47,7 +47,7 @@ const client: UserConfig = {
   target: 'es2022',
   dts: false,
   clean: false,
-  sourcemap: true,
+  sourcemap: false,
   external: PLATFORM_MODULES,
   noExternal: (id: string) => !PLATFORM_MODULES.includes(id),
   define: { 'process.env.NODE_ENV': JSON.stringify(mode) },
