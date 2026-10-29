@@ -209,13 +209,14 @@ const BOARD = `
 .pd-cell::before{content:"";position:absolute;left:50%;top:50%;width:22%;height:22%;margin:-11% 0 0 -11%;border-radius:50%;background:var(--pd-peg);transition:opacity var(--pd-t-slow)}
 .pd-cell.pd-g{--pd-ga:var(--pd-ghost-alpha)}
 .pd-cell.pd-g.pd-hot{--pd-ga:var(--pd-ghost-hot)}
-/* the faintness lives in the fill (not in opacity), so the per-colour ring stays at full strength: ≥3:1 on the light board (spec §18.5, 1px) and the dark one (N10, 1.5px), see core/contrast.ts */
-.pd-cell.pd-g::after{content:attr(data-code);position:absolute;inset:14%;border-radius:50%;background:color-mix(in srgb,var(--pd-gc) calc(var(--pd-ga) * 100%),transparent);box-shadow:inset 0 0 0 1px var(--pd-grl);display:grid;place-items:center;font:600 calc(var(--pd-cell)*.42)/1 var(--pd-font-code);color:transparent;transition:opacity var(--pd-t),background-color var(--pd-t)}
+/* the faintness lives in the fill (not in opacity), so the per-colour ring stays at full strength: ≥3:1 on the light board (spec §18.5) and the dark one (N10), see core/contrast.ts.
+   Ring width --pd-rw: 1px on the light board at 2×; 1.5px on 1× screens, where a 1px ring is blended by antialiasing to ~2.5:1 (design I6/C3), and on the dark board. A hot cell adds a halo. */
+.pd-cell.pd-g::after{content:attr(data-code);position:absolute;inset:14%;border-radius:50%;background:color-mix(in srgb,var(--pd-gc) calc(var(--pd-ga) * 100%),transparent);box-shadow:inset 0 0 0 var(--pd-rw,1px) var(--pd-rc,var(--pd-grl));display:grid;place-items:center;font:600 calc(var(--pd-cell)*.42)/1 var(--pd-font-code);color:transparent;transition:opacity var(--pd-t),background-color var(--pd-t)}
 .pd-root.pd-codes .pd-cell.pd-g::after{color:color-mix(in srgb,var(--pd-gl) calc(var(--pd-ga) * 100%),transparent)}
-.pd-cell.pd-g.pd-hot::after{box-shadow:inset 0 0 0 1px var(--pd-grl),0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
+@media (max-resolution:1.99dppx){.pd-g{--pd-rw:1.5px}}
+.pd-g.pd-hot::after{box-shadow:inset 0 0 0 var(--pd-rw,1px) var(--pd-rc,var(--pd-grl)),0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
 /* dark board: its own ring table, so grey, black, navy and brown guides stay visible (design N10) */
-body[data-ds-dark-theme] .pd-root .pd-cell.pd-g::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr)}
-body[data-ds-dark-theme] .pd-root .pd-cell.pd-g.pd-hot::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr),0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
+body[data-ds-dark-theme] .pd-g{--pd-rw:1.5px;--pd-rc:var(--pd-gr)}
 .pd-board.pd-pulse .pd-cell.pd-g.pd-hot::after{animation:pd-hot 520ms var(--pd-ease) 2}
 .pd-bead.pd-out{animation:pd-erase var(--pd-t-erase) var(--pd-ease) forwards;pointer-events:none}
 @keyframes pd-erase{to{transform:scale(.6);opacity:0}}

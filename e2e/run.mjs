@@ -303,10 +303,103 @@ async function placeBeads(p, n) {
   await p.waitForTimeout(200)
 }
 
-// E2E_ONLY=t1 runs just the picture section (the rest of the suite is unchanged)
+/**
+ * Design I6: at device scale 1 a ring is what antialiasing leaves of it. Per colour (a cell not
+ * of the selected colour), 72 rays from the dot's centre: on each, the strongest pixel within a
+ * pixel of the ring (what the eye follows), as contrast on the board; the median ray must be ≥ 3:1.
+ */
+async function ringPixels(k, codes) {
+  const at = await k.evaluate((list) => {
+    const b = document.querySelector('.pd-board').getBoundingClientRect()
+    return { box: { x: b.x, y: b.y, width: b.width, height: b.height }, board: getComputedStyle(document.querySelector('.pd-board')).backgroundColor,
+      cells: [...list].map((code) => {
+        const c = document.querySelector(`.pd-board .pd-cell.pd-g:not(.pd-hot)[data-code="${code}"]`)
+        const r = c?.getBoundingClientRect()
+        return r ? { code, x: r.x - b.x, y: r.y - b.y, s: r.width, width: Number.parseFloat(getComputedStyle(c, '::after').boxShadow.match(/[\d.]+px/g)?.[3] ?? '0') } : { code, missing: true }
+      }) }
+  }, codes)
+  const img = decodePng(await k.screenshot({ clip: at.box, animations: 'disabled' }))
+  const board = (/rgba?\(([^)]+)\)/.exec(at.board)?.[1] ?? '').split(',').map(Number)
+  const px = (x, y) => { const o = (Math.floor(y) * img.width + Math.floor(x)) * 4; return [img.data[o], img.data[o + 1], img.data[o + 2]] }
+  return at.cells.map((c) => {
+    if (c.missing) return { code: c.code, missing: true, median: 0 }
+    const cx = c.x + c.s / 2, cy = c.y + c.s / 2, r = c.s * 0.36, rays = []
+    for (let i = 0; i < 72; i++) {
+      const a = (i / 72) * 2 * Math.PI
+      let best = 1
+      for (let d = r - c.width - 1; d <= r + 1; d += 0.25) best = Math.max(best, contrast(px(cx + d * Math.cos(a), cy + d * Math.sin(a)), board))
+      rays.push(best)
+    }
+    rays.sort((m, n) => m - n)
+    return { code: c.code, width: c.width, median: Number(rays[36].toFixed(2)), p10: Number(rays[7].toFixed(2)), min: Number(rays[0].toFixed(2)) }
+  })
+}
+
+/** Both I6 runs (all colours but the selected one, then that one with another selected): every median ray ≥ 3:1, at 1.5px. */
+async function ringPixelCheck(k, scheme, pick) {
+  const rows = await ringPixels(k, '0123456789abcdef'.replace('4', ''))
+  await pick(5)
+  rows.splice(4, 0, ...await ringPixels(k, '4'))
+  await pick(4)
+  const low = Math.min(...rows.map(x => x.median))
+  // I6 is the light board (its ring was 1px); the dark one has been 1.5px since N10 and is recorded for reference
+  if (scheme === 'light') check(`I6/C3 light board at device scale 1: 1.5px rings, the median ray of every colour ≥ 3:1 (lowest ${low})`, rows.length === 16 && rows.every(x => x.width === 1.5 && x.median >= 3), JSON.stringify(rows.filter(x => x.width !== 1.5 || x.median < 3).slice(0, 6)))
+  else log(`    I6 reference: dark board at device scale 1, 1.5px rings, lowest median ray ${low}`, JSON.stringify(rows.filter(x => x.median < 3)))
+  writeFileSync(join(OUT, 'audit', `o3-ring-pixels-1x-${scheme}.json`), `${JSON.stringify(rows, null, 2)}\n`)
+  if (SELFCHECK) copyFileSync(join(OUT, 'audit', `o3-ring-pixels-1x-${scheme}.json`), join(SELFCHECK, `o3-ring-pixels-1x-${scheme}.json`))
+}
+
+// O3 / §18.5: every colour's guide ring measured on the real page, light and dark (computed
+// style), at device scale 2; then at device scale 1 (common Windows / Linux screens), where a
+// ring is what antialiasing leaves of it, also in pixels (design I6/C3: the median ring pixel of
+// every colour ≥ 3:1 on the board, light and dark).
+async function guideRingSection() {
+  for (const dpr of [2, 1]) {
+    const tag = dpr === 2 ? '' : '@1x'
+    const CODES = '0123456789abcdef'
+    // a followed pattern with all 16 colours (one column each, rows 2–13) on an empty board
+    const pattern = Array.from({ length: 16 }, (_, y) => (y >= 2 && y <= 13 ? CODES : '.'.repeat(16))).join('')
+    const seed = JSON.stringify({ v: 2, size: 16, board: '.'.repeat(256), color: 4, tool: 'paint', mode: 'play', target: 'board:o3', pattern, ironed: false, prefs: { busyHint: true, showGuide: true, showCodes: false }, done: [], coached: true })
+    const k = await newPage({ viewport: { width: 1280, height: 900 }, colorScheme: 'light', deviceScaleFactor: dpr }, 'zh',
+      `if (!sessionStorage.getItem('o3')) { sessionStorage.setItem('o3', '1'); localStorage.setItem('dsh-pindou:v1', ${JSON.stringify(seed)}) }`)
+    await startSession(k, '解释一下 package.json')
+    await openPanel(k)
+    await k.locator('.pd-board .pd-cell.pd-g').first().waitFor()
+    // normal state: every colour once while another colour is selected; selected state: pick each colour in turn
+    const swk = k.locator('.pd-palette .pd-sw')
+    const pick = async (i) => { await swk.nth(i).click(); await k.waitForTimeout(80) }
+    const measure = async () => {
+      await pick(5)
+      const normal = (await k.evaluate(guideRings, [CODES.replace('5', ''), false]))
+      await pick(4)
+      normal.splice(5, 0, ...await k.evaluate(guideRings, ['5', false]))
+      const hot = []
+      for (let i = 0; i < 16; i++) { await pick(i); hot.push(...await k.evaluate(guideRings, [CODES[i], true])) }
+      await pick(4)
+      return { normal, hot }
+    }
+    check(`O3${tag} setup: 16 palette swatches and a ghost for every colour`, await swk.count() === 16 && await k.locator('.pd-board .pd-cell.pd-g').count() === 16 * 12)
+    const light = await measure()
+    check(`O3/R3-1${tag} light: 16 guide rings ≥ 3:1 on the real board, normal and selected (min ${minOf(light)})`, allOk(light), bad(light))
+    if (dpr === 1) await ringPixelCheck(k, 'light', pick)
+    await outShot(k, `o3-rings-light${tag}`, { clip: await k.locator('.pd-board').boundingBox() }, { text: false })
+    await k.emulateMedia({ colorScheme: 'dark' })
+    await k.waitForTimeout(600)
+    const dark = await measure()
+    check(`O3/N10${tag} dark: 16 guide rings ≥ 3:1 on the real board, normal and selected (min ${minOf(dark)})`, allOk(dark) && await k.evaluate(() => document.body.hasAttribute('data-ds-dark-theme')), bad(dark))
+    if (dpr === 1) await ringPixelCheck(k, 'dark', pick)
+    await outShot(k, `o3-rings-dark${tag}`, { clip: await k.locator('.pd-board').boundingBox() }, { text: false })
+    writeFileSync(join(OUT, 'audit', `o3-rings${tag}.json`), `${JSON.stringify({ light, dark }, null, 2)}\n`)
+    if (SELFCHECK) copyFileSync(join(OUT, 'audit', `o3-rings${tag}.json`), join(SELFCHECK, `o3-rings${tag}.json`))
+    await k.context().close()
+  }
+}
+
+// E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
 try {
   sections: {
+  if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
   // ── T1. picture to pattern (spec §18.2) + lazy modules (spec §18.6), in the real product ──
   log('T1. picture to pattern')
   {
@@ -1235,44 +1328,9 @@ try {
   }
   await j.context().close()
 
-  // ── K. O3 / §18.5: every colour's guide ring measured on the real page, light and dark ──
+  // ── K. O3 / §18.5: every colour's guide ring measured on the real page, light and dark, at 2× and 1× ──
   log('K. guide rings (spec §18.5)')
-  {
-    const CODES = '0123456789abcdef'
-    // a followed pattern with all 16 colours (one column each, rows 2–13) on an empty board
-    const pattern = Array.from({ length: 16 }, (_, y) => (y >= 2 && y <= 13 ? CODES : '.'.repeat(16))).join('')
-    const seed = JSON.stringify({ v: 2, size: 16, board: '.'.repeat(256), color: 4, tool: 'paint', mode: 'play', target: 'board:o3', pattern, ironed: false, prefs: { busyHint: true, showGuide: true, showCodes: false }, done: [], coached: true })
-    const k = await newPage({ viewport: { width: 1280, height: 900 }, colorScheme: 'light' }, 'zh',
-      `if (!sessionStorage.getItem('o3')) { sessionStorage.setItem('o3', '1'); localStorage.setItem('dsh-pindou:v1', ${JSON.stringify(seed)}) }`)
-    await startSession(k, '解释一下 package.json')
-    await openPanel(k)
-    await k.locator('.pd-board .pd-cell.pd-g').first().waitFor()
-    // normal state: every colour once while another colour is selected; selected state: pick each colour in turn
-    const swk = k.locator('.pd-palette .pd-sw')
-    const pick = async (i) => { await swk.nth(i).click(); await k.waitForTimeout(80) }
-    const measure = async () => {
-      await pick(5)
-      const normal = (await k.evaluate(guideRings, [CODES.replace('5', ''), false]))
-      await pick(4)
-      normal.splice(5, 0, ...await k.evaluate(guideRings, ['5', false]))
-      const hot = []
-      for (let i = 0; i < 16; i++) { await pick(i); hot.push(...await k.evaluate(guideRings, [CODES[i], true])) }
-      await pick(4)
-      return { normal, hot }
-    }
-    check('O3 setup: 16 palette swatches and a ghost for every colour', await swk.count() === 16 && await k.locator('.pd-board .pd-cell.pd-g').count() === 16 * 12)
-    const light = await measure()
-    check(`O3/R3-1 light: 16 guide rings ≥ 3:1 on the real board, normal and selected (min ${minOf(light)})`, allOk(light), bad(light))
-    await outShot(k, 'o3-rings-light', { clip: await k.locator('.pd-board').boundingBox() }, { text: false })
-    await k.emulateMedia({ colorScheme: 'dark' })
-    await k.waitForTimeout(600)
-    const dark = await measure()
-    check(`O3/N10 dark: 16 guide rings ≥ 3:1 on the real board, normal and selected (min ${minOf(dark)})`, allOk(dark) && await k.evaluate(() => document.body.hasAttribute('data-ds-dark-theme')), bad(dark))
-    await outShot(k, 'o3-rings-dark', { clip: await k.locator('.pd-board').boundingBox() }, { text: false })
-    writeFileSync(join(OUT, 'audit', 'o3-rings.json'), `${JSON.stringify({ light, dark }, null, 2)}\n`)
-    if (SELFCHECK) copyFileSync(join(OUT, 'audit', 'o3-rings.json'), join(SELFCHECK, 'o3-rings.json'))
-    await k.context().close()
-  }
+  await guideRingSection()
   }
 
   check('no page errors from the plugin', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))

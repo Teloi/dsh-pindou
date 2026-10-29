@@ -79,7 +79,7 @@ describe('N10: target ghost dots on the dark board reach 3:1 for all 16 colours'
     expect(fills.filter(f => contrast(f, DARK_BOARD) < 3).length).toBeGreaterThan(8)
   })
   it('the dark theme draws the ring at full strength (faintness in the fill, not in opacity)', () => {
-    expect(CSS).toContain('body[data-ds-dark-theme] .pd-root .pd-cell.pd-g::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr)}')
+    expect(CSS).toContain('body[data-ds-dark-theme] .pd-g{--pd-rw:1.5px;--pd-rc:var(--pd-gr)}')
     const ghost = /\.pd-cell\.pd-g::after\{[^}]*\}/.exec(CSS)![0]
     expect(ghost).not.toMatch(/opacity:var\(--pd-ghost/)
     expect(ghost).toContain('color-mix(in srgb,var(--pd-gc) calc(var(--pd-ga) * 100%),transparent)')
@@ -102,9 +102,15 @@ describe('O3 (spec §18.5): target ghost dots on the light board reach 3:1 for a
     // the §18.5 draft recipe (28% ink over the board, white and cream only) measures well below 3:1
     expect(contrast(coreMix(LIGHT_BOARD, '#0F1115', 0.28), LIGHT_BOARD)).toBeLessThan(3)
   })
-  it('the light theme draws a 1px ring at full strength, also on the selected colour', () => {
-    expect(/\.pd-cell\.pd-g::after\{[^}]*\}/.exec(CSS)![0]).toContain('box-shadow:inset 0 0 0 1px var(--pd-grl)')
-    expect(CSS).toContain('.pd-cell.pd-g.pd-hot::after{box-shadow:inset 0 0 0 1px var(--pd-grl),')
+  it('the light theme draws the ring at full strength, also on the selected colour: 1px at 2×, 1.5px on 1× screens (design I6/C3)', () => {
+    const ring = 'inset 0 0 0 var(--pd-rw,1px) var(--pd-rc,var(--pd-grl))'
+    expect(/\.pd-cell\.pd-g::after\{[^}]*\}/.exec(CSS)![0]).toContain(`box-shadow:${ring};`)
+    expect(CSS).toContain(`.pd-g.pd-hot::after{box-shadow:${ring},0 0 0 1px color-mix(`)
+    // a 1px ring at 1× is blended by antialiasing (median ring pixel 2.5–2.8:1 measured); 1.5px there
+    expect(CSS).toContain('@media (max-resolution:1.99dppx){.pd-g{--pd-rw:1.5px}}')
+    // nothing else sets the width or the colour
+    expect(CSS.match(/--pd-rw:\d/g)).toHaveLength(2)
+    expect(CSS.match(/--pd-rc:v/g)).toHaveLength(1)
   })
   it('ghostRing on a light board darkens (toward ink), never lightens', () => {
     for (const h of ['#FFFFFF', '#F6F4EE', '#EEF0F3', '#F7C531', '#000000']) {
@@ -115,27 +121,44 @@ describe('O3 (spec §18.5): target ghost dots on the light board reach 3:1 for a
   })
 })
 
+/** The custom properties a rule sets, e.g. the dark board's or the 1× screen's ring width and table. */
+const varsOf = (rule: string): Record<string, string> => Object.fromEntries([...rule.matchAll(/(--pd-[\w-]+):([^;}]+)/g)].map(m => [m[1]!, m[2]!]))
+
 describe('§18.5 acceptance (design R3-1): 16 colours × light/dark × normal/selected, every guide ring ≥ 3:1 on its board', () => {
   const dark = CSS.slice(CSS.indexOf('body[data-ds-dark-theme] .pd-root, body[data-ds-dark-theme] .pd-portal {'))
   const RING_TABLES: Record<string, readonly string[]> = { '--pd-grl': GHOST_RINGS_LIGHT, '--pd-gr': GHOST_RINGS }
-  /** The ring a rule draws: its first box-shadow must be an opaque `inset 0 0 0 <w>px var(--table)`. */
-  const ringOf = (selector: string): { width: number; table: readonly string[] } => {
+  const DARK_G = varsOf(/body\[data-ds-dark-theme\] \.pd-g\{([^}]*)\}/.exec(CSS)?.[1] ?? '')
+  const ONE_X = varsOf(/@media \(max-resolution:1\.99dppx\)\{\.pd-g\{([^}]*)\}\}/.exec(CSS)?.[1] ?? '')
+  /** The ring a rule draws with the given properties set on the cell: its first box-shadow must be an opaque `inset 0 0 0 <w>px <table>`. */
+  const ringOf = (selector: string, set: Record<string, string>): { width: number; table: readonly string[] } => {
     const esc = selector.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const rule = new RegExp(`(?:^|[}\\n])${esc}\\{([^}]*)\\}`).exec(CSS)
     if (!rule) throw new Error(`no rule ${selector}`)
-    const m = /box-shadow:inset 0 0 0 ([\d.]+)px var\((--pd-grl?)\)/.exec(rule[1]!)
-    if (!m) throw new Error(`${selector} draws no ring first: ${rule[1]}`)
+    // resolve var(--x,fallback) from the innermost out, as the cascade would
+    let shadow = /box-shadow:([^;}]*)/.exec(rule[1]!)?.[1] ?? ''
+    for (let prev = ''; prev !== shadow;) {
+      prev = shadow
+      shadow = shadow.replace(/var\((--pd-(?:rw|rc|grl?))(?:,([^()]*(?:\([^()]*\))?[^()]*))?\)/, (all, name: string, fb?: string) => set[name] ?? (name === '--pd-grl' || name === '--pd-gr' ? `@${name}` : fb ?? all))
+    }
+    const m = /^inset 0 0 0 ([\d.]+)px @(--pd-grl?)(?:,|$)/.exec(shadow)
+    if (!m) throw new Error(`${selector} draws no ring first: ${shadow}`)
     return { width: Number(m[1]), table: RING_TABLES[m[2]!]! }
   }
   const cases = [
-    ['light', 'normal', token('--pd-board'), '.pd-cell.pd-g::after'],
-    ['light', 'selected', token('--pd-board'), '.pd-cell.pd-g.pd-hot::after'],
-    ['dark', 'normal', token('--pd-board', dark), 'body[data-ds-dark-theme] .pd-root .pd-cell.pd-g::after'],
-    ['dark', 'selected', token('--pd-board', dark), 'body[data-ds-dark-theme] .pd-root .pd-cell.pd-g.pd-hot::after'],
+    ['light', 'normal', token('--pd-board'), '.pd-cell.pd-g::after', {}],
+    ['light', 'selected', token('--pd-board'), '.pd-g.pd-hot::after', {}],
+    ['light 1×', 'normal', token('--pd-board'), '.pd-cell.pd-g::after', ONE_X],
+    ['light 1×', 'selected', token('--pd-board'), '.pd-g.pd-hot::after', ONE_X],
+    ['dark', 'normal', token('--pd-board', dark), '.pd-cell.pd-g::after', DARK_G],
+    ['dark', 'selected', token('--pd-board', dark), '.pd-g.pd-hot::after', DARK_G],
   ] as const
-  for (const [theme, state, board, selector] of cases) {
+  it('the widths: 1px on the light board at 2×, 1.5px on 1× screens (design I6/C3) and on the dark board (N10)', () => {
+    expect([ringOf('.pd-cell.pd-g::after', {}).width, ringOf('.pd-cell.pd-g::after', ONE_X).width, ringOf('.pd-cell.pd-g::after', DARK_G).width]).toEqual([1, 1.5, 1.5])
+    expect(ringOf('.pd-cell.pd-g::after', DARK_G).table).toBe(GHOST_RINGS)
+  })
+  for (const [theme, state, board, selector, set] of cases) {
     describe(`${theme}, ${state}`, () => {
-      const { width, table } = ringOf(selector)
+      const { width, table } = ringOf(selector, set)
       it('ring is at least 1px wide and covers all 16 colours', () => {
         expect(width).toBeGreaterThanOrEqual(1)
         expect(table).toHaveLength(PALETTE.length)
