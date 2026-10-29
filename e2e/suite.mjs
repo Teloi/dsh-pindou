@@ -19,7 +19,6 @@ import { startFakeLlm } from './fake-llm.mjs'
 import { decodePng, diffPng } from './compare-shots.mjs'
 import { longNames } from './classes-hook.mjs'
 import CSS_VARS from '../scripts/css-vars.json' with { type: 'json' }
-import { DAILY_DEFS } from '../src/core/daily.ts'
 import { contrast, dropFile, HEART, hostFileCards, NO_ASYNC_REQUIRE, pasteFile, png, sliderLook, storedFootprint } from './picture.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -795,43 +794,6 @@ async function worksSection() {
     await k.locator('.pd-wdet').waitFor({ timeout: 5000 })
     check('W a home thumbnail opens that work\'s card on the wall page', (await k.locator('.pd-wdet').getAttribute('aria-label'))?.endsWith('5 月 31 日'))
     await k.context().close()
-  }
-  // F1 每日一拼, all in the works chunk: 2026-06-01 is day 151 → pattern 31 (小猪); yesterday's daily on the wall
-  {
-    const pig = DAILY_DEFS[31].rows.join(''), prev = DAILY_DEFS[30].rows.join('')
-    const yesterday = { i: Date.parse('2026-05-31T12:00:00+08:00'), n: 16, b: prev, s: 'board:p-daily-2026-05-31-a1', p: prev }
-    const y = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(JSON.stringify([...seedWorks(2), yesterday])))
-    await startSession(y, '看看 README')
-    await openPanel(y)
-    await worksCard(y).click()
-    await y.locator('.pd-wdaily').waitFor({ timeout: 10000 })
-    const before = await y.evaluate(() => ({ text: document.querySelector('.pd-wdaily')?.textContent, first: document.querySelector('.pd-view > .pd-wday + .pd-wall') !== null, tags: [...document.querySelectorAll('.pd-wc')].filter(c => c.querySelector('.pd-wtag')).map(c => c.getAttribute('aria-label')) }))
-    check('F1 the wall page opens with today\'s pattern (day 151 → 31, 小猪), yesterday\'s daily makes a 1-day streak, then 开始; the wall below; yesterday\'s work carries the badge',
-      before.text === '今日一拼 · 小猪连续 1 天开始' && before.first && before.tags.join() === `今日一拼 · ${DAILY_DEFS[30].zh} · 5 月 31 日`, JSON.stringify(before))
-    await outShot(y, 'f1-daily-zh-light')
-    await y.locator('.pd-wdaily').click()
-    await y.locator('.pd-board').waitFor()
-    await y.waitForTimeout(300)
-    const game = await y.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:v1') ?? '{}'))
-    check('F1 开始 opens a game following today\'s pattern, keyed board:p-daily-2026-06-01-…', /^board:p-daily-2026-06-01-[0-9a-z]+$/.test(game.target ?? '') && game.pattern === pig && game.mode === 'play', JSON.stringify({ target: game.target, mode: game.mode, same: game.pattern === pig }))
-    for (let i = 0; i < 3; i++) await y.locator('.pd-board .pd-cell').nth(i * 17).click()
-    await y.locator('.pd-foot .pd-warm').click()
-    await y.locator('.pd-overlay.pd-result').waitFor({ timeout: 8000 })
-    await backHome(y)
-    await worksCard(y).click()
-    await y.locator('.pd-wdaily').waitFor({ timeout: 10000 })
-    const after = await y.evaluate(() => ({ text: document.querySelector('.pd-wdaily')?.textContent, tags: document.querySelectorAll('.pd-wc .pd-wtag').length, newest: document.querySelector('.pd-wc')?.getAttribute('aria-label') }))
-    check('F1 ironed: on the wall with the badge (今日一拼 · 小猪 · 6 月 1 日), the streak is 2 days, the card offers 再拼一次', after.text === '今日一拼 · 小猪连续 2 天再拼一次' && after.tags === 2 && after.newest === '今日一拼 · 小猪 · 6 月 1 日', JSON.stringify(after))
-    await y.locator('.pd-wc').first().click()
-    await y.locator('.pd-wdet').waitFor()
-    const note = await y.evaluate(() => { const d = document.querySelector('.pd-wdet .pd-wdel'); return document.getElementById(d?.getAttribute('aria-describedby') ?? '')?.textContent ?? null })
-    check('F1 a daily work\'s detail card says 「删除后连续天数会重新计算」 and 删除 is described by it', note === '删除后连续天数会重新计算', JSON.stringify(note))
-    await outShot(y, 'f1-detail-zh-light')
-    await y.locator('.pd-wdet .pd-wdel').click()
-    await y.waitForTimeout(200)
-    const gone = await y.evaluate(() => document.querySelector('.pd-wdaily')?.textContent)
-    check('F1 deleting today\'s daily recalculates the streak at once (1 day, 开始 again)', gone === '今日一拼 · 小猪连续 1 天开始', JSON.stringify(gone))
-    await y.context().close()
   }
   // 5. ironing collects, 取消熨烫 withdraws, the empty wall, and a broken wall
   {

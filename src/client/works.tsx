@@ -8,9 +8,8 @@
  * the bead renderer, the decoder and the export/copy actions come in through
  * `kit` (types only are imported), and it carries its own strings and styles.
  */
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import type { StoredWork, Template } from '../core/index.ts'
-import { DAILY_DEFS, dailyDate, dailyDay, dailyDayOf, dailyIndex, dailyStreak } from '../core/daily.ts'
 import { addWork, cleanWorks, removeWork, type Work } from '../core/works.ts'
 import type { Env } from './ui/context.tsx'
 import type { WorksKit } from './ui/Works.tsx'
@@ -20,12 +19,10 @@ const STRINGS = {
   zh: {
     wall: '我的作品', empty: '熨烫过的作品会住在这里', go: '去拼一个', tpl: '模板', free: '自由拼', ai: 'AI 生成', picture: '图片转图纸',
     export: '导出 PNG', copy: '复制图片', again: '再拼一次', del: '删除', close: '关闭', deleted: '已删除作品', undo: '撤销', all: '全部 ›', resumed: '接着上次没拼完的',
-    daily: '今日一拼', start: '开始', goOn: '继续', redo: '再拼一次', streak: '连续 {n} 天', note: '删除后连续天数会重新计算',
   },
   en: {
     wall: 'My works', empty: 'Your ironed pieces will live here', go: 'Make one', tpl: 'Pattern', free: 'Free play', ai: 'AI pattern', picture: 'Picture',
     export: 'Export PNG', copy: 'Copy image', again: 'Bead it again', del: 'Delete', close: 'Close', deleted: 'Work deleted', undo: 'Undo', all: 'All ›', resumed: 'Picked up where you left off.',
-    daily: 'Daily', start: 'Start', goOn: 'Continue', redo: 'Again', streak: '{n}-day streak', note: 'Your streak will be recalculated.',
   },
 } as const
 export const WORKS_STRINGS = STRINGS
@@ -68,53 +65,9 @@ export function replay(env: Env, kit: WorksKit, w: Work): void {
   else if (s.startsWith('template:')) env.store.follow(s.slice(9))
   else {
     const d = kit.decode(w.p ?? w.b, w.n)
-    const date = dailyOf(s)
-    if (d.ok) env.store.startPicture(d.board, date ? `${DAILY}${date}-` : s.startsWith('board:p-') ? 'p-' : '')
+    if (d.ok) env.store.startPicture(d.board, s.startsWith('board:p-') ? 'p-' : '')
   }
   if (resumes) env.store.showToast('say', false, { s: STRINGS[env.lang].resumed })
-}
-
-/**
- * F1 每日一拼 (spec §18.3), all in this chunk: a daily game is a picture-like `board:` source
- * `board:p-daily-<date>-…` (the entry restores and collects it like any picture pattern; a
- * `daily:` key would need entry code). Its date names the pattern and counts for the streak.
- */
-const DAILY = 'p-daily-'
-/** 「2026-10-30」 of a daily source key, or null. */
-export function dailyOf(s: string | null): string | null {
-  return s?.startsWith(`board:${DAILY}`) ? s.slice(6 + DAILY.length, 16 + DAILY.length) : null
-}
-/** The pattern of a daily date. */
-const dailyDef = (date: string): typeof DAILY_DEFS[number] | undefined => DAILY_DEFS[dailyIndex(dailyDayOf(date))]
-
-/** Top of the wall page: today's pattern, the streak, and start / continue / again. */
-function Daily({ env, kit, wall }: { readonly env: Env; readonly kit: WorksKit; readonly wall: readonly Work[] }): ReactElement | null {
-  const t = STRINGS[env.lang]
-  const [today] = useState(() => dailyDay(Date.now()))
-  const date = dailyDate(today)
-  const def = DAILY_DEFS[dailyIndex(today)]!
-  const preview = useMemo<Work>(() => ({ i: 0, n: 16, b: def.rows.join(''), s: null }), [def])
-  const days = wall.flatMap((w) => { const d = dailyOf(w.s); return d ? [dailyDayOf(d)] : [] })
-  const streak = dailyStreak(days, today)
-  const g = env.store.getSnapshot()
-  const going = dailyOf(g.target) === date && !g.ironed && g.ironingSince === null
-  const start = (): void => {
-    if (going) { env.store.go('play'); return }
-    const d = kit.decode(preview.b, 16)
-    if (d.ok) env.store.startPicture(d.board, `${DAILY}${date}-`)
-  }
-  return (
-    <section className="pd-wday">
-      <button type="button" className="pd-wdaily" onClick={start}>
-        <Piece kit={kit} w={preview} css={56} />
-        <span>
-          <b>{t.daily} · {def[env.lang]}</b>
-          {streak ? <span>{t.streak.replace('{n}', String(streak))}</span> : null}
-        </span>
-        <span className="pd-wgo">{going ? t.goOn : days.includes(today) ? t.redo : t.start}</span>
-      </button>
-    </section>
-  )
 }
 
 function useStyles(): void {
@@ -134,8 +87,7 @@ export function workLabel(w: Work, lang: 'zh' | 'en', template: (id: string) => 
   const date = lang === 'zh' ? `${d.getMonth() + 1} 月 ${d.getDate()} 日` : d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
   const s = w.s
   const tpl = s?.startsWith('template:') ? template(s.slice(9)) : undefined
-  const day = dailyOf(s)
-  const src = day ? `${t.daily} · ${dailyDef(day)?.[lang] ?? day}` : s === null ? t.free : s.startsWith('template:') ? `${t.tpl} · ${tpl ? tpl[lang] : s.slice(9)}` : s.startsWith('board:p-') ? t.picture : t.ai
+  const src = s === null ? t.free : s.startsWith('template:') ? `${t.tpl} · ${tpl ? tpl[lang] : s.slice(9)}` : s.startsWith('board:p-') ? t.picture : t.ai
   return `${src} · ${date}`
 }
 
@@ -276,8 +228,6 @@ function Detail({ env, kit, w, onClose, onDelete }: { readonly env: Env; readonl
     next?.focus()
   }
   const label = workLabel(w, env.lang, kit.template)
-  const note = useId()
-  const daily = dailyOf(w.s) !== null
   return (
     <div ref={ref} className="pd-wdet" role="dialog" aria-modal="false" aria-label={label} onKeyDown={onKeyDown}>
       <button type="button" className="pd-btn pd-wclose" onClick={onClose}>{t.close}</button>
@@ -287,9 +237,8 @@ function Detail({ env, kit, w, onClose, onDelete }: { readonly env: Env; readonl
         {board ? <button type="button" className="pd-btn pd-primary" data-primary onClick={() => { kit.exportBoard(env, { board, target: w.s }) }}>{t.export}</button> : null}
         {board && kit.copySupported() ? <button type="button" className="pd-btn" onClick={() => { kit.copyBoard(env, board) }}>{t.copy}</button> : null}
         <button type="button" className="pd-btn" onClick={() => { replay(env, kit, w) }}>{t.again}</button>
-        <button type="button" className="pd-btn pd-wdel" aria-describedby={daily ? note : undefined} onClick={onDelete}>{t.del}</button>
+        <button type="button" className="pd-btn pd-wdel" onClick={onDelete}>{t.del}</button>
       </div>
-      {daily ? <p className="pd-wmeta" id={note}>{t.note}</p> : null}
     </div>
   )
 }
@@ -404,7 +353,6 @@ export function WorksPage(props: WorksProps): ReactElement {
 
   return (
     <>
-      <Daily env={env} kit={kit} wall={wall} />
       {wall.length === 0
         ? (
           <div className="pd-wempty">
@@ -427,7 +375,6 @@ export function WorksPage(props: WorksProps): ReactElement {
                       onFocus={() => { setActive(w.i) }}
                       onClick={() => { setActive(w.i); setOpen(w.i) }}>
                       <Piece kit={kit} w={w} css={112} />
-                      {dailyOf(w.s) ? <span className="pd-wtag" aria-hidden>{t.daily}</span> : null}
                     </button>
                   ))}
                 </div>

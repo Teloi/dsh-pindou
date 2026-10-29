@@ -30,16 +30,6 @@ export const WORKS_CSS = `
 .pd-wacts{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:320px}
 .pd-wacts .pd-wdel{color:var(--pd-danger)}
 .pd-wclose{align-self:flex-end}
-/* F1 每日一拼: today's pattern on top of the wall page; a badge on daily works */
-.pd-wday{margin-bottom:8px}
-.pd-wdaily{width:100%;display:flex;align-items:center;gap:12px;padding:8px 12px 8px 8px;border:1px solid var(--pd-border-subtle);border-radius:var(--pd-radius-card);background:var(--pd-surface);color:inherit;font:inherit;text-align:start;cursor:pointer}
-@media (hover:hover){.pd-wdaily:hover{background:var(--pd-hover)}}
-.pd-wdaily canvas{width:56px;height:56px;flex:none;image-rendering:pixelated}
-.pd-wdaily>span:not(.pd-wgo){flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.pd-wdaily>span>span{font-size:12.5px;color:var(--pd-text-2)}
-.pd-wgo{flex:none;font-weight:600;color:var(--pd-link)}
-.pd-wc{position:relative}
-.pd-wtag{position:absolute;left:6px;top:6px;padding:0 5px;border-radius:5px;background:var(--pd-toast-bg);color:var(--pd-toast-label);font-size:11px;line-height:16px;pointer-events:none}
 /* empty wall */
 .pd-wempty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 16px;text-align:center;color:var(--pd-text-2);font-size:13px}
 .pd-wempty>span{width:40px;height:40px;margin:8px;border-radius:14px;background:var(--pd-accent);opacity:.85;display:grid;place-items:center}

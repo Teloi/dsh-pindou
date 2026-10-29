@@ -103,17 +103,6 @@ for (const { f, code } of shipped) {
   if (long.length) fail.push(`${f} still has long class names (add them to scripts/css-classes.json): ${long.join(' ')}`)
 }
 
-// F1 (spec §18.3 / §18.6): the 60 daily patterns (≈4 KB gzip) ship in the works chunk only, never in
-// the first screen or another chunk. A pattern counts as shipped in a file when every one of its
-// non-empty rows is there.
-const { DAILY_DEFS } = await import(new URL('../src/core/daily.ts', import.meta.url).href)
-const carries = (code, def) => def.rows.filter(r => r !== '.'.repeat(r.length)).every(r => code.includes(r))
-for (const { f, code } of shipped) {
-  if (f.endsWith('/client.works.js')) continue
-  const found = DAILY_DEFS.filter(d => carries(code, d)).map(d => d.id)
-  if (found.length) fail.push(`${f} carries daily patterns (${found.join(' ')}); import src/core/daily.ts from the works chunk only`)
-}
-
 function budget(label, bytes, limit) {
   if (bytes > limit) fail.push(`${label} is ${bytes} B gzip, over the ${limit} B budget`)
   else if (bytes > limit * GZIP_HEADROOM) fail.push(`${label} is ${bytes} B gzip, above ${GZIP_HEADROOM * 100}% of the ${limit} B budget; trim before adding more`)
