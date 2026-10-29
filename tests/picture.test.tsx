@@ -51,6 +51,19 @@ function jpegFar(w: number, h: number, pad: number): Uint8Array {
   out.push(0xff, 0xd9)
   return new Uint8Array(out)
 }
+const le = (n: number): number[] => [n & 255, (n >> 8) & 255]
+/** A GIF with screen `sw`×`sh` and one `fw`×`fh` frame, after `pad` bytes of comment extension; 2-colour global table. */
+function gifFar(sw: number, sh: number, fw: number, fh: number, pad = 0): Uint8Array {
+  const out: number[] = [...'GIF89a'].map(c => c.charCodeAt(0))
+  out.push(...le(sw), ...le(sh), 0x80, 0, 0, 0, 0, 0, 255, 255, 255)
+  if (pad > 0) {
+    out.push(0x21, 0xfe)
+    for (let left = pad; left > 0; left -= 255) out.push(Math.min(left, 255), ...Array.from({ length: Math.min(left, 255) }, () => 0x20))
+    out.push(0)
+  }
+  out.push(0x2c, 0, 0, 0, 0, ...le(fw), ...le(fh), 0, 2, 3, 0x44, 0x01, 0x05, 0, 0x3b)
+  return new Uint8Array(out)
+}
 const svgFile = (): File => file('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'a.svg', 'image/svg+xml')
 
 /** The pixels the fake decoder "decodes": a red square on white, or flat white. */
@@ -352,6 +365,10 @@ describe('picture page (spec §18.2)', () => {
     ['a side over 8000 px', () => file(pngHead(8001, 100), 'wide.png', 'image/png'), '图片太大了，换一张小点的'],
     // audit R-3: the size is judged from the header wherever it sits, never by decoding first
     ['R-3: a 330 KB JPEG declaring 60000×60000 past the first 256 KB', () => file(jpegFar(60000, 60000, 330 * 1024), 'far.jpg', 'image/jpeg'), '图片太大了，换一张小点的'],
+    // audit N-2: a GIF's screen size can be forged small; the browser decodes the frame's size
+    ['N-2: a GIF whose screen says 10×10 over a 9000×9000 frame', () => file(gifFar(10, 10, 9000, 9000), 'forged.gif', 'image/gif'), '图片太大了，换一张小点的'],
+    ['N-2: the same, the frame past the first 256 KB', () => file(gifFar(10, 10, 9000, 9000, 300 * 1024), 'far.gif', 'image/gif'), '图片太大了，换一张小点的'],
+    ['N-2: a GIF cut short before its trailer', () => file(gifFar(10, 10, 9000, 9000).slice(0, 30), 'cut.gif', 'image/gif'), '这张图打不开'],
     ['R-3: a JPEG with no frame header anywhere', () => file(jpegFar(0, 0, 300 * 1024), 'nosize.jpg', 'image/jpeg'), '这张图打不开'],
   ])('%s: refused before any decode, red border + shake, message in an alert', async (_, make, message) => {
     await open()
@@ -428,6 +445,13 @@ describe('picture page (spec §18.2)', () => {
     const label24 = prev.getAttribute('aria-label')!
     expect(label24).toMatch(/^24×24 预览，共 \d+ 颗豆$/)
     expect(label24).not.toBe(label16.replace('16×16', '24×24'))
+  })
+
+  it('N-2: a normal GIF (frame inside its screen) is still decoded', async () => {
+    await open()
+    await choose(file(gifFar(64, 48, 64, 48, 300 * 1024), 'ok.gif', 'image/gif'))
+    expect(bitmap).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
   })
 
   it('a decoder failure: 这张图打不开', async () => {

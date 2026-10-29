@@ -58,13 +58,42 @@ function webpSize(b: Uint8Array): [number, number] | null {
   return null
 }
 
+/**
+ * GIF (audit N-2): the logical screen size alone can be forged small while a
+ * frame is huge, and the browser decodes the frame's size. So walk every block
+ * to the trailer and take the furthest any frame reaches (left/top + width/height).
+ * Not reaching the trailer (bytes read end first, or a malformed block) is
+ * "no size": readPicture then reads the whole file, and a file that still has
+ * no trailer is never decoded (cannotOpen) — safe over lenient.
+ */
+function gifSize(b: Uint8Array): [number, number] | null {
+  let w = u16le(b, 6), h = u16le(b, 8), i = 13
+  if (b[10]! & 0x80) i += 3 << ((b[10]! & 7) + 1) // global colour table
+  const blocks = (): void => { while (i < b.length && b[i]) i += b[i]! + 1; i++ } // sub-blocks to the 0 terminator
+  while (i < b.length) {
+    const t = b[i]
+    if (t === 0x3b) return [w, h]
+    if (t === 0x21) { i += 2; blocks() } // extension: label, then sub-blocks
+    else if (t === 0x2c && i + 10 <= b.length) {
+      w = Math.max(w, u16le(b, i + 1) + u16le(b, i + 5))
+      h = Math.max(h, u16le(b, i + 3) + u16le(b, i + 7))
+      const f = b[i + 9]!
+      i += 10
+      if (f & 0x80) i += 3 << ((f & 7) + 1) // local colour table
+      i++ // LZW minimum code size
+      blocks()
+    } else return null
+  }
+  return null
+}
+
 const make = (kind: ImageKind, s: [number, number] | null): Sniffed => ({ kind, width: s?.[0] ?? null, height: s?.[1] ?? null })
 
 /** The image kind and header size, or null when the bytes are not an image we decode. */
 export function sniff(b: Uint8Array): Sniffed | null {
   if (b.length >= 24 && b[0] === 0x89 && ascii(b, 1, 'PNG\r\n\x1a\n')) return make('png', ascii(b, 12, 'IHDR') ? [u32be(b, 16), u32be(b, 20)] : null)
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return make('jpeg', jpegSize(b))
-  if (b.length >= 10 && (ascii(b, 0, 'GIF87a') || ascii(b, 0, 'GIF89a'))) return make('gif', [u16le(b, 6), u16le(b, 8)])
+  if (b.length >= 10 && (ascii(b, 0, 'GIF87a') || ascii(b, 0, 'GIF89a'))) return make('gif', gifSize(b))
   if (b.length >= 16 && ascii(b, 0, 'RIFF') && ascii(b, 8, 'WEBP')) return make('webp', webpSize(b))
   if (b.length >= 26 && ascii(b, 0, 'BM')) return make('bmp', [Math.abs(i32le(b, 18)), Math.abs(i32le(b, 22))])
   return null

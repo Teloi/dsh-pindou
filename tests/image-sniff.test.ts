@@ -18,7 +18,23 @@ const jpeg = (w: number, h: number): Uint8Array => bytes(
   [0xff, 0xdb], be16(4), [0, 0],
   [0xff, 0xc2], be16(17), [8], be16(h), be16(w), [3], Array.from({ length: 9 }, () => 0),
 )
-const gif = (w: number, h: number): Uint8Array => bytes('GIF89a', le16(w), le16(h), [0, 0, 0])
+interface GifFrame { readonly w: number, readonly h: number, readonly x?: number, readonly y?: number, readonly lct?: boolean }
+/**
+ * A complete GIF: screen `w`×`h` with a 2-colour global table, a NETSCAPE loop
+ * extension, then each frame (graphic control extension, image descriptor,
+ * optional local table, one LZW data sub-block), then the trailer.
+ */
+const gifOf = (w: number, h: number, frames: readonly GifFrame[] = [{ w, h }]): Uint8Array => bytes(
+  'GIF89a', le16(w), le16(h), [0x80, 0, 0], [0, 0, 0, 255, 255, 255],
+  [0x21, 0xff, 11], 'NETSCAPE2.0', [3, 1, 0, 0, 0],
+  ...frames.flatMap(f => [
+    [0x21, 0xf9, 4, 0, 10, 0, 0, 0],
+    [0x2c], le16(f.x ?? 0), le16(f.y ?? 0), le16(f.w), le16(f.h), [f.lct ? 0x80 : 0], f.lct ? [0, 0, 0, 255, 255, 255] : [],
+    [2, 3, 0x44, 0x01, 0x05, 0],
+  ]),
+  [0x3b],
+)
+const gif = (w: number, h: number): Uint8Array => gifOf(w, h)
 const webpX = (w: number, h: number): Uint8Array => bytes('RIFF', le32(30), 'WEBP', 'VP8X', le32(10), [0, 0, 0, 0], le24(w - 1), le24(h - 1))
 const webpL = (w: number, h: number): Uint8Array => {
   const bits = ((w - 1) & 0x3fff) | (((h - 1) & 0x3fff) << 14)
@@ -105,6 +121,52 @@ describe('precheck: the order of checks', () => {
 
   it('a zero-sized header cannot be opened', () => {
     expect(precheck(file('image/png', 100), png(0, 10))).toEqual({ error: 'cannotOpen' })
+  })
+})
+
+describe('GIF: every frame counts, not just the screen size (audit N-2)', () => {
+  it('a screen forged to 10×10 over a 9000×9000 frame is too big before decoding', () => {
+    const forged = gifOf(10, 10, [{ w: 9000, h: 9000 }])
+    expect(sniff(forged)).toEqual({ kind: 'gif', width: 9000, height: 9000 })
+    expect(precheck(file('image/gif', forged.length, 'forged.gif'), forged)).toEqual({ error: 'tooBig' })
+  })
+
+  it('a frame pushed past 8000 px by its left/top offset is too big', () => {
+    const shifted = gifOf(10, 10, [{ w: 20, h: 10, x: MAX_SIDE - 10 }])
+    expect(sniff(shifted)).toMatchObject({ width: MAX_SIDE + 10, height: 10 })
+    expect(precheck(file('image/gif', shifted.length), shifted)).toEqual({ error: 'tooBig' })
+    expect(precheck(file('image/gif', 100), gifOf(10, 10, [{ w: 10, h: 20, y: MAX_SIDE - 10 }]))).toEqual({ error: 'tooBig' })
+  })
+
+  it('several frames: the largest of all of them, wherever it is (local colour tables skipped)', () => {
+    const big = gifOf(100, 100, [{ w: 100, h: 100 }, { w: 50, h: 50, lct: true }, { w: 9000, h: 30, lct: true }, { w: 10, h: 10 }])
+    expect(sniff(big)).toEqual({ kind: 'gif', width: 9000, height: 100 })
+    expect(precheck(file('image/gif', big.length), big)).toEqual({ error: 'tooBig' })
+  })
+
+  it('a normal animated GIF (frames inside the screen) is not refused', () => {
+    const anim = gifOf(640, 480, [{ w: 640, h: 480 }, { w: 100, h: 80, x: 20, y: 30, lct: true }, { w: 640, h: 480 }])
+    expect(sniff(anim)).toEqual({ kind: 'gif', width: 640, height: 480 })
+    expect(precheck(file('image/gif', anim.length, 'anim.gif'), anim)).toEqual({ ok: { kind: 'gif', width: 640, height: 480 } })
+    expect(precheck(file('image/gif', 100), gif(MAX_SIDE, MAX_SIDE))).toHaveProperty('ok')
+  })
+
+  it('cut short anywhere, it never throws and never reports a size (then the whole file is read, or it is not decoded)', () => {
+    const full = gifOf(10, 10, [{ w: 10, h: 10 }, { w: 9000, h: 9000, lct: true }])
+    for (let n = 10; n < full.length; n++) {
+      const cut = full.slice(0, n)
+      expect(() => sniff(cut)).not.toThrow()
+      expect(sniff(cut)).toEqual({ kind: 'gif', width: null, height: null })
+      expect(precheck(file('image/gif', n), cut)).not.toEqual({ ok: expect.objectContaining({ width: 10 }) })
+    }
+    expect(sniff(full)).toMatchObject({ width: 9000 })
+  })
+
+  it('an unknown block, or a frame header cut in half, is no size, not a guess', () => {
+    const good = gifOf(10, 10)
+    const junk = new Uint8Array([...good.slice(0, -1), 0x99, 0x3b])
+    expect(sniff(junk)).toEqual({ kind: 'gif', width: null, height: null })
+    expect(sniff(bytes('GIF89a', le16(10), le16(10), [0, 0, 0], [0x2c, 0, 0]))).toEqual({ kind: 'gif', width: null, height: null })
   })
 })
 
