@@ -9,7 +9,7 @@
 // Everything runs in throwaway dirs under the OS temp dir: DSH_HOME, the workspace,
 // and a fake Messages-API LLM (e2e/fake-llm.mjs). No real API key is used.
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -82,6 +82,17 @@ if (!existsSync(profilePkg) || !readFileSync(profilePkg, 'utf8').includes('"dsh-
 }
 
 // 2. fake LLM + DSH Web
+// SIGTERM/SIGINT are fine (Playwright closes the browser, the pending wait throws, `finally` stops
+// DSH: checked 06:18, run kr-old-killed). A run killed before its `finally` (SIGKILL, a crash) leaves its DSH server running on this
+// DSH_HOME; a rerun on the same home would share its sessions and files. Stop only such a server:
+// a DSH whose DSH_HOME is exactly this run's (never another checkout's or another person's).
+for (const pid of existsSync('/proc') ? readdirSync('/proc').filter(d => /^\d+$/.test(d)) : []) {
+  try {
+    const env = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')
+    const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+    if (cmd.includes(DSH_BIN) && env.includes(`DSH_HOME=${DSH_HOME}`)) { log('stopping a leftover DSH server on this home, pid', pid); process.kill(Number(pid), 'SIGTERM') }
+  } catch { /* gone, or not ours to read */ }
+}
 const llm = await startFakeLlm({ chatMs: Number(process.env.FAKE_LLM_CHAT_MS ?? 30000) })
 const CLOCK_FILE = join(tmpdir(), `pindou-e2e-clock-${process.pid}`)
 const serverClockEnv = FIXED_NOW ? {
@@ -1569,7 +1580,13 @@ try {
   // Pin it instead: every B shot is taken while the turn still runs (asserted), and C starts once
   // it has ended (waited for), so each crop's entry state is the same in every run.
   check('B shots all show the busy entry: the section-A turn is still running at the end of B', await p.locator('.pd-entry.pd-busy').count() === 1)
-  await p.locator('.pd-entry.pd-busy').waitFor({ state: 'detached', timeout: 60000 })
+  try {
+    await p.locator('.pd-entry.pd-busy').waitFor({ state: 'detached', timeout: 60000 })
+  } catch (error) {
+    // evidence for the rare case the section-A turn never ends (run hab-1): what the model was still sending
+    log('section-A turn still running; model requests in flight:', JSON.stringify(llm.inFlight()))
+    throw error
+  }
   log('C. dark')
   await p.emulateMedia({ colorScheme: 'dark' })
   await p.waitForTimeout(600)
@@ -2047,6 +2064,8 @@ try {
   check(`I1 every host rule that reaches the plugin only sets accepted properties (${leaksSeen.size} rules)`, unexpected.length === 0, JSON.stringify(unexpected.slice(0, 5)))
 } finally {
   writeFileSync(join(OUT, 'dsh.log'), dshLog.replace(/token=[^&\s]+/g, 'token=…'))
+  writeFileSync(join(OUT, 'llm-requests.json'), `${JSON.stringify(llm.requests, null, 1)}\n`)
+  if (SELFCHECK) for (const f of ['dsh.log', 'llm-requests.json']) copyFileSync(join(OUT, f), join(SELFCHECK, f))
   writeFileSync(join(OUT, 'checks.json'), `${JSON.stringify(checks, null, 2)}\n`)
   writeFileSync(join(OUT, 'audit', 'leaks.json'), `${JSON.stringify([...leaksSeen.values()].map(l => ({ ...l, props: [...l.props] })), null, 2)}\n`)
   writeFileSync(join(OUT, 'audit', 'summary.json'), `${JSON.stringify(audits, null, 2)}\n`)
