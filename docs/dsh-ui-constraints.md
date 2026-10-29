@@ -73,7 +73,9 @@
 5. **命名与作用域**：只用 `pd-` 前缀（类名、自定义属性、keyframes）。面板内规则挂在 `.pd-root` 下，面板外渲染的元素（入口按钮、忙碌胶囊、下载用的临时链接）都带 `.pd-portal`，token 同时定义在这两个作用域上。没有无前缀的全局选择器，测试会逐条检查。
 6. **容器查询**：`.pd-root{container: pd/inline-size}`。≤ 340 收紧间距；≥ 560 模板 4 列、主页最大宽 640，玩法列最大宽 480 居中。
 7. **忙碌胶囊（spec §2.2）**：28px 高，放在 `conversation.input.overlay`，浮在输入框上沿右侧，带关闭按钮。模型运行满 3 秒后才出现，每个会话最多 2 次、每轮最多 1 次，停留 8 秒（悬停时暂停计时）。轮次结束、开始输入、点 ×、打开面板时立即隐藏；面板已开、偏好关闭、草稿非空、视口 < 480 时不出现。`role="status"`，按钮 `tabIndex=-1` 且按下时 `preventDefault`，不会抢输入框焦点。
-8. **快捷键**：⌘⌥K / Ctrl+Alt+K（`pindou.toggle`），通过宿主的 `shortcuts` 服务注册，用户可以改绑。面板正在显示时按下会收起，否则打开。注册失败不会影响入口按钮和胶囊。
+8. **快捷键**：`pindou.toggle`，通过宿主的 `shortcuts` 服务注册，用户可以在设置里改绑。面板正在显示时按下会收起，否则打开。注册失败不会影响入口按钮和胶囊。
+   - 只在桌面端给默认键 ⌘⌥K / Ctrl+Alt+K。
+   - **Web 端不给默认键**：Web 里 ⌘⌥K 已经是宿主「搜索会话」的默认键（`packages/client/ui-workspace/src/client/shortcuts.ts:83`，Web 用 primary+alt），而注册表遇到重叠默认键会直接抛错（`packages/client/shortcuts/src/client/registry.ts` 的 `register`，"Conflicting shortcut defaults"），后注册的一方整个激活失败。实测：带 Web 默认键时 `dsh-client-ui-workspace` 激活失败，页面停在 "Failed to load plugins"。另外 web:linux 不允许 Ctrl+Alt（`shortcuts/src/binding.ts` 的 `isWebBindingAllowed`）。
 9. **状态色**：danger 和 success 引用宿主状态色 `--dsw-alias-state-error-primary` 和 `--dsw-alias-state-success-primary`，带兜底值，明暗主题由宿主切换。
 10. **英文名**：Bead Break（中文名 拼豆小憩）。仓库名和包名仍是 `dsh-pindou`，标签页 kind 仍是 `pindou`。UI 文案只从 `src/core/i18n.ts` 的 `APP_NAME_ZH` 和 `APP_NAME_EN` 取名字；`package.json` 的 `displayName` 和 `description` 与它们保持一致。
 

@@ -53,7 +53,10 @@ describe('client apply', () => {
     expect((f.tabs[0]!['title'] as () => string)()).toBe('拼豆小憩')
     expect(f.slots.map(s => s.options['name'])).toEqual(['sidebar.right.pane.tab', 'conversation.session.header.actions', 'conversation.input.overlay'])
     expect(f.shortcuts[0]).toMatchObject({ id: SHORTCUT_ID, regions: ['page', 'editable'] })
-    expect((f.shortcuts[0]!['defaults'] as Record<string, unknown>)['web:macos']).toEqual({ code: 'KeyK', modifiers: ['primary', 'alt'] })
+    const defaults = f.shortcuts[0]!['defaults'] as Record<string, unknown>
+    expect(defaults['desktop:macos']).toEqual({ code: 'KeyK', modifiers: ['primary', 'alt'] })
+    // the Web shell already uses ⌘⌥K for session search: no Web defaults
+    expect(Object.keys(defaults).filter(k => k.startsWith('web:'))).toEqual([])
     const css = document.getElementById(STYLE_ID)?.textContent ?? ''
     expect(css).toContain('.pd-root')
     // every selector is scoped by a pd- class (keyframes / @property / at-rule preludes aside)

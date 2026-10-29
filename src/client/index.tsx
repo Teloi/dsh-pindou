@@ -4,7 +4,8 @@
  * - a `pindou` right-sidebar tab (kind `pindou`, kept mounted, on the guide page)
  * - an entry button in `conversation.session.header.actions` (quiet busy / progress dot)
  * - a busy pill in `conversation.input.overlay`
- * - a rebindable global shortcut ⌘⌥K / Ctrl+Alt+K that toggles the tab
+ * - a rebindable global shortcut that toggles the tab (default ⌘⌥K / Ctrl+Alt+K
+ *   in the desktop app only; unbound on Web, where the host already uses it)
  * - one shared GameStore per plugin lifetime (localStorage-backed, disposed with the plugin)
  *
  * Host types are not bundled; the minimal shapes used here are declared below
@@ -27,6 +28,12 @@ export const TAB_ID = 'dsh-pindou'
 
 export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'shortcuts']
 export const SHORTCUT_ID = 'pindou.toggle'
+const DESKTOP_PROFILES = ['desktop:macos', 'desktop:windows', 'desktop:linux'] as const
+
+/** The DSH desktop app's preload exposes `window.dshDesktop` (apps/desktop/src/preload-app.ts). */
+function isDesktopShell(): boolean {
+  return typeof window !== 'undefined' && 'dshDesktop' in window
+}
 
 type Dispose = () => void
 interface LocaleFace {
@@ -131,12 +138,16 @@ export function apply(ctx: ClientContext): void {
           id: SHORTCUT_ID,
           label: () => tFor(lang())('shortcutToggle'),
           aliases: ['pindou', 'bead', '拼豆'],
-          defaults: Object.fromEntries(['desktop:macos', 'desktop:windows', 'desktop:linux', 'web:macos', 'web:windows', 'web:linux'].map(p => [p, binding])),
+          // Desktop only. In the Web shell ⌘⌥K / Ctrl+Alt+K is the host's own
+          // "search sessions" default (ui-workspace/src/client/shortcuts.ts), and
+          // the shortcut registry throws on overlapping defaults, which would stop
+          // whichever package registers second. Web users can bind it in Settings.
+          defaults: Object.fromEntries(DESKTOP_PROFILES.map(p => [p, binding])),
           regions: ['page', 'editable'],
           modals: [],
           resolve: () => ({ status: 'handled', run: toggle }),
         })
-        keyshortcuts = 'Control+Alt+K Meta+Alt+K'
+        keyshortcuts = isDesktopShell() ? 'Control+Alt+K Meta+Alt+K' : undefined
         return () => { keyshortcuts = undefined; off() }
       } catch (error) {
         console.warn('[dsh-pindou] shortcut not registered:', error)
