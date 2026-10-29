@@ -26,6 +26,7 @@ for (const [, spec] of client.matchAll(/require\("([^"]+)"\)/g)) {
   if (!PLATFORM.has(spec)) fail.push(`lib/client.js requires "${spec}", which the DSH platform does not provide`)
 }
 if (/\bbb-|--bb-/.test(client)) fail.push('lib/client.js contains a non-pd- class prefix')
+if (client.includes('__PURE__')) fail.push('lib/client.js ships /* @__PURE__ */ annotations; tsdown.config.ts output.comments.annotation must stay false')
 if (/(?:^|\n)\s*import\s/.test(client)) fail.push('lib/client.js must be CJS (no import statements)')
 const gz = gzipSync(client).length
 if (gz > GZIP_BUDGET) fail.push(`lib/client.js is ${gz} B gzip, over the ${GZIP_BUDGET} B budget`)

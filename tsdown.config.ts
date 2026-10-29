@@ -81,6 +81,9 @@ const client: UserConfig = {
     banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(pkg.name)}, factory: (require) => {`,
     intro: 'var module = { exports: {} }; var exports = module.exports;',
     footer: 'return module.exports; } });',
+    // lib/client.js is the end of the line: the host runs it as a classic script and
+    // no later bundler reads its /* @__PURE__ */ hints, so ship none. Legal comments stay.
+    comments: { legal: true, annotation: false, jsdoc: false },
     codeSplitting: false,
   },
 }
