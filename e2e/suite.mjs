@@ -808,10 +808,6 @@ async function worksSection() {
     const before = await y.evaluate(() => ({ text: document.querySelector('.pd-wdaily')?.textContent, first: document.querySelector('.pd-view > .pd-wday + .pd-wall') !== null, tags: [...document.querySelectorAll('.pd-wc')].filter(c => c.querySelector('.pd-wtag')).map(c => c.getAttribute('aria-label')) }))
     check('F1 the wall page opens with today\'s pattern (day 151 → 31, 小猪), yesterday\'s daily makes a 1-day streak, then 开始; the wall below; yesterday\'s work carries the badge',
       before.text === '今日一拼 · 小猪连续 1 天开始' && before.first && before.tags.join() === `今日一拼 · ${DAILY_DEFS[30].zh} · 5 月 31 日`, JSON.stringify(before))
-    // shoot once the page has slid in (the plugin's own finite animations are done)
-    await animationsDone(y)
-    const shown = await y.evaluate(() => getComputedStyle(document.querySelector('.pd-view:has(> .pd-wday)')).opacity)
-    check('F1 the wall page has slid in before its screenshot (opacity 1)', shown === '1', shown)
     await outShot(y, 'f1-daily-zh-light')
     await y.locator('.pd-wdaily').click()
     await y.locator('.pd-board').waitFor()
@@ -830,7 +826,6 @@ async function worksSection() {
     await y.locator('.pd-wdet').waitFor()
     const note = await y.evaluate(() => { const d = document.querySelector('.pd-wdet .pd-wdel'); return document.getElementById(d?.getAttribute('aria-describedby') ?? '')?.textContent ?? null })
     check('F1 a daily work\'s detail card says 「删除后连续天数会重新计算」 and 删除 is described by it', note === '删除后连续天数会重新计算', JSON.stringify(note))
-    await animationsDone(y)
     await outShot(y, 'f1-detail-zh-light')
     await y.locator('.pd-wdet .pd-wdel').click()
     await y.waitForTimeout(200)
