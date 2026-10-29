@@ -53,7 +53,8 @@ function StatusLine(): ReactElement {
   // a picture pattern (spec §18.2) is a `board:` source too, but not the AI's: no prompt, no tokens
   const pic = isPictureSource(s.target)
   const isAi = !pic && (s.target?.startsWith('board:') ?? false)
-  const ai = isAi ? s.ai.result : undefined
+  // only the board the last generation made: undo back to an older one and its facts are gone (R3-4)
+  const ai = isAi && s.ai.result?.board === target ? s.ai.result : undefined
   const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : pic ? t('myPattern') : isAi ? (ai?.prompt ?? t('homeAi')) : t('playFree')
   const beads = board.cells.filter(c => c !== EMPTY).length
   const c = target ? completion(board, target) : null
