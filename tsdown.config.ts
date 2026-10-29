@@ -9,10 +9,13 @@
  *   (`PLATFORM_MODULES` in packages/client/web/src/platform.ts) stay external;
  *   every other import is inlined, and any value import of another
  *   `@deepseek-ai/*` package or a Node builtin fails the build.
+ * - `lib/client.<name>.js` — optional lazy chunks, one per `import()`ed module,
+ *   loaded by the host through `require.async` (scripts/async-chunks.ts).
  */
 import { builtinModules } from 'node:module'
 import { defineConfig, type UserConfig } from 'tsdown'
 import pkg from './package.json' with { type: 'json' }
+import { asyncChunksPlugin, registrationBanner } from './scripts/async-chunks.ts'
 import { minifyCssModule } from './scripts/minify-css.ts'
 
 const NODE_BUILTINS = new Set([...builtinModules, ...builtinModules.map(id => `node:${id}`)])
@@ -66,7 +69,7 @@ const client: UserConfig = {
     transform(code: string, id: string) {
       return id.replaceAll('\\', '/').endsWith('/src/client/styles.ts') ? { code: minifyCssModule(code), map: null } : null
     },
-  }, {
+  }, asyncChunksPlugin(), {
     name: 'dsh-client-bundle-purity',
     resolveId(source: string) {
       if (NODE_BUILTINS.has(source)) {
@@ -80,13 +83,16 @@ const client: UserConfig = {
   }],
   outputOptions: {
     entryFileNames: 'client.js',
-    banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(pkg.name)}, factory: (require) => {`,
+    // `import()` of a module makes it lazy: lib/client.<name>.js, fetched by the host's
+    // module loader on first use (scripts/async-chunks.ts). The first-screen budget
+    // counts lib/client.js only; the async chunks have their own (scripts/check-bundle.mjs).
+    chunkFileNames: 'client.[name].js',
+    banner: chunk => registrationBanner(pkg.name, chunk),
     intro: 'var module = { exports: {} }; var exports = module.exports;',
     footer: 'return module.exports; } });',
     // lib/client.js is the end of the line: the host runs it as a classic script and
     // no later bundler reads its /* @__PURE__ */ hints, so ship none. Legal comments stay.
     comments: { legal: true, annotation: false, jsdoc: false },
-    codeSplitting: false,
   },
 }
 

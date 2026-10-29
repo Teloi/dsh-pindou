@@ -2,36 +2,79 @@
 // Release guard: the committed lib/ must be loadable by DSH as-is.
 // - lib/client.js is one `window.__ModuleLoader__.load({ id, factory })` call
 //   that only requires modules the DSH web platform provides;
+// - each lazy chunk lib/client.<name>.js is one `load({ id, chunk: "<file>", factory })`
+//   call, is reached from the entry through `require.async("./<file>")`, and never
+//   through a synchronous require (the host's sync require knows platform modules only;
+//   see scripts/async-chunks.ts);
 // - package.json declares what awesome-dsh-hub and `dsh plugin add` need;
 // - no stray class prefixes or unscoped names leak into the shipped CSS.
-// - lib/client.js stays within the spec's size budget: 40 KB = 40,960 bytes
-//   gzip (zlib default level, which is what CDNs and `gzip` ship), and below 90% of
-//   it so there is always headroom for the next change.
-import { readFileSync } from 'node:fs'
+// - size, gzip at the zlib default level (what CDNs and `gzip` ship), each below 90%
+//   of its budget so there is always headroom for the next change:
+//     first screen  lib/client.js            ≤ 40 KB = 40,960 B (spec §10)
+//     lazy chunks   lib/client.<name>.js     ≤ 20 KB = 20,480 B together (spec §18.6)
+//
+// Usage: node scripts/check-bundle.mjs [libDir]   (default lib; package.json from cwd)
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 
-/** Spec §10: the client bundle must stay at or below 40 KB gzip. */
+/** Spec §10: the first-screen client bundle must stay at or below 40 KB gzip. */
 export const GZIP_BUDGET = 40 * 1024
+/** Spec §18.6: lazily loaded chunks, all together, at or below 20 KB gzip. */
+export const ASYNC_GZIP_BUDGET = 20 * 1024
 /** Project rule on top of the spec: stay at or below 90% so a feature can't silently use up the last few KB. */
 export const GZIP_HEADROOM = 0.9
 const PLATFORM = new Set(['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client'])
+const CLIENT_CHUNK = /^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$/
+const Q = '["\'`]'
 const fail = []
+const libDir = process.argv[2] ?? 'lib'
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
-const client = readFileSync('lib/client.js', 'utf8')
-const host = readFileSync('lib/index.js', 'utf8')
+const client = readFileSync(join(libDir, 'client.js'), 'utf8')
+const host = readFileSync(join(libDir, 'index.js'), 'utf8')
 
-if (!client.startsWith('window.__ModuleLoader__.load({')) fail.push('lib/client.js must start with window.__ModuleLoader__.load({')
-if (!new RegExp(`^window\\.__ModuleLoader__\\.load\\(\\{\\s*id:\\s*["'\`]${pkg.name}["'\`]`).test(client)) fail.push(`lib/client.js module id must be "${pkg.name}"`)
-for (const [, spec] of client.matchAll(/require\("([^"]+)"\)/g)) {
-  if (!PLATFORM.has(spec)) fail.push(`lib/client.js requires "${spec}", which the DSH platform does not provide`)
+const libFiles = readdirSync(libDir).filter(f => !f.startsWith('.'))
+const chunkFiles = libFiles.filter(f => f !== 'client.js' && f.startsWith('client.'))
+for (const f of libFiles) {
+  if (f !== 'index.js' && f !== 'client.js' && !CLIENT_CHUNK.test(f)) fail.push(`${libDir}/${f} is not a file the plugin ships (index.js, client.js, client.<name>.js)`)
 }
-if (/\bbb-|--bb-/.test(client)) fail.push('lib/client.js contains a non-pd- class prefix')
-if (client.includes('__PURE__')) fail.push('lib/client.js ships /* @__PURE__ */ annotations; tsdown.config.ts output.comments.annotation must stay false')
-if (/(?:^|\n)\s*import\s/.test(client)) fail.push('lib/client.js must be CJS (no import statements)')
+for (const f of chunkFiles) {
+  if (f.startsWith('client.node.')) fail.push(`${libDir}/${f}: client.node.* is reserved by the host and never served to the browser`)
+}
+
+/** Shape checks shared by the entry and every chunk. */
+function checkScript(file, code, chunk) {
+  const opening = new RegExp(`^window\\.__ModuleLoader__\\.load\\(\\{\\s*id:\\s*${Q}${pkg.name}${Q},\\s*${chunk ? `chunk:\\s*${Q}${chunk.replaceAll('.', '\\.')}${Q},\\s*` : ''}factory:\\s*\\(?require\\)?\\s*=>`)
+  if (!code.startsWith('window.__ModuleLoader__.load({')) fail.push(`${file} must start with window.__ModuleLoader__.load({`)
+  else if (!opening.test(code)) fail.push(`${file} must register id "${pkg.name}"${chunk ? ` with chunk "${chunk}"` : ' with no chunk'} and a factory whose parameter is named require (the require checks below read it by name)`)
+  for (const [, spec] of code.matchAll(new RegExp(`\\brequire\\(${Q}([^"'\`]+)${Q}\\)`, 'g'))) {
+    if (spec.startsWith('.')) fail.push(`${file} requires "${spec}" synchronously; the DSH loader only loads package chunks through require.async (shared code between the entry and a lazy module?)`)
+    else if (!PLATFORM.has(spec)) fail.push(`${file} requires "${spec}", which the DSH platform does not provide`)
+  }
+  for (const [, spec] of code.matchAll(new RegExp(`\\brequire\\.async\\(${Q}([^"'\`]+)${Q}\\)`, 'g'))) {
+    if (!spec.startsWith('./') || !chunkFiles.includes(spec.slice(2))) fail.push(`${file} loads "${spec}" with require.async, but ${libDir} has no such chunk`)
+  }
+  if (/\bbb-|--bb-/.test(code)) fail.push(`${file} contains a non-pd- class prefix`)
+  if (/(?:^|\n)\s*import\s/.test(code)) fail.push(`${file} must be CJS (no import statements)`)
+  if (code.includes('__PURE__')) fail.push(`${file} ships /* @__PURE__ */ annotations; tsdown.config.ts output.comments.annotation must stay false`)
+}
+
+checkScript(`${libDir}/client.js`, client)
+const chunks = chunkFiles.map(f => ({ f, code: readFileSync(join(libDir, f), 'utf8') }))
+for (const { f, code } of chunks) checkScript(`${libDir}/${f}`, code, f)
+// a chunk nobody loads is dead weight (or a stale file from an earlier build)
+const loaded = new Set([client, ...chunks.map(c => c.code)].flatMap(code => [...code.matchAll(new RegExp(`\\brequire\\.async\\(${Q}\\./([^"'\`]+)${Q}\\)`, 'g'))].map(m => m[1])))
+for (const { f } of chunks) if (!loaded.has(f)) fail.push(`${libDir}/${f} is never loaded with require.async (stale build output?)`)
+
+function budget(label, bytes, limit) {
+  if (bytes > limit) fail.push(`${label} is ${bytes} B gzip, over the ${limit} B budget`)
+  else if (bytes > limit * GZIP_HEADROOM) fail.push(`${label} is ${bytes} B gzip, above ${GZIP_HEADROOM * 100}% of the ${limit} B budget; trim before adding more`)
+}
 const gz = gzipSync(client).length
-if (gz > GZIP_BUDGET) fail.push(`lib/client.js is ${gz} B gzip, over the ${GZIP_BUDGET} B budget`)
-else if (gz > GZIP_BUDGET * GZIP_HEADROOM) fail.push(`lib/client.js is ${gz} B gzip, above ${GZIP_HEADROOM * 100}% of the ${GZIP_BUDGET} B budget; trim before adding more`)
-if (!host.includes('export')) fail.push('lib/index.js must be an ES module')
+budget(`${libDir}/client.js`, gz, GZIP_BUDGET)
+const asyncGz = chunks.reduce((sum, { code }) => sum + gzipSync(code).length, 0)
+budget(`lazy chunks (${chunks.length})`, asyncGz, ASYNC_GZIP_BUDGET)
+if (!host.includes('export')) fail.push(`${libDir}/index.js must be an ES module`)
 
 if (!pkg.dsh?.bundle?.patch) fail.push('package.json dsh.bundle.patch is required (awesome-dsh-hub listing rule)')
 if (pkg.dsh?.client?.platform !== 'web') fail.push('package.json dsh.client.platform must be "web"')
@@ -43,5 +86,6 @@ if (fail.length > 0) {
   for (const f of fail) console.error(`✗ ${f}`)
   process.exit(1)
 }
-const pct = ((gz / GZIP_BUDGET) * 100).toFixed(1)
-process.stdout.write(`✓ bundle shape ok (client ${client.length} B, ${gz} B gzip = ${pct}% of ${GZIP_BUDGET} B budget; host ${host.length} B)\n`)
+const pct = (n, of) => ((n / of) * 100).toFixed(1)
+process.stdout.write(`✓ bundle shape ok (client ${client.length} B, ${gz} B gzip = ${pct(gz, GZIP_BUDGET)}% of ${GZIP_BUDGET} B budget; `
+  + `lazy chunks ${chunks.length}, ${asyncGz} B gzip = ${pct(asyncGz, ASYNC_GZIP_BUDGET)}% of ${ASYNC_GZIP_BUDGET} B; host ${host.length} B)\n`)
