@@ -35,13 +35,14 @@ npx @deepseek-ai/dsh plugin --profile web remove dsh-pindou
 ## How to play
 
 - **Entry points**: the bead button on the right of the session header, or the small pill that appears above the composer after the model has been running for 3 seconds. The pill shows at most twice per session and stays away while you type, while the panel is open, or when the window is too narrow. You can turn it off in the ⋯ menu.
-- **Templates**: 12 templates with faint guide beads and a completion meter; finishing one plays a small celebration, then you can iron it.
+- **Templates**: 12 templates with faint guide beads and a completion meter; when you finish, it offers to iron the piece, and ironing ends with a small confetti burst.
 - **Tools**: paint, picker, eraser, fill, undo/redo, clear (undoable for 5 seconds). Boards come in 12 / 16 / 24 with 16 colors.
 - **Export**: save as PNG, or copy the image to the clipboard (the Copy button is hidden where the browser can't do it).
 - **Autosave**: progress is kept in the browser's localStorage.
 - **Shortcut**: in the desktop app ⌘⌥K / Ctrl+Alt+K toggles the panel and can be rebound in Settings → Shortcuts. The Web shell has no default because DSH already uses that combination for "Search sessions"; bind one in Settings if you want it.
 - **Keyboard and screen readers**: arrow keys move, Space/Enter places, Delete erases. The board is a labelled grid and each cell announces its position, color and guide color.
 - **Language and theme**: follows DSH's language (Chinese first, English included) and light/dark theme.
+- **Not yet** (planned for v2): zooming the board (cells already size themselves to the panel), and AI patterns appearing row by row (the whole pattern lands at once).
 
 ## AI patterns
 
@@ -52,6 +53,8 @@ Model selection, in order:
 1. **DSH's current default model** (the one you chat with; no extra setup).
 2. If DSH has no usable model route and `DEEPSEEK_API_KEY` is set, the DeepSeek API is called directly (`deepseek-chat`).
 3. Otherwise the AI page says no model is available; templates and free drawing keep working.
+
+The check only looks at whether credentials are configured and never calls the model for it; where that can't be known up front (account sign-in, for example) the page says the first generation will check the setup. If a key turns out to be invalid, the page keeps showing "not configured" after the first failed generation until you press "Check again". DSH gives plugins no way to open its Models settings, so "Open DSH Settings" only appears where the Settings shortcut can open Settings (on its home page); otherwise you get written steps.
 
 The key is only read in the DSH server process and never reaches the browser.
 
@@ -87,7 +90,7 @@ All keys are optional. Unknown keys or invalid values make the plugin fail to lo
 ```bash
 pnpm install
 pnpm run check      # lint + typecheck + tests + build + bundle-shape check
-pnpm run e2e        # start DSH Web from source and drive it with Playwright (see e2e/run.mjs)
+pnpm run e2e        # start DSH Web from source and drive it with Playwright; screenshots go to e2e/.out (add -- --update-assets to refresh docs/assets)
 ```
 
 Three layers: `src/core` (pure logic: board, templates, pattern validation and repair, cache; no DOM), `src/client` (React UI and DSH client glue), `src/host` (DSH server side: the model call). DSH UI constraints and design decisions are in [docs/dsh-ui-constraints.md](docs/dsh-ui-constraints.md) (Chinese).

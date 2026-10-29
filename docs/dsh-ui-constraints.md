@@ -57,27 +57,51 @@
 
 - **没有 iframe，也没有 Shadow DOM**：插件组件直接渲染在宿主 React 树中，与宿主共享同一个 `document`、同一个 React 实例。
 - **CSS 不隔离**：插件样式通过 `<style>` 注入到全局。所有类名和自定义属性统一使用 `pd-` 前缀：面板内规则限定在 `.pd-root` 下，渲染到 `document.body` 或宿主插槽里的元素（忙碌胶囊、入口按钮、弹层、toast）一律带 `.pd-portal`。禁止写 `button {}`、`:root {}` 之类的无前缀全局规则，也不用 `!important` 覆盖宿主（唯一例外是减少动态效果的媒体查询）。
-- 宿主的字体、`box-sizing`、表单控件重置会“漏”进插件；反之插件不应改变宿主元素。
+- 宿主的全局样式会“漏”进插件；反之插件不应改变宿主元素。下面是在真实 DSH Web 里逐条测出来的（E2E 的 `e2e/audit.mjs` 每次都会重新扫描，结果写在 `e2e/.out/audit/leaks.json`），以及插件的处理方式：
+
+  | 宿主规则（来源） | 影响 | 处理 |
+  |---|---|---|
+  | `*, ::before, ::after { corner-shape: superellipse(1.5) }`（ui-theme `corner-shape.css`） | 圆豆、色块、圆点变成“方圆” | `.pd-root *`、`.pd-portal *` 及其伪元素统一 `corner-shape: round` |
+  | `body` 的 `font-family`、`line-height`、`text-autospace: normal`（web `base.css`） | 字体沿用宿主（这是想要的）；中英文之间自动加空隙会把 `0/118`、色号、计数撑开 | 字体继承；数字和色号元素设 `text-autospace: no-autospace` |
+  | `button, input, select, textarea { font-family: inherit }` 和浏览器默认的控件字号、外边距、`appearance` | 按钮字号、行高不一致 | `:where(.pd-root, .pd-portal) :where(button, input, textarea, select)` 统一 `font/color/letter-spacing: inherit; margin: 0; appearance: none` |
+  | 盒模型 | 宿主没有全局 `box-sizing`，浏览器默认是 `content-box` | `.pd-root *`、`.pd-portal *` 统一 `border-box` |
+  | `svg` 没有默认尺寸（浏览器按 300×150 撑开） | 设计走查 B1：警告图标撑坏卡片 | 所有图标走 `icons.tsx`，带 `width/height=16` 属性和 `.pd-i` 类；尺寸只由 `--pd-i` 决定，测试断言每处 ≤ 24px |
+  | `:focus-visible` 的 outline 颜色和宽度（ui-theme `focus.css`）；`[data-dsh-automatic-focus]:focus { outline: none }` | 焦点环跟随宿主（想要的） | 保留，不覆盖 |
+  | 桌面端 macOS 的 `-webkit-app-region`（窗口拖拽区） | 控件需要 `no-drag` 才能点 | 保留宿主的值 |
+  | 宿主滚动条样式 | 与宿主一致（想要的） | 保留 |
+
+  E2E 里只有上表“保留”的几项是允许的（`e2e/run.mjs` 的 `ACCEPTED_LEAKS`，每项写了原因）；扫到其他宿主规则作用到插件元素上就会失败。
+- **焦点归还只有一个机制**（`src/client/focus.ts`）：弹层、菜单、卡片和预览用 `useFocusReturn` 打开时把焦点放进来，关闭时还给打开它的元素（菜单是 `⋯` 按钮）；那个元素不在了，就给豆板（或当前页面的第一个控件）。清空、撤销熨烫、undo toast 这类会让当前焦点元素消失或被禁用的操作，由根节点上的 `useFocusGuard` 兜底：焦点掉到 `body` 时还给豆板。用户自己点到面板外，不会被拉回来。
 - 组件拿不到 `ctx`，只能通过 slot 注入的回调与标准 props 交互（如 `useSession(s => s.running)` 判断模型是否在忙）。
 - 只能直接 `import` 宿主共享的平台模块（react、react-dom、zod、`@deepseek-ai/dsh-client-ui-primitives` 等）；其他宿主包只能类型引用。
 - 弹层/菜单若放在标题栏动作里，会被标题栏的 overflow 裁剪，必须 portal 到 `document.body`。
 - 右栏标签页在**没有会话界面**时无法打开；右栏宽度会被用户随时拖动，正文必须流式布局。
 - 静态资源（图片）可放在插件包 `src/client/assets/`，由宿主以 `/plugins/<包名>/assets/` 提供；本插件全部用 CSS/Canvas 绘制，无图片资源。
 
-## 5. 决定（Decisions，已锁定，对应 spec v1.4 §15.1）
+## 5. 决定（Decisions，已锁定，对应 spec v1.5 §15.1）
 
 1. **入口**：放在 `conversation.session.header.actions`（会话头部右侧），32px 幽灵按钮，id `dsh-pindou-entry`。不弹气泡，只用一个 6px 圆点表示状态：模型运行中是强调色呼吸点；面板关着时，如果有未完成的作品，或生成期间关掉面板后 AI 结果已到，就是暖色静止点。`aria-expanded` 跟随面板是否可见。
 2. **面板**：右侧栏标签页，kind `pindou`，`keepMounted`。宽度由宿主决定（最小 300，默认框架宽度的 45%，最大 70%）；豆板边长上限 480。
 3. **窄屏**：< 768px 时直接用宿主的全屏右栏，插件不做自己的抽屉或浮层；只调整正文（safe-area、色块 32px、熨烫和导出收进工具栏）。
 4. **正文头部**：宿主标签条已经有标题和关闭按钮，正文里只放「‹ 返回」和「⋯」，高 36px。正文根节点 `.pd-root` 带 `role="region"` 和应用名 `aria-label`。
 5. **命名与作用域**：只用 `pd-` 前缀（类名、自定义属性、keyframes）。面板内规则挂在 `.pd-root` 下，面板外渲染的元素（入口按钮、忙碌胶囊、下载用的临时链接）都带 `.pd-portal`，token 同时定义在这两个作用域上。没有无前缀的全局选择器，测试会逐条检查。
-6. **容器查询**：`.pd-root{container: pd/inline-size}`。≤ 340 收紧间距；≥ 560 模板 4 列、主页最大宽 640，玩法列最大宽 480 居中。
+6. **容器查询**：`.pd-root{container: pd/inline-size}`。≤ 340 收紧间距；≥ 560 模板 4 列、主页最大宽 640；玩法列最大宽 `480px + 2×--pd-pad`，所以面板 640 时豆板正好 480（12/16/24 格分别是 39/29/19 px）。豆板边长 A = min(内容宽, 滚动区高度 − 其他块, 480)，最小 140，格子 = ⌊(A − 12)/N⌋；矮窗口先缩豆板，保证色板和「熨烫」不用滚动就能看到。
 7. **忙碌胶囊（spec §2.2）**：28px 高，放在 `conversation.input.overlay`，浮在输入框上沿右侧，带关闭按钮。模型运行满 3 秒后才出现，每个会话最多 2 次、每轮最多 1 次，停留 8 秒（悬停时暂停计时）。轮次结束、开始输入、点 ×、打开面板时立即隐藏；面板已开、偏好关闭、草稿非空、视口 < 480 时不出现。`role="status"`，按钮 `tabIndex=-1` 且按下时 `preventDefault`，不会抢输入框焦点。
 8. **快捷键**：`pindou.toggle`，通过宿主的 `shortcuts` 服务注册，用户可以在设置里改绑。面板正在显示时按下会收起，否则打开。注册失败不会影响入口按钮和胶囊。
    - 只在桌面端给默认键 ⌘⌥K / Ctrl+Alt+K。
    - **Web 端不给默认键**：Web 里 ⌘⌥K 已经是宿主「搜索会话」的默认键（`packages/client/ui-workspace/src/client/shortcuts.ts:83`，Web 用 primary+alt），而注册表遇到重叠默认键会直接抛错（`packages/client/shortcuts/src/client/registry.ts` 的 `register`，"Conflicting shortcut defaults"），后注册的一方整个激活失败。实测：带 Web 默认键时 `dsh-client-ui-workspace` 激活失败，页面停在 "Failed to load plugins"。另外 web:linux 不允许 Ctrl+Alt（`shortcuts/src/binding.ts` 的 `isWebBindingAllowed`）。
 9. **状态色**：danger 和 success 引用宿主状态色 `--dsw-alias-state-error-primary` 和 `--dsw-alias-state-success-primary`，带兜底值，明暗主题由宿主切换。
-10. **英文名**：Bead Break（中文名 拼豆小憩）。仓库名和包名仍是 `dsh-pindou`，标签页 kind 仍是 `pindou`。UI 文案只从 `src/core/i18n.ts` 的 `APP_NAME_ZH` 和 `APP_NAME_EN` 取名字；`package.json` 的 `displayName` 和 `description` 与它们保持一致。
+10. **与 spec 的两处偏差（移到 v2，spec v1.5 §15.3 已接受）**：
+    - **不做缩放**（spec §3.4 的双指/滚轮缩放豆板）。豆板按面板尺寸自动取格子大小（见第 6 条），24×24 在 300px 面板下格子 11px，仍可点按；缩放和平移会和拖动画豆抢手势，留到 v2 一起设计。
+    - **AI 不逐行落豆**（spec §4.7 的流式逐行出现）。Host 一次拿到完整回复，校验、修复之后才下发给前端，前端只显示“生成中”文案。逐行落豆需要流式协议和“半张图纸”的校验规则，留到 v2。
+11. **凭据检测的限制（I3）**：`/api/pindou.status` 不调用模型，只看凭据是否“配了”：
+    - 对选中的 provider 用 `ctx.get('credentials').describe(ref)` 查 key（ref 取 provider 配置里的 `apiKeyEnv`，官方 provider 默认 `DEEPSEEK_API_KEY`）。没有 credentials 服务时退回检查启动环境变量。查不到 → `configured:false`。
+    - 账号登录（`deepseek-account`）、OAuth 和目录里没有的 provider 无法在不调用模型的情况下确认，返回 `configured:true, verified:false`，前端在输入框下提示“首次生成会检测模型配置”。
+    - key 配了但无效（过期、被撤销）也只能靠真正调用发现：第一次生成返回 401 / not-configured 后，前端把状态缓存成“未配置”，再进 AI 页也直接显示未配置卡片，直到用户点「重新检测」。
+12. **「打开 DSH 设置」是尽力而为（I4）**：DSH 没有给插件开放“执行命令”或“打开某个设置分区”的 API。插件从 `shortcuts.catalog` 读 `settings.open` 的实际绑定，在 `document.body` 上派发同样的 keydown，由宿主的 Web 键盘适配器处理：
+    - 只在 Web（macOS/Windows 默认 ⌘⌥, / Ctrl+Alt+,）和 Linux 桌面端（DOM 适配器）生效；打开的是设置首页，不是「模型」分区，卡片里会写明。
+    - macOS/Windows 桌面端由原生键盘桥处理绑定，DOM 事件无效；Web Linux 默认没有绑定；用户也可能解绑。这些情况下不显示按钮，只给文字步骤（有绑定时写出按键），「重新检测」作为主按钮。
+13. **英文名**：Bead Break（中文名 拼豆小憩）。仓库名和包名仍是 `dsh-pindou`，标签页 kind 仍是 `pindou`。UI 文案只从 `src/core/i18n.ts` 的 `APP_NAME_ZH` 和 `APP_NAME_EN` 取名字；`package.json` 的 `displayName` 和 `description` 与它们保持一致。
 
 ### 5.1 `conversation.input.overlay` 定位核查
 

@@ -33,13 +33,14 @@ npx @deepseek-ai/dsh plugin --profile web remove dsh-pindou
 ## 怎么玩
 
 - **入口**：会话标题栏右侧的豆子按钮，或模型运行 3 秒后输入框上方出现的小胶囊「趁现在拼一个？」。胶囊每个会话最多出现两次，你开始打字、面板已打开或窗口太窄时不出现，可以在 ⋯ 菜单里关掉。
-- **模板**：12 个模板，豆板上有淡色的引导豆，顶部显示完成度；拼完会有庆祝动画，然后可以「熨烫」。
+- **模板**：12 个模板，豆板上有淡色的引导豆，顶部显示完成度；拼完先问要不要「熨烫」，熨烫定型后撒彩豆庆祝。
 - **工具**：画笔、取色、橡皮、填充、撤销/重做、清空（清空后 5 秒内可以撤回）。豆板支持 12 / 16 / 24 三种尺寸，16 种颜色。
 - **导出**：导出 PNG，或者直接「复制图片」到剪贴板（浏览器不支持时这个按钮不显示）。
 - **自动保存**：进度存在浏览器的 localStorage 里，关掉面板再打开还在。
 - **快捷键**：桌面端默认 ⌘⌥K / Ctrl+Alt+K 打开或收起面板，可以在设置的快捷键里改绑。Web 端没有默认键（Web 里这组键已经是 DSH 的「搜索会话」），需要的话在设置里自己绑。
 - **键盘与读屏**：方向键移动光标，空格/回车放豆，Delete 擦除；豆板是带标签的 grid，每格会读出位置、颜色和引导色。
 - **语言与主题**：跟随 DSH 的语言（中文优先，另有英文）和浅色/深色主题。
+- **暂不支持**（计划在 v2）：豆板缩放（豆板会按面板大小自动调整格子）；AI 生成时逐行落豆（现在是整张图纸一次出现）。
 
 ## AI 生成图纸
 
@@ -50,6 +51,8 @@ npx @deepseek-ai/dsh plugin --profile web remove dsh-pindou
 1. **DSH 当前的默认模型**（和你聊天用的是同一个，无需额外配置）。
 2. 如果 DSH 没有可用的模型路由，而环境变量里有 `DEEPSEEK_API_KEY`，直接调用 DeepSeek API（`deepseek-chat`）。
 3. 都没有时，AI 页会提示「还没有可用的模型」，模板和自由拼不受影响。
+
+检测只看凭据有没有配置，不会为此调用模型；账号登录等无法提前确认的情况会提示「首次生成会检测模型配置」。Key 失效时，第一次生成失败后会一直显示未配置，直到你点「重新检测」。DSH 没有给插件开放跳到「模型」设置的接口，「打开 DSH 设置」按钮只在能用设置快捷键打开时出现（打开的是设置首页），其他情况只给文字步骤。
 
 密钥只在 DSH 的服务端进程里读取，不会发到浏览器。
 
@@ -85,7 +88,7 @@ npx @deepseek-ai/dsh plugin --profile web remove dsh-pindou
 ```bash
 pnpm install
 pnpm run check      # lint + typecheck + 测试 + 构建 + bundle 形状检查
-pnpm run e2e        # 从源码启动 DSH Web，用 Playwright 跑一遍并截图（见 e2e/run.mjs）
+pnpm run e2e        # 从源码启动 DSH Web，用 Playwright 跑一遍，截图写进 e2e/.out（加 -- --update-assets 才会刷新 docs/assets）
 ```
 
 代码分三层：`src/core`（纯逻辑：豆板、模板、图纸校验修复、缓存，无 DOM）、`src/client`（React 界面与 DSH 客户端胶水）、`src/host`（DSH 服务端：模型调用）。DSH 的界面约束和设计决定记在 [docs/dsh-ui-constraints.md](docs/dsh-ui-constraints.md)。
