@@ -34,6 +34,7 @@
 - 以 **300px 宽** 为最小设计稿，同时保证在 300–900px 之间自适应；豆板按容器宽度等比缩放（正方形，最大约 480px）。
 - 高度不可假定：在 1366×768 的笔记本上正文区约 640–680px，需要内容可滚动；工具栏/色板放在豆板下方。
 - 手机全屏时注意 `safe-area-inset`，触控目标 ≥ 32px（色块 28px + 间距即可满足 WCAG 2.2 目标尺寸最低要求 24px）。
+- 宿主页面的 `<meta name="viewport">` 没有 `viewport-fit=cover`（DSH 源码 `apps/web/index.html`：`width=device-width, initial-scale=1`），所以 iOS 上 `env(safe-area-inset-*)` 恒为 0，插件里的 safe-area 规则不生效。无害：页面本身不铺进刘海和底部横条区域，插件不需要也不应该自己改 viewport。宿主将来加上 `viewport-fit=cover` 时这些规则会自动起作用（设计走查 N7）。
 - 宿主会在右栏面板元素上写 CSS 变量 `--dsh-sidebar-width`（当前右栏宽度，全屏时为 `100vw`）；更推荐对插件根节点用 `container-type: inline-size` 做容器查询。
 
 ## 3. 宿主主题变量

@@ -10,6 +10,9 @@ These review suggestions were left out of 0.1.0 on purpose:
 
 - **"Thinking" board while the model runs (design S4)**: a new idle state that needs its own design pass and copy; out of scope for a fix round.
 - **Wrap the stylesheet in `@scope (.pd-root, .pd-portal)` (design S12)**: nothing leaks out today (a unit test rejects any selector without the `pd-` prefix), and host styles leaking in are now handled by the isolation layer. `@scope` would change cascade proximity for all ~260 rules, so it needs its own visual pass on every screen rather than a late fix.
+- **Coach card placement (design N11)**: the card covers the bottom two rows of the board. Spec §4.2 places it exactly there ("卡片覆盖豆板下部，不遮挡调色盘"), so moving it above the board or before the first template needs the spec changed first; left as specified.
+- **Light-mode ghost dots for White and Cream**: the dark-theme rings (N10) bring every colour to ≥ 3:1 on the dark board. On the light board White and Cream ghosts stay below 3:1 as designed (a guide, not content); a light-mode ring needs a design decision.
+- **Replaced games survive a reload**: games kept for undo after switching patterns (N1) live in memory only; the current game is saved as before. Persisting the stack would change the storage format.
 - **Pin GitHub Actions to commit SHAs**: CI uses major-version tags (`actions/checkout@v4` and so on). Pinning needs a Renovate/Dependabot rule to keep the SHAs current; otherwise they go stale.
 
 ## [0.1.0] - 2026-10-29
@@ -44,6 +47,15 @@ First release of 拼豆小憩 · Bead Break.
 - **Contrast**: links use a darker blue in light mode (the host link blue is 4.2:1 on white). Disabled AI example chips look disabled.
 - **Bundle**: comments and whitespace in the stylesheet are stripped at build time; `check:bundle` also fails above 90% of the 40 KB gzip budget.
 - **E2E**: every screenshot is audited for icon size, round beads, squeezed or wrapped labels and text contrast in light and dark. New keyboard-only and English not-configured flows; `E2E_SELFCHECK_DIR` copies screenshots and reports to a folder outside the repo.
+
+### Fixed before release (design walkthrough round 2)
+
+- **Picking a pattern never loses work (N1)**: the same template (or the same AI pattern, keyed by its size and content) resumes the board while it is not ironed, as spec §4.3 says; an ironed board starts a new game. A pattern click can never match a free or generated board. Replaced games stay one undo away (up to five), and replacing unfinished work shows a "Started a new board · Undo" toast.
+- **Settings shortcut text (N2)**: host keycaps are read as the array the catalog gives (macOS `⌥⌘,`, elsewhere `Ctrl+Alt+,`) instead of being joined with commas.
+- **Done / result card (N8)**: it now takes the place of the toolbar, palette and footer in the page flow instead of floating over them; buttons are at least 32 px and wrap at narrow widths.
+- **Entry dot after closing the tab (N9)**: a generation that finishes while the tab is closed, hidden or the sidebar collapsed lights the entry dot; opening the panel clears it.
+- **Dark-mode guide dots (N10)**: every ghost dot gets a per-colour ring at ≥ 3:1 against the dark board, checked for all 16 colours in tests and on the live page.
+- Smaller items: undo in a toast returns focus to the board and a failed generation focuses Retry (N4); the busy pill budget survives a page reload (N5); continue, coach, toast and pill-close controls have 32 px hit areas (N6); the toast no longer wraps its button at 300 px and pauses while hovered or focused (N14); swatch badges shrink at ≤ 340 px (N12); ironed light beads keep a soft inner shade in the panel and the PNG (N13).
 
 ### Known limitations
 
