@@ -2,6 +2,14 @@
 
 **中文** · [English](./README.en.md)
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-demo-dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-demo-light.gif">
+    <img src="docs/assets/readme-demo-light.gif" width="800" alt="演示：在 DSH 等模型思考时打开拼豆小憩，选「爱心」模板逐颗拼满，点熨烫后得到定型完成的成品卡">
+  </picture>
+</p>
+
 模型在思考的时候，来拼几颗豆子。
 
 拼豆小憩是 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) Web 端的插件：在右侧边栏打开一块像素拼豆板，照着模板拼、自由拼，或者用一句话让模型生成图纸，拼完「熨烫」定型，导出 PNG。

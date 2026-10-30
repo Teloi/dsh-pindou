@@ -2,6 +2,14 @@
 
 [中文](./README.md) · **English**
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-demo-dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-demo-light.gif">
+    <img src="docs/assets/readme-demo-light.gif" width="800" alt="Demo: while the model thinks in DSH, open Bead Break, fill the Heart template bead by bead, then iron it into a finished piece">
+  </picture>
+</p>
+
 Place a few beads while the model is thinking.
 
 Bead Break is a plugin for the Web shell of [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It opens a pixel perler-bead board in the right sidebar: follow a template, draw freely, or describe a picture in one sentence and let the model draw the pattern. Iron it when you're done and save it as a PNG.
