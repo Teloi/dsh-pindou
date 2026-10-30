@@ -14,10 +14,6 @@ Place a few beads while the model is thinking.
 
 Bead Break is a plugin for the Web shell of [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It opens a pixel perler-bead board in the right sidebar: follow a template, draw freely, or describe a picture in one sentence and let the model draw the pattern. Iron it when you're done and save it as a PNG.
 
-<p align="center">
-  <img src="docs/assets/demo.gif" alt="Following the heart template, then ironing it" width="420">
-</p>
-
 | While the model is busy | Templates | Ironed |
 | --- | --- | --- |
 | ![The small pill above the composer](docs/assets/pill-light.png) | ![Template home with 12 templates](docs/assets/home-light.png) | ![The ironed heart](docs/assets/ironed-light.png) |

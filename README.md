@@ -14,10 +14,6 @@
 
 拼豆小憩是 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) Web 端的插件：在右侧边栏打开一块像素拼豆板，照着模板拼、自由拼，或者用一句话让模型生成图纸，拼完「熨烫」定型，导出 PNG。
 
-<p align="center">
-  <img src="docs/assets/demo.gif" alt="照着爱心模板放豆、拼完熨烫" width="420">
-</p>
-
 | 模型忙时的提示 | 模板 | 熨烫完成 |
 | --- | --- | --- |
 | ![输入框上方的「趁现在拼一个？」小胶囊](docs/assets/pill-light.png) | ![模板首页，12 个模板](docs/assets/home-light.png) | ![熨烫后的爱心](docs/assets/ironed-light.png) |
