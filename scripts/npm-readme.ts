@@ -7,8 +7,13 @@
 // them per ref); only the packed copy is pinned to the release ref here:
 //   images (img src, source srcset, ![](…))  -> raw.githubusercontent.com/<slug>/<ref>/<path>
 //   links  (a href, [](…), [id]: …)          -> github.com/<slug>/blob|tree/<ref>/<path>
-// Anchors (#…), absolute URLs (any scheme, //host) and fenced or inline code are
-// left alone. See scripts/pack-npm.mjs.
+// Absolute URLs of this repository at `main` / `HEAD` (raw, blob, tree; also when
+// URL-encoded inside another URL, e.g. the shields.io dynamic version / engines
+// badges' `?url=https%3A%2F%2Fraw.githubusercontent.com%2F<slug>%2Fmain%2F…`) get
+// the same ref, so the npm page shows what the release commit says. The CI status
+// badge is the one deliberate exception (CI_BADGES): it keeps following `main`.
+// Anchors (#…), other absolute URLs (any scheme, //host) and fenced or inline code
+// are left alone. See scripts/pack-npm.mjs.
 
 /** Fenced code is shown as text on both sites: never rewrite or flag inside it. */
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
@@ -146,7 +151,55 @@ export function readmeRefs(md: string): ReadmeRef[] {
 export interface PinnedPath {
   /** Repository path without query or fragment, decoded, no trailing slash. */
   path: string
-  kind: 'image' | 'link'
+  /** `embedded`: a file of this repository named by an absolute (possibly encoded) URL, e.g. a badge's package.json. */
+  kind: 'image' | 'link' | 'embedded'
+}
+
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** `/` as written in a URL, or percent-encoded once or more (`%2F`, `%252F`, …). */
+const SEP = '(?:/|%(?:25)*2F)'
+
+/** raw / blob / tree / raw-on-github URL of `slug`, plain or encoded; group 2 is the ref. */
+function ownRefPattern(slug: string): RegExp {
+  const [owner, repo] = slug.split('/').map(escape) as [string, string]
+  return new RegExp(`((?:raw\\.githubusercontent\\.com${SEP}${owner}${SEP}${repo}|github\\.com${SEP}${owner}${SEP}${repo}${SEP}(?:blob|tree|raw))${SEP})([^/?#&%\\s"'<>]+)(?=${SEP}|$|[?#&])`, 'gi')
+}
+
+/** Every decoding of `url` up to a fixed point (nested `?url=` parameters may be encoded several times). */
+export function decodings(url: string): string[] {
+  const out = [url]
+  for (let s = url, i = 0; i < 8; i++) {
+    let d: string
+    try { d = decodeURIComponent(s) } catch { break }
+    if (d === s) break
+    out.push(d)
+    s = d
+  }
+  return out
+}
+
+/**
+ * The CI status badge follows `main` on purpose (it reports the branch, not the
+ * release). Only these exact image URLs may name `main` in a packed README.
+ */
+export function isCiBadge(kind: RefKind, url: string, slug: string): boolean {
+  if (kind !== 'src' && kind !== 'markdown-image') return false
+  const s = escape(slug)
+  const query = '(?:&[\\w.%=-]*)*'
+  return new RegExp(`^https://img\\.shields\\.io/github/actions/workflow/status/${s}/ci\\.yml\\?branch=main${query}$`, 'i').test(url)
+    || new RegExp(`^https://github\\.com/${s}/actions/workflows/ci\\.yml/badge\\.svg\\?branch=main${query}$`, 'i').test(url)
+}
+
+/** `main` / `HEAD` of this repository in an absolute URL -> `ref`; plain and encoded alike. */
+function pinAbsolute(url: string, slug: string, ref: string): string {
+  return url.replace(ownRefPattern(slug), (all, head: string, at: string) => (at === 'main' || at === 'HEAD' ? head + ref : all))
+}
+
+/** Repository paths that an absolute URL names at `ref` (after full decoding). */
+function embeddedPaths(url: string, slug: string, ref: string): string[] {
+  const decoded = decodings(url).at(-1)!
+  const re = new RegExp(`(?:raw\\.githubusercontent\\.com/${escape(slug)}|github\\.com/${escape(slug)}/(?:blob|tree|raw))/${escape(ref)}/([^?#&\\s"'<>]+)`, 'gi')
+  return [...decoded.matchAll(re)].map((m) => m[1]!.replace(/\/+$/, ''))
 }
 
 export interface PinOptions {
@@ -167,7 +220,13 @@ export function pinReadme(md: string, { slug, ref, objectType }: PinOptions): { 
   const raw = rawBase(slug, ref)
   const paths: PinnedPath[] = []
   const text = mapRefs(md, ({ kind, url }) => {
-    if (!isRelative(url)) return undefined
+    if (!isRelative(url)) {
+      if (isCiBadge(kind, url, slug)) return undefined
+      const next = pinAbsolute(url, slug, ref)
+      if (next === url) return undefined
+      for (const path of embeddedPaths(next, slug, ref)) paths.push({ path, kind: 'embedded' })
+      return next
+    }
     const rel = repoPath(url)
     const { path, suffix } = splitPath(rel)
     const clean = decodeURIComponent(path).replace(/\/+$/, '')
@@ -185,14 +244,21 @@ export function pinReadme(md: string, { slug, ref, objectType }: PinOptions): { 
 
 /**
  * Problems that make a packed README unfit for npm: any relative image, srcset or
- * link left over, or an image/blob/tree URL of this repository at another ref.
+ * link left over; a raw/blob/tree URL of this repository at another ref, also when
+ * it is URL-encoded inside another URL (every level of decoding is checked); and any
+ * other URL of this repository that names `main` or `HEAD` (a path segment, `@main`
+ * or a `=main` query value), except the CI status badge (isCiBadge).
  */
 export function packedReadmeProblems(md: string, slug: string, ref: string): string[] {
-  const own = [`https://raw.githubusercontent.com/${slug}/`, `https://github.com/${slug}/blob/`, `https://github.com/${slug}/tree/`]
-  const pinned = [rawBase(slug, ref), webBase(slug, ref, 'blob'), webBase(slug, ref, 'tree')]
+  const own = ownRefPattern(slug)
+  const mentions = new RegExp(escape(slug), 'i')
+  const atMain = /[/=@](?:main|HEAD)(?=$|[/?#&])/
   return readmeRefs(md).flatMap(({ line, kind, url }) => {
     if (isRelative(url)) return [`line ${line}: relative ${kind} "${url}"`]
-    if (own.some((o) => url.startsWith(o)) && !pinned.some((p) => url.startsWith(p))) return [`line ${line}: ${kind} "${url}" is not pinned to ${ref}`]
+    const levels = decodings(url)
+    if (levels.some((d) => [...d.matchAll(own)].some((m) => m[2] !== ref))) return [`line ${line}: ${kind} "${url}" is not pinned to ${ref}`]
+    if (isCiBadge(kind, url, slug)) return []
+    if (levels.some((d) => mentions.test(d) && atMain.test(d))) return [`line ${line}: ${kind} "${url}" points at main/HEAD of ${slug}`]
     return []
   })
 }
