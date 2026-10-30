@@ -18,16 +18,52 @@
 
 ## 安装
 
+需要 DSH **0.2.1 或更高版本**（`package.json` 的 `engines.dsh` 为 `>=0.2.1`）。版本不满足时 DSH 会拒绝安装，提示 `is incompatible with dsh …`，不会装任何东西。预发布版也按这条规则比较，所以 `0.2.1-rc.*` 不满足，`0.2.2-alpha.*` 满足。如果 npm 上 `@deepseek-ai/dsh` 的 `latest` 还是 `0.2.1-rc.*`，可以先用 `npx @deepseek-ai/dsh@alpha` 代替下面命令里的 `npx @deepseek-ai/dsh`。
+
+插件只有 Web 界面，可以装进 DSH 的 Web 端和桌面客户端。TUI、ACP 这类没有 Web 界面的 profile 不支持。
+
+不需要 `allowBuilds`：仓库里已经提交了构建好的 `lib/`，也没有任何安装脚本。
+
+### Web
+
 ```bash
 npx @deepseek-ai/dsh plugin --profile web add github:Teloi/dsh-pindou
 ```
 
-然后重启 `dsh --profile web`。不需要 `allowBuilds`：仓库里已经提交了构建好的 `lib/`，也没有任何安装脚本。
+然后重启 `dsh --profile web`。确认生效：
 
-卸载：
+- `npx @deepseek-ai/dsh plugin --profile web list` 的列表里有 `dsh-pindou`。
+- 打开 Web 页面，会话标题栏右侧出现豆子按钮。
+
+也可以不用命令行，在 Web 侧栏的**插件**页里点**添加插件** → **安装第三方插件**，填 `github:Teloi/dsh-pindou`（界面名称以 DSH 0.2.2 为准，下同）。
+
+### 桌面客户端
+
+桌面客户端（macOS、Windows）有自己的 profile（`$DSH_HOME/profiles/desktop`；默认 macOS 是 `~/.dsh/profiles/desktop`，Windows 是 `%USERPROFILE%\.dsh\profiles\desktop`），和 Web 端的 profile 分开，要单独安装。用 npm 装的 `dsh` 不能改它：`npx @deepseek-ai/dsh plugin --profile desktop …` 会直接报错 `profile "desktop" is managed exclusively by the Electron application`。可以用下面两种方式之一：
+
+- **在客户端里装**：在侧栏打开**插件**，点**添加插件** → **安装第三方插件**，填 `github:Teloi/dsh-pindou`。页面提示需要重启时，重启客户端。
+- **用客户端自带的 `dsh` 命令装**：先在应用菜单的**管理 dsh 命令…**里安装命令。客户端至少要打开过一次，然后完全退出，再运行：
+
+  ```bash
+  dsh plugin --profile desktop add github:Teloi/dsh-pindou
+  ```
+
+  重新打开客户端后生效。如果终端里的 `dsh` 是 npm 装的那个，上面的命令会报同样的错，这时用**管理 dsh 命令…**里显示的完整路径运行。
+
+确认生效：**插件**页的**已安装插件**里出现本插件，会话标题栏右侧出现豆子按钮。可选配置写在桌面 profile 目录下的 `cordis.patch.yml` 里，键和 Web 端一样（见下文「可选配置」）。
+
+## 卸载
+
+Web：
 
 ```bash
 npx @deepseek-ai/dsh plugin --profile web remove dsh-pindou
+```
+
+桌面客户端：在**插件**页里卸载；或者先完全退出客户端，再用客户端自带的 `dsh` 命令运行：
+
+```bash
+dsh plugin --profile desktop remove dsh-pindou
 ```
 
 ## 怎么玩
