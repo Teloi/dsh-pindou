@@ -1376,7 +1376,10 @@ try {
   const p = await newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'light' })
   await startSession(p, '帮我梳理一下这个仓库的结构')
   check('entry button rendered in the session header', await p.locator('.pd-entry').isVisible())
-  check('entry shows the busy dot while the model runs', await p.locator('.pd-entry.pd-busy').count() === 1)
+  // The entry can render a moment before the host reports the run: on DSH 0.2.1-rc.3 the dot came
+  // about 250 ms after the button (it is there at once on 0.2.2-alpha.2), so wait for it like the pill below.
+  const busyDot = await p.locator('.pd-entry.pd-busy').waitFor({ timeout: 5000 }).then(() => true, () => false)
+  check('entry shows the busy dot while the model runs', busyDot && await p.locator('.pd-entry.pd-busy').count() === 1)
   const pill = p.locator('.pd-pill')
   await pill.waitFor({ timeout: 8000 })
   const geo = await p.evaluate(() => {

@@ -18,6 +18,13 @@ These review suggestions were left out of 0.1.0 on purpose:
 - **Replaced games survive a reload** (known limitation of 0.1.0, see below): persist the games kept for undo after switching patterns (N1), so that undo still reaches them after a reload. This changes the storage format.
 - **Pin GitHub Actions to commit SHAs**: CI uses major-version tags (`actions/checkout@v4` and so on). Pinning needs a Renovate/Dependabot rule to keep the SHAs current; otherwise they go stale.
 
+## [0.2.1] - 2026-10-30
+
+### Fixed
+
+- **Installs on DSH 0.2.1 release candidates, including the desktop app.** `engines.dsh` was `>=0.2.1`, and DSH compares pre-releases too, so 0.2.1-rc.3 (bundled with the desktop app) and 0.2.1-rc.5 (npm `latest`) refused the plugin with `is incompatible with dsh`. It is now `>=0.2.1-rc.3`; the full E2E suite passes on rc.3 and rc.5, and the host features the plugin uses, `require.async` included, are already there in rc.3. Versions before rc.3 are still refused.
+- **在 DSH 0.2.1 的候选版（包括桌面客户端）上能装了。** 原来 `engines.dsh` 是 `>=0.2.1`，DSH 比较时也算预发布版，所以桌面客户端自带的 0.2.1-rc.3 和 npm `latest` 的 0.2.1-rc.5 都会以 `is incompatible with dsh` 拒装。现在改为 `>=0.2.1-rc.3`：完整 E2E 在 rc.3 和 rc.5 上都通过，插件用到的宿主功能（包括 `require.async`）在 rc.3 里都已经有了。rc.3 之前的版本仍会被拒绝。
+
 ## [0.2.0] - 2026-10-30
 
 ### Added
@@ -89,6 +96,7 @@ First release of 拼豆小憩 · Bead Break.
 - No board zoom (spec §3.4) and no row-by-row AI drop (spec §4.7); both moved to v2. See `docs/dsh-ui-constraints.md` §5.
 - Credentials are checked without a model call, so a configured but invalid key is only found on the first generation.
 
-[Unreleased]: https://github.com/Teloi/dsh-pindou/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Teloi/dsh-pindou/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Teloi/dsh-pindou/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Teloi/dsh-pindou/compare/v0.1.0...feat/v0.2
 [0.1.0]: https://github.com/Teloi/dsh-pindou/releases/tag/v0.1.0
