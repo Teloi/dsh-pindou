@@ -52,6 +52,15 @@ npx @deepseek-ai/dsh plugin --profile web add github:Teloi/dsh-pindou
 
 确认生效：**插件**页的**已安装插件**里出现本插件，会话标题栏右侧出现豆子按钮。可选配置写在桌面 profile 目录下的 `cordis.patch.yml` 里，键和 Web 端一样（见下文「可选配置」）。
 
+### 按包名安装
+
+本插件发布到 npm 之后，上面的 `github:Teloi/dsh-pindou` 都可以换成包名 `dsh-pindou`：
+
+- **命令行**：Web 端运行 `npx @deepseek-ai/dsh plugin --profile web add dsh-pindou`；桌面客户端退出后运行 `dsh plugin --profile desktop add dsh-pindou`（用客户端自带的 `dsh`，同上）。
+- **客户端界面**：在**插件**页点**添加插件** → **安装第三方插件**，在**包名或地址**里填 `dsh-pindou`。
+
+这需要包已经发布到 npm。镜像源（比如界面**安装源**里的**中国大陆镜像源**）的同步可能有延迟。刚发布时如果装不上或者没装到最新版，可以改用 **npm 官方源**，或者稍后再试。
+
 ## 卸载
 
 Web：

@@ -54,6 +54,15 @@ The desktop app (macOS, Windows) has its own profile (`$DSH_HOME/profiles/deskto
 
 To check it worked: the plugin shows under **Installed plugins** on the **Plugins** page, and the bead button appears on the right of the session header. Optional configuration goes in `cordis.patch.yml` in the desktop profile directory, with the same keys as on the Web (see "Optional configuration" below).
 
+### Install by package name
+
+Once the plugin is published to npm, you can use the package name `dsh-pindou` in place of `github:Teloi/dsh-pindou` anywhere above:
+
+- **Command line**: on the Web, run `npx @deepseek-ai/dsh plugin --profile web add dsh-pindou`. For the desktop app, quit it and run `dsh plugin --profile desktop add dsh-pindou` (with the app's own `dsh`, as above).
+- **In the UI**: on the **Plugins** page, choose **Add plugin** → **Install a third-party plugin** and enter `dsh-pindou` under **Package name or address**.
+
+This needs the package to be on npm already. Mirrors, such as the **Mainland China mirror** under **Registry** in the dialog, can lag behind npm. Right after a release, if the install fails or does not pick up the newest version, switch to the **Official npm registry** or try again later.
+
 ## Uninstall
 
 Web:
