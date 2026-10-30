@@ -43,14 +43,15 @@ const DEEPSEEK_API_HOST = 'api.deepseek.com'
 
 /**
  * Whether the direct request should carry DeepSeek's `thinking` switch: always
- * on DeepSeek's own API, and for `deepseek-*` models behind another
- * OpenAI-compatible host. Other models on other hosts never get the field, so
- * a strict server cannot reject it as unknown.
+ * on DeepSeek's own API, and for DeepSeek's own model ids (`deepseek-…` with no
+ * `/`, e.g. `deepseek-flash`) behind another OpenAI-compatible host. Namespaced
+ * ids such as `deepseek-ai/DeepSeek-V3` and other models on other hosts never
+ * get the field, so a strict server cannot reject it as unknown.
  */
 export function wantsThinkingOff(baseUrl: string, model: string): boolean {
   let host = ''
   try { host = new URL(baseUrl).hostname.toLowerCase() } catch { /* validated in resolveConfig */ }
-  return host === DEEPSEEK_API_HOST || /^deepseek-/i.test(model)
+  return host === DEEPSEEK_API_HOST || /^deepseek-[^/]*$/i.test(model)
 }
 
 function num(v: unknown): number {

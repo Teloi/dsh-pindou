@@ -109,7 +109,7 @@ describe('generator routes', () => {
     expect(await junk.generate('cat', 12)).toMatchObject({ ok: false, error: 'upstream' })
   })
 
-  it('defaults the direct fallback to deepseek-flash (deepseek-chat was retired on 2026-07-24)', () => {
+  it('defaults the direct fallback to deepseek-flash (deepseek-chat was announced as discontinued on 2026-07-24)', () => {
     expect(resolveConfig(undefined).fallbackModel).toBe('deepseek-flash')
     expect(resolveConfig({}).fallbackModel).toBe('deepseek-flash')
     const g = new Generator(deps({ env: () => 'sk-test' }))
@@ -150,13 +150,25 @@ describe('generator routes', () => {
     const proxied = await run({ baseUrl: 'https://proxy.example.com/v1', fallbackModel: 'deepseek-v4-pro' })
     expect(proxied.url).toBe('https://proxy.example.com/v1/chat/completions')
     expect(proxied.body).toMatchObject({ model: 'deepseek-v4-pro', thinking: { type: 'disabled' } })
+    // Same on another host by its bare DeepSeek id.
+    const proxiedFlash = await run({ baseUrl: 'https://proxy.example.com/v1', fallbackModel: 'deepseek-flash' })
+    expect(proxiedFlash.body).toMatchObject({ model: 'deepseek-flash', thinking: { type: 'disabled' } })
+    // A namespaced id on a third-party host (vLLM, SiliconFlow…) is not DeepSeek's API: no thinking field.
+    for (const model of ['deepseek-ai/DeepSeek-V3', 'DeepSeek-AI/deepseek-v3']) {
+      const namespaced = await run({ baseUrl: 'https://vllm.example.com/v1', fallbackModel: model })
+      expect(namespaced.body).toMatchObject({ model })
+      expect(namespaced.body).not.toHaveProperty('thinking')
+    }
     // Some other model on some other host: no DeepSeek-only field that a strict server could reject.
     const other = await run({ baseUrl: 'https://llm.example.com/v1', fallbackModel: 'qwen-plus' })
     expect(other.body).toMatchObject({ model: 'qwen-plus' })
     expect(other.body).not.toHaveProperty('thinking')
     // The official host always gets the toggle, whatever the model is called.
-    const official = await run({ fallbackModel: 'my-alias' })
-    expect(official.body).toMatchObject({ model: 'my-alias', thinking: { type: 'disabled' } })
+    for (const model of ['my-alias', 'deepseek-ai/DeepSeek-V3', 'qwen-plus']) {
+      const official = await run({ fallbackModel: model })
+      expect(official.url).toBe('https://api.deepseek.com/chat/completions')
+      expect(official.body).toMatchObject({ model, thinking: { type: 'disabled' } })
+    }
   })
 
   it('direct route ignores reasoning_content and keeps only the answer', async () => {
@@ -175,7 +187,7 @@ describe('generator routes', () => {
     expect(await spent.generate('heart', 16)).toMatchObject({ ok: false, error: 'parse' })
   })
 
-  it('a retired or unknown model name surfaces as an upstream error, not as not-configured', async () => {
+  it('an unavailable or unknown model name surfaces as an upstream error, not as not-configured', async () => {
     for (const status of [400, 422]) {
       const g = new Generator(deps({ env: () => 'sk-test', fetch: (async () => Response.json({ error: { message: 'Model Not Exist' } }, { status })) as unknown as typeof fetch }))
       expect(await g.generate('cat', 12)).toMatchObject({ ok: false, error: 'upstream', message: `HTTP ${status}` })

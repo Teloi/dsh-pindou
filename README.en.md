@@ -127,7 +127,7 @@ All keys are optional. Unknown keys or invalid values make the plugin fail to lo
 | `provider` + `model` | — | Pin one DSH model route; give both together |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | Environment variable read by the direct fallback |
 | `baseUrl` | `https://api.deepseek.com` | Direct fallback endpoint (https only; http://localhost for testing) |
-| `fallbackModel` | `deepseek-flash` | Model used by the direct fallback (DeepSeek retired `deepseek-chat` on 2026-07-24) |
+| `fallbackModel` | `deepseek-flash` | Model used by the direct fallback (`deepseek-chat` was announced as discontinued on 2026-07-24) |
 | `maxTokens` | `1024` | Output cap per generation |
 | `timeoutMs` | `30000` | Timeout per generation |
 | `minIntervalMs` | `1500` | Minimum gap between two generations |

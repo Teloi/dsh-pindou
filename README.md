@@ -125,7 +125,7 @@ dsh plugin --profile desktop remove dsh-pindou
 | `provider` + `model` | — | 固定使用某个 DSH 模型路由，两个必须一起给 |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | 直连兜底读取的环境变量名 |
 | `baseUrl` | `https://api.deepseek.com` | 直连兜底的地址（只允许 https，测试时可用 http://localhost） |
-| `fallbackModel` | `deepseek-flash` | 直连兜底用的模型（DeepSeek 已于 2026-07-24 停用 `deepseek-chat`） |
+| `fallbackModel` | `deepseek-flash` | 直连兜底用的模型（`deepseek-chat` 官方已公告停用（2026-07-24）） |
 | `maxTokens` | `1024` | 每次生成的输出上限 |
 | `timeoutMs` | `30000` | 单次生成超时 |
 | `minIntervalMs` | `1500` | 两次生成的最短间隔 |
