@@ -10,8 +10,8 @@ const changelog = read('CHANGELOG.md')
 const pkg = JSON.parse(read('package.json')) as { version: string }
 
 describe('docs for v0.2 (audit R-5)', () => {
-  it('package.json is 0.2.0 and the changelog has its section, newest release first', () => {
-    expect(pkg.version).toBe('0.2.0')
+  it('package.json is 0.2.1 and the changelog has its section, newest release first', () => {
+    expect(pkg.version).toBe('0.2.1')
     const released = [...changelog.matchAll(/^## \[(\d+\.\d+\.\d+)\]/gm)].map(m => m[1])
     expect(released[0]).toBe(pkg.version)
   })

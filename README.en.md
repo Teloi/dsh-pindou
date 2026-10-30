@@ -20,7 +20,7 @@ The screenshots show the Chinese UI; the plugin follows DSH's language and also 
 
 ## Install
 
-Requires DSH **0.2.1 or later** (`engines.dsh` in `package.json` is `>=0.2.1`). On an older DSH the install is refused with `is incompatible with dsh …` and nothing is installed. Pre-releases are compared by the same rule, so `0.2.1-rc.*` does not qualify and `0.2.2-alpha.*` does. If `latest` of `@deepseek-ai/dsh` on npm is still `0.2.1-rc.*`, use `npx @deepseek-ai/dsh@alpha` in place of `npx @deepseek-ai/dsh` in the commands below.
+Requires DSH **0.2.1-rc.3 or later** (`engines.dsh` in `package.json` is `>=0.2.1-rc.3`). The 0.2.1-rc.3 bundled with the desktop app, 0.2.1-rc.5 on npm, and anything newer all qualify. On an older DSH the install is refused with `is incompatible with dsh …` and nothing is installed.
 
 The plugin has a Web UI only, so it installs into DSH's Web shell and the desktop app. Profiles without the Web UI, such as TUI and ACP, are not supported.
 

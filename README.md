@@ -18,7 +18,7 @@
 
 ## 安装
 
-需要 DSH **0.2.1 或更高版本**（`package.json` 的 `engines.dsh` 为 `>=0.2.1`）。版本不满足时 DSH 会拒绝安装，提示 `is incompatible with dsh …`，不会装任何东西。预发布版也按这条规则比较，所以 `0.2.1-rc.*` 不满足，`0.2.2-alpha.*` 满足。如果 npm 上 `@deepseek-ai/dsh` 的 `latest` 还是 `0.2.1-rc.*`，可以先用 `npx @deepseek-ai/dsh@alpha` 代替下面命令里的 `npx @deepseek-ai/dsh`。
+需要 DSH **0.2.1-rc.3 或更高版本**（`package.json` 的 `engines.dsh` 为 `>=0.2.1-rc.3`）。桌面客户端自带的 0.2.1-rc.3、npm 上的 0.2.1-rc.5 和之后的版本都满足。版本更低时 DSH 会拒绝安装，提示 `is incompatible with dsh …`，不会装任何东西。
 
 插件只有 Web 界面，可以装进 DSH 的 Web 端和桌面客户端。TUI、ACP 这类没有 Web 界面的 profile 不支持。
 
