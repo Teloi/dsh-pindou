@@ -41,7 +41,7 @@ Then restart `dsh --profile web`. To check it worked:
 - `npx @deepseek-ai/dsh plugin --profile web list` lists `dsh-pindou`.
 - In the Web page, the bead button appears on the right of the session header.
 
-Without the command line: open **Plugins** in the Web sidebar, choose **Add plugin** → **Install a third-party plugin**, and enter `github:Teloi/dsh-pindou` (UI names as of DSH 0.2.2, here and below).
+Without the command line: open **Plugins** in the Web sidebar, choose **Add plugin** → **Install a third-party plugin**, and enter `github:Teloi/dsh-pindou` (UI names as of DSH 0.2.1-rc.3, the same in 0.2.2; here and below).
 
 ### Desktop app
 

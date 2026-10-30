@@ -39,7 +39,7 @@ npx @deepseek-ai/dsh plugin --profile web add github:Teloi/dsh-pindou
 - `npx @deepseek-ai/dsh plugin --profile web list` 的列表里有 `dsh-pindou`。
 - 打开 Web 页面，会话标题栏右侧出现豆子按钮。
 
-也可以不用命令行，在 Web 侧栏的**插件**页里点**添加插件** → **安装第三方插件**，填 `github:Teloi/dsh-pindou`（界面名称以 DSH 0.2.2 为准，下同）。
+也可以不用命令行，在 Web 侧栏的**插件**页里点**添加插件** → **安装第三方插件**，填 `github:Teloi/dsh-pindou`（界面名称以 DSH 0.2.1-rc.3 为准，0.2.2 相同，下同）。
 
 ### 桌面客户端
 
