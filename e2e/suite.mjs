@@ -1459,8 +1459,12 @@ try {
   check('entry button rendered in the session header', await p.locator('.pd-entry').isVisible())
   // The entry can render a moment before the host reports the run: on DSH 0.2.1-rc.3 the dot came
   // about 250 ms after the button (it is there at once on 0.2.2-alpha.2), so wait for it like the pill below.
+  // The wait is logged (audit E-4) so a dot that gets slower shows up in the log even though it passes.
+  const busyT0 = Date.now()
   const busyDot = await p.locator('.pd-entry.pd-busy').waitFor({ timeout: 5000 }).then(() => true, () => false)
-  check('entry shows the busy dot while the model runs', busyDot && await p.locator('.pd-entry.pd-busy').count() === 1)
+  const busyMs = Date.now() - busyT0
+  check('entry shows the busy dot while the model runs', busyDot && await p.locator('.pd-entry.pd-busy').count() === 1, JSON.stringify({ ms: busyMs }))
+  if (busyDot && busyMs > 1000) log(`  ⚠ the busy dot took ${busyMs} ms after the entry button (over 1000 ms); going on`)
   const pill = p.locator('.pd-pill')
   await pill.waitFor({ timeout: 8000 })
   const geo = await p.evaluate(() => {
