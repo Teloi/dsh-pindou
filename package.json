@@ -66,7 +66,9 @@
     "test:watch": "vitest",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run check:bundle",
     "e2e": "node e2e/run.mjs",
-    "check:bundle": "node scripts/check-bundle.mjs"
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "pack:npm": "node scripts/pack-npm.mjs",
+    "prepublishOnly": "node -e \"console.error('请用 pnpm pack:npm 产出的 tgz 发布：npm publish <tgz> --ignore-scripts / publish the tgz produced by pack:npm');process.exit(1)\""
   },
   "peerDependencies": {
     "react": "^18.2.0"
