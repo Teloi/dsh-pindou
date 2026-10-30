@@ -18,7 +18,11 @@
  */
 declare const require: unknown
 
-/** Can the host load package chunks? (`require.async`, DSH ≥ 0.2.2.) */
+/**
+ * Can the host load package chunks? `require.async` is there from DSH 0.2.1-rc.3 on, the oldest
+ * version engines.dsh admits: @deepseek-ai/dsh-client-modules@0.2.1-rc.3 lib/client.js:842, from
+ * packages/client/modules/src/client/system.ts:338 at tag dsh-v0.2.1-rc.3.
+ */
 export function hostLoadsChunks(): boolean {
   return typeof require === 'function' && typeof (require as { async?: unknown }).async === 'function'
 }
