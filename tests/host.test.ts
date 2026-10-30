@@ -109,7 +109,7 @@ describe('generator routes', () => {
     expect(await junk.generate('cat', 12)).toMatchObject({ ok: false, error: 'upstream' })
   })
 
-  it('defaults the direct fallback to deepseek-flash (deepseek-chat was announced as discontinued on 2026-07-24)', () => {
+  it('defaults the direct fallback to deepseek-flash (deepseek-chat: discontinuation announced for 2026-07-24, still routed to deepseek-flash, no longer listed)', () => {
     expect(resolveConfig(undefined).fallbackModel).toBe('deepseek-flash')
     expect(resolveConfig({}).fallbackModel).toBe('deepseek-flash')
     const g = new Generator(deps({ env: () => 'sk-test' }))
@@ -141,7 +141,7 @@ describe('generator routes', () => {
       const r = await g.generate('heart', 16)
       return { r, body: bodies[0]!, url: urls[0]!, route: g.route(), status: await g.status() }
     }
-    // Legacy name kept on purpose by the user: honoured as given.
+    // Legacy name kept on purpose by the user: honoured as given (DeepSeek still routes it to deepseek-flash today).
     const legacy = await run({ fallbackModel: 'deepseek-chat' })
     expect(legacy.body).toMatchObject({ model: 'deepseek-chat', thinking: { type: 'disabled' } })
     expect(legacy.r).toMatchObject({ ok: true, model: 'deepseek/deepseek-chat' })
@@ -187,7 +187,7 @@ describe('generator routes', () => {
     expect(await spent.generate('heart', 16)).toMatchObject({ ok: false, error: 'parse' })
   })
 
-  it('an unavailable or unknown model name surfaces as an upstream error, not as not-configured', async () => {
+  it('a model name the provider rejects surfaces as an upstream error, not as not-configured', async () => {
     for (const status of [400, 422]) {
       const g = new Generator(deps({ env: () => 'sk-test', fetch: (async () => Response.json({ error: { message: 'Model Not Exist' } }, { status })) as unknown as typeof fetch }))
       expect(await g.generate('cat', 12)).toMatchObject({ ok: false, error: 'upstream', message: `HTTP ${status}` })

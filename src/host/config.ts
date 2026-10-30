@@ -8,9 +8,10 @@ export interface PindouConfig {
   readonly apiKeyEnv: string
   readonly baseUrl: string
   /**
-   * Model used by the direct fallback. DeepSeek announced `deepseek-chat` as
-   * discontinued on 2026-07-24; `deepseek-flash` is the current name (thinking on by default,
-   * so the direct call turns it off).
+   * Model used by the direct fallback. DeepSeek has announced that
+   * `deepseek-chat` will be discontinued (planned for 2026-07-24); it is still
+   * routed to `deepseek-flash` but no longer in the official model list.
+   * `deepseek-flash` thinks by default, so the direct call turns thinking off.
    */
   readonly fallbackModel: string
   /** Hard output cap per generation (reasoning included on reasoning models). */
