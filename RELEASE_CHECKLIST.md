@@ -17,9 +17,9 @@
       `拼豆小憩 Bead Break — 等模型思考时拼一会儿的像素拼豆小游戏 · a tiny perler-bead pixel game for DeepSeek Harness (DSH) while the model is busy`
 - [ ] 仓库 About → Website 可留空或填 README 链接
 - [ ] awesome-dsh-hub 每小时刷新一次；约 1 小时后确认插件出现在列表里（应归入 fun/游戏类）
+- [ ] 发布后向 awesome 列表投稿（提 PR 前须经主人确认）
 
 这次不做 / Not in this release:
 
 - 不发布到 npm
-- 不给 awesome 列表提 PR（靠 topic 自动收录）
 - 不打 tag、不建 GitHub Release
