@@ -173,7 +173,7 @@ One sentence (e.g. "an orange cat") → one model call → the pattern is valida
 Model selection, in order:
 
 1. **DSH's current default model** (the one you chat with; no extra setup).
-2. If DSH has no usable model route and `DEEPSEEK_API_KEY` is set, the DeepSeek API is called directly (`deepseek-chat`).
+2. If DSH has no usable model route and `DEEPSEEK_API_KEY` is set, the DeepSeek API is called directly (`deepseek-flash`, thinking off).
 3. Otherwise the AI page says no model is available; templates and free drawing keep working.
 
 The check only looks at whether credentials are configured and never calls the model for it; where that can't be known up front (account sign-in, for example) the page says the first generation will check the setup. If a key turns out to be invalid, the page keeps showing "not configured" after the first failed generation until you press "Check again". DSH gives plugins no way to open its Models settings, so "Open DSH Settings" only appears where the Settings shortcut can open Settings (on its home page); otherwise you get written steps.
@@ -198,7 +198,7 @@ All keys are optional. Unknown keys or invalid values make the plugin fail to lo
 | `provider` + `model` | — | Pin one DSH model route; give both together |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | Environment variable read by the direct fallback |
 | `baseUrl` | `https://api.deepseek.com` | Direct fallback endpoint (https only; http://localhost for testing) |
-| `fallbackModel` | `deepseek-chat` | Model used by the direct fallback |
+| `fallbackModel` | `deepseek-flash` | Model used by the direct fallback. DeepSeek has announced that `deepseek-chat` will be discontinued (planned for 2026-07-24); it is still routed to `deepseek-flash` but no longer in the official model list |
 | `maxTokens` | `1024` | Output cap per generation |
 | `timeoutMs` | `30000` | Timeout per generation |
 | `minIntervalMs` | `1500` | Minimum gap between two generations |

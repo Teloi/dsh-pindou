@@ -39,6 +39,21 @@ class GenerationError extends Error {
 
 export const MAX_BODY_BYTES = 2048
 
+const DEEPSEEK_API_HOST = 'api.deepseek.com'
+
+/**
+ * Whether the direct request should carry DeepSeek's `thinking` switch: always
+ * on DeepSeek's own API, and for DeepSeek's own model ids (`deepseek-…` with no
+ * `/`, e.g. `deepseek-flash`) behind another OpenAI-compatible host. Namespaced
+ * ids such as `deepseek-ai/DeepSeek-V3` and other models on other hosts never
+ * get the field, so a strict server cannot reject it as unknown.
+ */
+export function wantsThinkingOff(baseUrl: string, model: string): boolean {
+  let host = ''
+  try { host = new URL(baseUrl).hostname.toLowerCase() } catch { /* validated in resolveConfig */ }
+  return host === DEEPSEEK_API_HOST || /^deepseek-[^/]*$/i.test(model)
+}
+
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0
 }
@@ -301,6 +316,9 @@ export class Generator {
           max_tokens: maxTokens,
           temperature: 0.7,
           stream: false,
+          // DeepSeek models think by default, and reasoning counts against max_tokens:
+          // a fixed-shape grid needs none of it (api-docs.deepseek.com/guides/thinking_mode).
+          ...(wantsThinkingOff(baseUrl, fallbackModel) ? { thinking: { type: 'disabled' } } : {}),
           messages: [{ role: 'system', content: systemPrompt(size) }, { role: 'user', content: userPrompt(subject) }],
         }),
       })
@@ -319,6 +337,7 @@ export class Generator {
       usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; completion_tokens_details?: { reasoning_tokens?: unknown } }
     }
     const choice = d.choices?.[0]
+    // Only the answer counts; `reasoning_content` (thinking mode) is never parsed as a grid.
     const text = typeof choice?.message?.content === 'string' ? choice.message.content : ''
     const usage: TokenUsageInfo | undefined = d.usage
       ? { input: num(d.usage.prompt_tokens), output: num(d.usage.completion_tokens), reasoning: num(d.usage.completion_tokens_details?.reasoning_tokens) || undefined }

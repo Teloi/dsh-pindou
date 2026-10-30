@@ -7,7 +7,12 @@ export interface PindouConfig {
   /** Environment variable holding a DeepSeek API key for the direct fallback. */
   readonly apiKeyEnv: string
   readonly baseUrl: string
-  /** Model used by the direct fallback. */
+  /**
+   * Model used by the direct fallback. DeepSeek has announced that
+   * `deepseek-chat` will be discontinued (planned for 2026-07-24); it is still
+   * routed to `deepseek-flash` but no longer in the official model list.
+   * `deepseek-flash` thinks by default, so the direct call turns thinking off.
+   */
   readonly fallbackModel: string
   /** Hard output cap per generation (reasoning included on reasoning models). */
   readonly maxTokens: number
@@ -21,7 +26,7 @@ export interface PindouConfig {
 export const DEFAULT_CONFIG: PindouConfig = {
   apiKeyEnv: 'DEEPSEEK_API_KEY',
   baseUrl: 'https://api.deepseek.com',
-  fallbackModel: 'deepseek-chat',
+  fallbackModel: 'deepseek-flash',
   maxTokens: 1024,
   timeoutMs: 30_000,
   minIntervalMs: 1500,
