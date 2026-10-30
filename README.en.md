@@ -1,13 +1,13 @@
 <h1 align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-banner-dark.png">
-    <img src="docs/assets/readme-banner-light.png" width="100%" alt="Bead Break · 拼豆小憩: bead art for the moments while your AI thinks">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-banner-en-dark.png">
+    <img src="docs/assets/readme-banner-en-light.png" width="100%" alt="Bead Break · 拼豆小憩: bead art while your AI thinks">
   </picture>
 </h1>
 
 <div align="center">
 
-<p>A perler-bead mini game in the DSH sidebar: 12 templates, AI patterns and picture to pattern, then iron your piece onto the works wall.</p>
+<p>A bead mini game in the DSH sidebar: 12 templates, AI patterns and picture to pattern, then iron your piece onto the works wall.</p>
 
 <p>
   <a href="https://github.com/Teloi/dsh-pindou/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/Teloi/dsh-pindou/ci.yml?branch=main&style=flat-square&label=CI"></a>
@@ -33,7 +33,7 @@
 
 <br>
 
-Bead Break is a plugin for the Web shell of [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It opens a pixel perler-bead board in the right sidebar: follow a template, draw freely, or describe a picture in one sentence and let the model draw the pattern. Iron it when you're done and save it as a PNG.
+Bead Break is a plugin for the Web shell of [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It opens a pixel bead board in the right sidebar: follow a template, draw freely, or describe a picture in one sentence and let the model draw the pattern. Iron it when you're done and save it as a PNG.
 
 ## Features
 
