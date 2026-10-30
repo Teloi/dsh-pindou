@@ -20,16 +20,61 @@ The screenshots show the Chinese UI; the plugin follows DSH's language and also 
 
 ## Install
 
+Requires DSH **0.2.1 or later** (`engines.dsh` in `package.json` is `>=0.2.1`). On an older DSH the install is refused with `is incompatible with dsh …` and nothing is installed. Pre-releases are compared by the same rule, so `0.2.1-rc.*` does not qualify and `0.2.2-alpha.*` does. If `latest` of `@deepseek-ai/dsh` on npm is still `0.2.1-rc.*`, use `npx @deepseek-ai/dsh@alpha` in place of `npx @deepseek-ai/dsh` in the commands below.
+
+The plugin has a Web UI only, so it installs into DSH's Web shell and the desktop app. Profiles without the Web UI, such as TUI and ACP, are not supported.
+
+No `allowBuilds` is needed: the built `lib/` is committed and the package has no install scripts.
+
+### Web
+
 ```bash
 npx @deepseek-ai/dsh plugin --profile web add github:Teloi/dsh-pindou
 ```
 
-Then restart `dsh --profile web`. No `allowBuilds` is needed: the built `lib/` is committed and the package has no install scripts.
+Then restart `dsh --profile web`. To check it worked:
 
-Uninstall:
+- `npx @deepseek-ai/dsh plugin --profile web list` lists `dsh-pindou`.
+- In the Web page, the bead button appears on the right of the session header.
+
+Without the command line: open **Plugins** in the Web sidebar, choose **Add plugin** → **Install a third-party plugin**, and enter `github:Teloi/dsh-pindou` (UI names as of DSH 0.2.2, here and below).
+
+### Desktop app
+
+The desktop app (macOS, Windows) has its own profile (`$DSH_HOME/profiles/desktop`; by default `~/.dsh/profiles/desktop` on macOS and `%USERPROFILE%\.dsh\profiles\desktop` on Windows), separate from the Web one, so install the plugin there too. The npm-installed `dsh` cannot change it: `npx @deepseek-ai/dsh plugin --profile desktop …` stops with `profile "desktop" is managed exclusively by the Electron application`. Use one of these instead:
+
+- **In the app**: open **Plugins** in the sidebar, choose **Add plugin** → **Install a third-party plugin**, and enter `github:Teloi/dsh-pindou`. Restart the app if the page asks you to.
+- **With the app's own `dsh` command**: install the command from **Manage dsh Command…** in the application menu. Open the app at least once, quit it fully, then run:
+
+  ```bash
+  dsh plugin --profile desktop add github:Teloi/dsh-pindou
+  ```
+
+  The change applies when you reopen the app. If the `dsh` in your terminal is the npm one, this command fails with the same error; run the app's command by the full path shown in **Manage dsh Command…** instead.
+
+To check it worked: the plugin shows under **Installed plugins** on the **Plugins** page, and the bead button appears on the right of the session header. Optional configuration goes in `cordis.patch.yml` in the desktop profile directory, with the same keys as on the Web (see "Optional configuration" below).
+
+### Install by package name
+
+Once the plugin is published to npm, you can use the package name `dsh-pindou` in place of `github:Teloi/dsh-pindou` anywhere above:
+
+- **Command line**: on the Web, run `npx @deepseek-ai/dsh plugin --profile web add dsh-pindou`. For the desktop app, quit it and run `dsh plugin --profile desktop add dsh-pindou` (with the app's own `dsh`, as above).
+- **In the UI**: on the **Plugins** page, choose **Add plugin** → **Install a third-party plugin** and enter `dsh-pindou` under **Package name or address**.
+
+This needs the package to be on npm already. Mirrors, such as the **Mainland China mirror** under **Registry** in the dialog, can lag behind npm. Right after a release, if the install fails or does not pick up the newest version, switch to the **Official npm registry** or try again later.
+
+## Uninstall
+
+Web:
 
 ```bash
 npx @deepseek-ai/dsh plugin --profile web remove dsh-pindou
+```
+
+Desktop app: uninstall it on the **Plugins** page, or quit the app fully and run the app's own `dsh` command:
+
+```bash
+dsh plugin --profile desktop remove dsh-pindou
 ```
 
 ## How to play
