@@ -115,6 +115,21 @@ describe('client apply', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).target).toBe('template:heart')
   })
 
+  for (const desktop of [false, true]) {
+    it(`entry button announces ⌘⌥K only in the desktop shell (${desktop ? 'desktop' : 'web'})`, async () => {
+      if (desktop) vi.stubGlobal('dshDesktop', {})
+      const f = fakeCtx()
+      apply(f.ctx)
+      const Entry = f.slots[1]!.component as ComponentType<{ sessionId: string; useSession: <R>(s: (v: { running: boolean }) => R) => R }>
+      const root = createRoot(host)
+      await act(async () => { root.render(<Entry sessionId="s1" useSession={sel => sel({ running: false })} />) })
+      expect(host.querySelector('.pd-entry')?.getAttribute('aria-keyshortcuts') ?? null).toBe(desktop ? 'Control+Alt+K Meta+Alt+K' : null)
+      await act(async () => { root.unmount() })
+      f.dispose()
+      vi.unstubAllGlobals()
+    })
+  }
+
   it('header entry shows a quiet busy dot and opens the tab, surviving a missing session surface', async () => {
     const f = fakeCtx()
     f.openTab.mockImplementation(() => { throw new Error('no surface') })
@@ -500,7 +515,7 @@ describe('design walkthrough round 2 fixes (r3)', () => {
     expect(CSS).toContain('.pd-overlay .pd-acts .pd-btn{min-height:var(--pd-hit)}')
     expect(CSS).toMatch(/\.pd-overlay\{position:relative;/)
     // the toast is absolutely centred; without max-content its box shrinks to half the panel and 撤销 wraps at 300 px
-    expect(CSS).toMatch(/\.pd-toast\{[^}]*width:max-content;max-width:calc\(100% - 24px\)/)
+    expect(CSS).toMatch(/\.pd-toast\{[^}]*width:max-content;max-width:calc\(100% - 32px\)/)
     expect(CSS).toContain('.pd-toast button{flex:none;white-space:nowrap;')
     await again.done()
   })
@@ -554,6 +569,49 @@ describe('design walkthrough round 2 fixes (r3)', () => {
     await done()
     vi.unstubAllGlobals()
   })
+
+  // Split view / several sessions: each mounted panel registers its own visibility; the
+  // entry dot is off while ANY panel is on screen, whatever the mount or unmount order.
+  for (const mounts of [['shown', 'hidden'], ['hidden', 'shown']] as const) {
+    for (const unmount of [['shown', 'hidden'], ['hidden', 'shown']] as const) {
+      it(`entry dot with one shown + one hidden panel: mount ${mounts.join(' then ')}, unmount ${unmount.join(' then ')}`, async () => {
+        vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, right: 400, top: 0, bottom: 600 } as DOMRect)
+        vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800)
+        const f = fakeCtx()
+        apply(f.ctx)
+        const Body = f.slots[0]!.component as ComponentType
+        const Entry = f.slots[1]!.component as ComponentType<{ sessionId: string; useSession: <R>(s: (v: { running: boolean }) => R) => R }>
+        const entryHost = document.createElement('div'); document.body.append(entryHost)
+        const entry = createRoot(entryHost)
+        await act(async () => { entry.render(<Entry sessionId="s1" useSession={sel => sel({ running: false })} />) })
+        const lit = (): boolean => entryHost.querySelector('.pd-entry')!.classList.contains('pd-has-progress')
+        const hosts = { shown: document.createElement('div'), hidden: document.createElement('div') }
+        hosts.hidden.hidden = true
+        const roots = {} as Record<'shown' | 'hidden', ReturnType<typeof createRoot>>
+        for (const k of mounts) {
+          document.body.append(hosts[k]); roots[k] = createRoot(hosts[k])
+          await act(async () => { roots[k].render(<Body />) })
+        }
+        // unfinished work in the shown panel
+        await act(async () => { hosts.shown.querySelector<HTMLButtonElement>('.pd-tpl')!.click() })
+        const grid = hosts.shown.querySelector('[role=grid]')!
+        await act(async () => { grid.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
+        expect(grid.querySelectorAll('.pd-bead').length).toBe(1)
+        expect(lit()).toBe(false)
+        // the hidden panel re-reporting (host attribute churn, the slow tick) never wins
+        await act(async () => { hosts.hidden.setAttribute('data-x', '1'); hosts.hidden.hidden = true; await new Promise(r => setTimeout(r, 1100)) })
+        expect(lit()).toBe(false)
+        await act(async () => { roots[unmount[0]].unmount() })
+        expect(lit()).toBe(unmount[0] === 'shown')
+        await act(async () => { roots[unmount[1]].unmount() })
+        expect(lit()).toBe(true)
+        await act(async () => { entry.unmount() })
+        f.dispose()
+        vi.unstubAllGlobals()
+      })
+    }
+  }
 
   it('N9: panelOnScreen follows the host hide / collapse attributes and the viewport', () => {
     const outer = document.createElement('section')

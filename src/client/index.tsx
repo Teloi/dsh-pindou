@@ -18,6 +18,7 @@ import { makeBusyPill, makeEntry, type SessionProps } from './entry.tsx'
 import { GameStore } from './game-store.ts'
 import { IconBead } from './icons.tsx'
 import { settingsOpener, type ShortcutsFace } from './settings.ts'
+import { hostLoadsChunks, lazy } from './lazy.ts'
 import { ensureStyles } from './styles.ts'
 import { App } from './ui/App.tsx'
 import { EnvContext, isDark, prefersReducedMotion } from './ui/context.tsx'
@@ -33,7 +34,7 @@ const DESKTOP_PROFILES = ['desktop:macos', 'desktop:windows', 'desktop:linux'] a
 
 /** The DSH desktop app's preload exposes `window.dshDesktop` (apps/desktop/src/preload-app.ts). */
 function isDesktopShell(): boolean {
-  return typeof window !== 'undefined' && 'dshDesktop' in window
+  return 'dshDesktop' in globalThis
 }
 
 type Dispose = () => void
@@ -76,6 +77,10 @@ export function apply(ctx: ClientContext): void {
     return () => { globalThis.removeEventListener?.('pagehide', flush) }
   }, 'pindou: save on pagehide')
 
+  // Picture to pattern lives in lib/client.picture.js, fetched on first open (spec §18.6)
+  const picture = lazy(() => import('./picture.tsx'), hostLoadsChunks())
+  // the works wall (lib/client.works.js): loaded once per session, kept (spec §18.4/§18.6)
+  const works = lazy(() => import('./works.tsx'), hostLoadsChunks())
   const lang = (): 'zh' | 'en' => langOf(ctx.locale.getSnapshot().active)
   const tFor = (l: 'zh' | 'en'): Translate => (l === 'zh' ? tZh : tEn)
   const tZh = makeTranslate('zh')
@@ -101,7 +106,7 @@ export function apply(ctx: ClientContext): void {
   function Body(): ReactElement {
     const l = useLang()
     return (
-      <EnvContext.Provider value={{ store, lang: l, t: tFor(l), reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts) }}>
+      <EnvContext.Provider value={{ store, lang: l, t: tFor(l), reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works }}>
         <App />
       </EnvContext.Provider>
     )

@@ -107,13 +107,15 @@ const ENTRY = `
 .pd-pill{position:absolute;bottom:8px;right:12px;z-index:5;height:var(--pd-hint-h);display:flex;align-items:center;white-space:nowrap;background:var(--pd-surface-raised);color:var(--pd-text);border:1px solid var(--pd-border);border-radius:14px;box-shadow:var(--dsw-elevation-soft,0 4px 14px rgba(0,0,0,.08));font-size:12.5px;line-height:1;font-family:inherit;animation:pd-pill-in var(--pd-t) var(--pd-ease)}
 .pd-pill.pd-out{opacity:0;transform:translateY(4px);transition:opacity var(--pd-t) var(--pd-ease),transform var(--pd-t) var(--pd-ease);pointer-events:none}
 @keyframes pd-pill-in{from{opacity:0;transform:translateY(4px)}}
-.pd-pill button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:0}
+/* both buttons hit 32 high (design N6, R3-6): a ::after 3px above and below the 26px pill row */
+.pd-pill button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:0;position:relative}
+.pd-pill button::after{content:"";position:absolute;inset:-3px 0}
 .pd-pill .pd-pill-go{height:26px;display:flex;align-items:center;gap:6px;padding:0 4px 0 10px;border-radius:13px 0 0 13px}
 .pd-pill .pd-pill-bead{width:12px;height:12px;border-radius:50%;flex:none;background:radial-gradient(circle,color-mix(in srgb,var(--pd-bead-3) 50%,#000) 0 22%,transparent 26%),radial-gradient(circle at 38% 34%,color-mix(in srgb,var(--pd-bead-3) 80%,#fff),var(--pd-bead-3) 55%,color-mix(in srgb,var(--pd-bead-3) 75%,#000))}
 .pd-pill .pd-pill-x{width:24px;height:26px;display:grid;place-items:center;padding:0;border-radius:0 13px 13px 0;color:var(--pd-text-3)}
-.pd-pill .pd-pill-x{--pd-i:12px;position:relative}
+.pd-pill .pd-pill-x{--pd-i:12px}
 /* 24×26 drawn, 32×32 to hit (design N6): the extra lies above, below and right, never over 「去看看」 */
-.pd-pill .pd-pill-x::after{content:"";position:absolute;inset:-3px -8px -3px 0}
+.pd-pill .pd-pill-x::after{inset:-3px -8px -3px 0}
 @media (hover:hover){.pd-pill .pd-pill-go:hover,.pd-pill .pd-pill-x:hover{background:var(--pd-hover)}}
 @media (prefers-reduced-motion: reduce){.pd-entry.pd-busy .pd-dot{animation:none}@keyframes pd-pill-in{from{opacity:0}}.pd-pill.pd-out{transform:none}}
 `
@@ -144,6 +146,7 @@ const PANEL = `
 .pd-root .pd-sr,.pd-portal .pd-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;margin:-1px}
 .pd-head{height:var(--pd-header-h);flex:none;display:flex;align-items:center;gap:4px;padding:0 8px 0 12px;border-bottom:1px solid var(--pd-border-subtle)}
 .pd-head .pd-spacer{flex:1}
+.pd-head h2{margin:0 0 0 4px;font-size:13px;font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pd-ib{width:var(--pd-hit);height:var(--pd-hit);border-radius:var(--pd-radius-ctl);border:0;background:transparent;display:grid;place-items:center;cursor:pointer;color:var(--pd-text-2);flex:none;padding:0;transition:background var(--pd-t-fast)}
 @media (hover:hover){.pd-ib:hover{background:var(--pd-hover);color:var(--pd-text)}}
 .pd-ib:disabled{opacity:.35;cursor:default;background:transparent}
@@ -151,16 +154,29 @@ const PANEL = `
 .pd-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
 .pd-view{max-width:calc(var(--pd-board-max) + 2 * var(--pd-pad));margin:0 auto;padding:12px var(--pd-pad) var(--pd-pad);display:flex;flex-direction:column;animation:pd-view-in var(--pd-t) var(--pd-ease)}
 @keyframes pd-view-in{from{opacity:0;transform:translateX(8px)}}
-/* start page */
-.pd-start{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
-.pd-big{border:1px solid var(--pd-border);background:var(--pd-surface-raised);border-radius:var(--pd-radius-card);padding:12px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-height:64px;transition:background var(--pd-t-fast),transform var(--pd-t-fast)}
+/* start page: four equal entry cards (§18.1 + the works wall), 2×2, one row from 560 wide; 64 high, icon left; narrow: icon on top, 72 high */
+.pd-start{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;gap:8px;margin-bottom:16px}
+.pd-big{border:1px solid var(--pd-border);background:var(--pd-surface-raised);border-radius:var(--pd-radius-card);padding:8px 10px;text-align:left;cursor:pointer;display:grid;grid:auto auto/28px minmax(0,1fr);align-content:center;gap:1px 8px;min-height:64px;transition:background var(--pd-t-fast),transform var(--pd-t-fast)}
 @media (hover:hover){.pd-big:hover{background:var(--pd-hover)}}
 .pd-big:active{transform:scale(.98)}
-.pd-big .pd-ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--pd-surface)}
-.pd-big .pd-ic{--pd-i:16px}
+.pd-big .pd-ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--pd-surface);grid-row:span 2;--pd-i:16px}
+/* entry cards (design C1): a title is never cut (CJK keeps whole, Latin may wrap at spaces); a description
+   shows up to two lines; a status line (需要新版 DSH / 加载失败) always shows in full; the row grows to fit */
+.pd-big b{word-break:keep-all}
+.pd-big b+span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.pd-big .pd-st{display:block}
 .pd-big b{font-size:13.5px;font-weight:600}
 .pd-big span{font-size:12px;color:var(--pd-text-3)}
+@container pd (max-width: 479px){.pd-big{grid:auto/minmax(0,1fr);min-height:72px;padding:6px 8px;align-content:start}.pd-big .pd-ic{grid-row:auto;width:24px;height:24px}.pd-big b{font-size:13px}}
+/* lazy modules (spec §18.6): no require.async → shown, focusable, inert; loading > 150 ms → a --pd-surface block */
+.pd-big.pd-off{opacity:.5;cursor:default;background:var(--pd-surface-raised);transform:none}
+.pd-lazy{display:grid;justify-items:center}
+.pd-skel{width:100%;max-width:var(--pd-board-max);aspect-ratio:1;border-radius:var(--pd-radius-board);background:var(--pd-surface)}
 .pd-sec{font-size:12px;color:var(--pd-text-3);margin:0 0 8px;font-weight:500;display:flex;justify-content:space-between}
+/* my works (spec §18.4): title + one row of 56px thumbnails; the row keeps its height while the chunk loads, fails or is unsupported */
+.pd-works{margin-top:16px}
+.pd-works .pd-sec{min-height:var(--pd-hit);align-items:center;margin:0 0 4px}
+.pd-wrow{height:56px;display:flex;gap:8px;align-items:center;overflow:hidden;font-size:12px;color:var(--pd-text-3)}
 .pd-tpls{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;list-style:none;margin:0;padding:0}
 .pd-tpl{width:100%;border:1px solid var(--pd-border-subtle);background:var(--pd-surface);border-radius:var(--pd-radius-card);padding:8px 6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;transition:background var(--pd-t-fast),transform var(--pd-t-fast),box-shadow var(--pd-t-fast)}
 @media (hover:hover){.pd-tpl:hover{background:var(--pd-hover);box-shadow:0 0 0 1px var(--pd-border)}}
@@ -202,13 +218,14 @@ const BOARD = `
 .pd-cell::before{content:"";position:absolute;left:50%;top:50%;width:22%;height:22%;margin:-11% 0 0 -11%;border-radius:50%;background:var(--pd-peg);transition:opacity var(--pd-t-slow)}
 .pd-cell.pd-g{--pd-ga:var(--pd-ghost-alpha)}
 .pd-cell.pd-g.pd-hot{--pd-ga:var(--pd-ghost-hot)}
-/* the faintness lives in the fill (not in opacity), so the dark-mode ring below stays at full strength */
-.pd-cell.pd-g::after{content:attr(data-code);position:absolute;inset:14%;border-radius:50%;background:color-mix(in srgb,var(--pd-gc) calc(var(--pd-ga) * 100%),transparent);display:grid;place-items:center;font:600 calc(var(--pd-cell)*.42)/1 var(--pd-font-code);color:transparent;transition:opacity var(--pd-t),background-color var(--pd-t)}
+/* the faintness lives in the fill (not in opacity), so the per-colour ring stays at full strength: ≥3:1 on the light board (spec §18.5) and the dark one (N10), see core/contrast.ts.
+   Ring width --pd-rw: 1px on the light board at 2×; 1.5px on 1× screens, where a 1px ring is blended by antialiasing to ~2.5:1 (design I6/C3), and on the dark board. A hot cell adds a halo. */
+.pd-cell.pd-g::after{content:attr(data-code);position:absolute;inset:14%;border-radius:50%;background:color-mix(in srgb,var(--pd-gc) calc(var(--pd-ga) * 100%),transparent);box-shadow:inset 0 0 0 var(--pd-rw,1px) var(--pd-rc,var(--pd-grl));display:grid;place-items:center;font:600 calc(var(--pd-cell)*.42)/1 var(--pd-font-code);color:transparent;transition:opacity var(--pd-t),background-color var(--pd-t)}
 .pd-root.pd-codes .pd-cell.pd-g::after{color:color-mix(in srgb,var(--pd-gl) calc(var(--pd-ga) * 100%),transparent)}
-.pd-cell.pd-g.pd-hot::after{box-shadow:0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
-/* dark board: a per-colour ring at ≥3:1 so grey, black, navy and brown guides stay visible (design N10, core/contrast.ts) */
-body[data-ds-dark-theme] .pd-root .pd-cell.pd-g::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr)}
-body[data-ds-dark-theme] .pd-root .pd-cell.pd-g.pd-hot::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr),0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
+@media (max-resolution:1.99dppx){.pd-g{--pd-rw:1.5px}}
+.pd-g.pd-hot::after{box-shadow:inset 0 0 0 var(--pd-rw,1px) var(--pd-rc,var(--pd-grl)),0 0 0 1px color-mix(in srgb,var(--pd-text) 25%,transparent)}
+/* dark board: its own ring table, so grey, black, navy and brown guides stay visible (design N10) */
+body[data-ds-dark-theme] .pd-g{--pd-rw:1.5px;--pd-rc:var(--pd-gr)}
 .pd-board.pd-pulse .pd-cell.pd-g.pd-hot::after{animation:pd-hot 520ms var(--pd-ease) 2}
 .pd-bead.pd-out{animation:pd-erase var(--pd-t-erase) var(--pd-ease) forwards;pointer-events:none}
 @keyframes pd-erase{to{transform:scale(.6);opacity:0}}
@@ -326,9 +343,11 @@ const CONTROLS = `
 .pd-mi[aria-checked=true] .pd-sw2::after{transform:translateX(12px)}
 .pd-menu hr{border:0;border-top:1px solid var(--pd-border-subtle);margin:4px 0}
 .pd-keys{margin:4px 8px 6px;padding:0;list-style:none;font-size:11.5px;color:var(--pd-text-2);display:flex;flex-direction:column;gap:3px}
-.pd-toast{position:absolute;left:50%;bottom:calc(var(--pd-footer-h) + 12px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--pd-toast-bg);color:var(--pd-toast-label);font-size:12.5px;border-radius:10px;padding:5px 6px 5px 12px;display:flex;gap:10px;align-items:center;z-index:40;width:max-content;max-width:calc(100% - 24px);box-shadow:0 6px 20px rgba(0,0,0,.18);animation:pd-toast-in var(--pd-t) var(--pd-ease)}
-@keyframes pd-toast-in{from{opacity:0;transform:translate(-50%,8px)}}
-.pd-toast>span{min-width:0}
+/* toast (design R3-2, spec v2.0): at most panel width − 32, drops from the top over the (read-only) status row. The play view stacks board → tools → palette → footer to the bottom edge at every height, so any bottom anchor lands on swatches or Iron/Export (seen at 1280×800 too, not only below 700 px) */
+.pd-toast{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + var(--pd-header-h) + 4px);transform:translateX(-50%);background:var(--pd-toast-bg);color:var(--pd-toast-label);font-size:12.5px;border-radius:10px;padding:5px 6px 5px 12px;display:flex;gap:10px;align-items:center;z-index:40;width:max-content;max-width:calc(100% - 32px);box-shadow:0 6px 20px rgba(0,0,0,.18);animation:pd-toast-in var(--pd-t) var(--pd-ease)}
+@keyframes pd-toast-in{from{opacity:0;transform:translate(-50%,-8px)}}
+/* one line, never wraps: a long message ends in … rather than growing over the title/progress row (spec v2.0, 22:15) */
+.pd-toast>span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pd-toast button{flex:none;white-space:nowrap;border:0;background:rgb(255 255 255 / .14);color:inherit;border-radius:6px;padding:0 10px;min-height:var(--pd-hit);font-size:12px;cursor:pointer;font-weight:600}
 body[data-ds-dark-theme] .pd-toast button{background:rgb(0 0 0 / .08)}
 .pd-preview{position:absolute;inset:var(--pd-header-h) 0 0;z-index:35;background:var(--pd-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:var(--pd-pad);text-align:center}
@@ -348,6 +367,7 @@ const RESPONSIVE = `
 /* wide sidebar (spec §3.1): 4 template columns, home max 640, play column max 480 */
 @container pd (min-width: 560px){
   .pd-tpls{grid-template-columns:repeat(4,1fr)}
+  .pd-start{grid-template-columns:repeat(4,minmax(0,1fr))}
   .pd-view.pd-v-home{max-width:640px}
 }
 /* host full-screen sidebar below 768px (spec §3.2): bigger swatches, iron/export move into the toolbar */
@@ -356,7 +376,6 @@ const RESPONSIVE = `
   .pd-root .pd-palette{--pd-swatch-gap:6px;--pd-swatch:32px}
   .pd-root .pd-foot .pd-io{display:none}
   .pd-root .pd-foot:not(:has(> :not(.pd-io))){display:none}
-  .pd-root .pd-toast{bottom:calc(16px + env(safe-area-inset-bottom))}
   /* ten toolbar buttons on one row at 360–390px: shrink width (never below 32), keep height */
   .pd-root .pd-tools{flex-wrap:nowrap;gap:0;justify-content:space-between}
   .pd-root .pd-tools .pd-tool{flex:1 1 0;min-width:32px;max-width:var(--pd-hit)}

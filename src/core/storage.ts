@@ -42,12 +42,30 @@ export interface SavedState {
   readonly done: readonly string[]
   /** Whether the first-run coach card was dismissed. */
   readonly coached: boolean
+  /** Id of this game's piece on the works wall (core/works.ts) while it is ironed, so un-ironing takes it back. */
+  readonly work: number | null
+}
+
+/**
+ * The works wall (spec §18.4) under its own key, so it can never stop the game
+ * from saving. The entry appends and withdraws; the wall page (core/works.ts,
+ * in the lazy chunk) validates. Max 60, oldest first.
+ */
+export const WORKS_KEY = 'dsh-pindou:works'
+export const MAX_WORKS = 60
+/** A work as stored: id = ironing time (ms), size, ironed code, source key, and a `board:` source's pattern. */
+export interface StoredWork {
+  readonly i: number
+  readonly n: BoardSize
+  readonly b: string
+  readonly s: string | null
+  readonly p?: string
 }
 
 export const DEFAULT_PREFS: Prefs = { busyHint: true, showGuide: true, showCodes: false }
 
 export function defaultState(size: BoardSize = DEFAULT_SIZE): SavedState {
-  return { board: createBoard(size), color: 4, tool: 'paint', mode: 'home', target: null, pattern: null, ironed: false, prefs: DEFAULT_PREFS, done: [], coached: false }
+  return { board: createBoard(size), color: 4, tool: 'paint', mode: 'home', target: null, pattern: null, ironed: false, prefs: DEFAULT_PREFS, done: [], coached: false, work: null }
 }
 
 const TOOLS: readonly Tool[] = ['paint', 'erase', 'pick', 'fill']
@@ -108,6 +126,7 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
       ? [...new Set(r['done'].filter((id): id is string => typeof id === 'string' && ID_RE.test(id)))].slice(0, 64)
       : [],
     coached: r['coached'] === true,
+    work: r['ironed'] === true && Number.isSafeInteger(r['work']) ? r['work'] as number : null,
   }
   return { state, corrupt }
 }
@@ -126,6 +145,7 @@ export function serializeState(state: SavedState): string {
     prefs: state.prefs,
     done: state.done,
     coached: state.coached,
+    work: state.work,
   })
 }
 
@@ -159,7 +179,11 @@ export class SafeStore {
     return this.memory.get(key) ?? null
   }
 
-  set(key: string, value: string): boolean {
+  /**
+   * A refused write marks storage unavailable, except for a `side` key (the
+   * works wall): its refusal (quota) must never stop the game from saving.
+   */
+  set(key: string, value: string, side = false): boolean {
     if (value.length > MAX_STORED_CHARS) return false
     this.memory.set(key, value)
     if (this.status === 'unavailable' || !this.backend) return false
@@ -167,7 +191,7 @@ export class SafeStore {
       this.backend.setItem(key, value)
       return true
     } catch {
-      this.status = 'unavailable'
+      if (!side) this.status = 'unavailable'
       return false
     }
   }
@@ -194,7 +218,7 @@ export class SafeStore {
 /** Resolve `window.localStorage` without throwing (access itself can throw). */
 export function browserStorage(): StorageLike | undefined {
   try {
-    return typeof globalThis.localStorage === 'undefined' ? undefined : globalThis.localStorage
+    return globalThis.localStorage
   } catch {
     return undefined
   }

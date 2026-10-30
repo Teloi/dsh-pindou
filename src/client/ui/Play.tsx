@@ -1,11 +1,12 @@
 /** The play view: status line, board, toolbar, palette, footer and the under-board cards. */
 import { useRef, type CSSProperties, type ReactElement } from 'react'
 import {
-  BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, PALETTE, remainingByColor, templateIdOf, type Tool,
+  type Board, BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, PALETTE, remainingByColor, templateIdOf, type Tool,
 } from '../../core/index.ts'
 import { IconBrush, IconCopy, IconEraser, IconFill, IconIron, IconPicker, IconRedo, IconSparkle, IconTrash, IconUndo, IconDownload } from '../icons.tsx'
 import { canCopyImage, copyPng, downloadBlob, exportBlob, exportFileName, saveRoute } from '../render.ts'
 import { useFocusReturn } from '../focus.ts'
+import { isPictureSource } from '../game-store.ts'
 import { BoardView } from './Board.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 
@@ -16,11 +17,11 @@ const TOOLS: ReadonlyArray<{ tool: Tool; key: string; icon: typeof IconBrush; la
   { tool: 'fill', key: 'G', icon: IconFill, label: 'toolFill' },
 ]
 
-/** PNG export (spec §13): download, or the in-panel preview where downloads are unsupported. */
-export function exportBoard(env: ReturnType<typeof useEnv>): void {
+/** PNG export (spec §13): download, or the in-panel preview where downloads are unsupported. A `piece` (a work on the wall) exports ironed. */
+export function exportBoard(env: ReturnType<typeof useEnv>, piece?: { readonly board: Board; readonly target: string | null }): void {
   const s = env.store.getSnapshot()
-  const name = exportFileName(s.target, new Date())
-  void exportBlob(document, s.history.present, s.ironed, env.dark()).then((blob) => {
+  const name = exportFileName(piece ? piece.target : s.target, new Date())
+  void exportBlob(document, piece ? piece.board : s.history.present, piece ? true : s.ironed, env.dark()).then((blob) => {
     if (!blob) { env.store.showToast('exportFailed'); return }
     if (saveRoute(document) === 'manual') { env.store.setPreview({ url: URL.createObjectURL(blob), name }); return }
     if (downloadBlob(document, blob, name)) env.store.showToast('exported', false, { name })
@@ -29,9 +30,9 @@ export function exportBoard(env: ReturnType<typeof useEnv>): void {
 }
 
 /** "Copy image": PNG to the clipboard, so it can be pasted straight into the conversation. */
-export function copyBoard(env: ReturnType<typeof useEnv>): void {
+export function copyBoard(env: ReturnType<typeof useEnv>, board?: Board): void {
   const s = env.store.getSnapshot()
-  void copyPng(exportBlob(document, s.history.present, s.ironed, env.dark())).then((ok) => {
+  void copyPng(exportBlob(document, board ?? s.history.present, board ? true : s.ironed, env.dark())).then((ok) => {
     env.store.showToast(ok ? 'copied' : 'copyFailed')
   })
 }
@@ -49,9 +50,12 @@ function StatusLine(): ReactElement {
   const board = s.history.present
   const target = s.targetBoard
   const tpl = findTemplate(templateIdOf(s.target) ?? '')
-  const isAi = s.target?.startsWith('board:') ?? false
-  const ai = isAi ? s.ai.result : undefined
-  const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : isAi ? (ai?.prompt ?? t('homeAi')) : t('playFree')
+  // a picture pattern (spec §18.2) is a `board:` source too, but not the AI's: no prompt, no tokens
+  const pic = isPictureSource(s.target)
+  const isAi = !pic && (s.target?.startsWith('board:') ?? false)
+  // only the board the last generation made: undo back to an older one and its facts are gone (R3-4)
+  const ai = isAi && s.ai.result?.board === target ? s.ai.result : undefined
+  const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : pic ? t('myPattern') : isAi ? (ai?.prompt ?? t('homeAi')) : t('playFree')
   const beads = board.cells.filter(c => c !== EMPTY).length
   const c = target ? completion(board, target) : null
   return (
@@ -188,7 +192,8 @@ function Footer(): ReactElement {
   const s = useGame()
   const empty = s.history.present.cells.every(c => c === EMPTY)
   const ironing = s.ironingSince !== null
-  const isAi = s.target?.startsWith('board:') ?? false
+  // 「填满」 is an AI-pattern helper; a picture pattern plays like a template (spec §18.2 → §4.5)
+  const isAi = !isPictureSource(s.target) && (s.target?.startsWith('board:') ?? false)
   // The result card carries export / copy itself; don't show them twice (spec §4.6).
   const dup = s.overlay === 'result'
   return (

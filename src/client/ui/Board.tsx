@@ -5,7 +5,7 @@
  * per-bead delay (--pd-d) and per-corner radius variables.
  */
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactElement, type ReactNode } from 'react'
-import { codeOf, EMPTY, GHOST_RINGS, PALETTE, type Board as BoardData, type Tool } from '../../core/index.ts'
+import { codeOf, EMPTY, GHOST_RINGS, GHOST_RINGS_LIGHT, PALETTE, type Board as BoardData, type Tool } from '../../core/index.ts'
 import { cornerRadii } from '../render.ts'
 import { cx, useEnv, useGame } from './context.tsx'
 
@@ -47,7 +47,7 @@ const Cell = memo(function Cell({ id, value, ghost, hot, wrong, cur, label, dela
     setLeaving(fx && value === EMPTY && prev !== EMPTY ? prev : EMPTY)
   }
   const g = value === EMPTY && ghost !== EMPTY
-  const style = g ? ({ '--pd-gc': PALETTE[ghost]!.hex, '--pd-gl': lightLabel(ghost), '--pd-gr': GHOST_RINGS[ghost] } as CSSProperties) : undefined
+  const style = g ? ({ '--pd-gc': PALETTE[ghost]!.hex, '--pd-gl': lightLabel(ghost), '--pd-gr': GHOST_RINGS[ghost], '--pd-grl': GHOST_RINGS_LIGHT[ghost] } as CSSProperties) : undefined
   let bead: ReactElement | null = null
   if (value !== EMPTY) {
     const [tl, tr, br, bl] = corners
@@ -282,7 +282,7 @@ export function BoardView({ overlay }: { readonly overlay?: ReactNode }): ReactE
         aria-readonly={ironed}
         aria-rowcount={n}
         aria-colcount={n}
-        className={cx('pd-board', `pd-tool-${s.tool}`, kbd && 'pd-kbd', ironed && 'pd-ironed', !showGuide && 'pd-noguide')}
+        className={cx('pd-board', s.tool === 'pick' ? 'pd-tool-pick' : s.tool === 'erase' && 'pd-tool-erase', kbd && 'pd-kbd', ironed && 'pd-ironed', !showGuide && 'pd-noguide')}
         style={style}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

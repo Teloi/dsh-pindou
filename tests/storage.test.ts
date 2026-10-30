@@ -94,3 +94,25 @@ describe('generation cache', () => {
     expect(GenerationCache.parse('{')).toEqual([])
   })
 })
+
+describe('storage: the works wall side key', () => {
+  it('a refused side write keeps storage ok; a refused game write does not', () => {
+    const backend = memoryStorage()
+    const store = new SafeStore(backend)
+    backend.setItem = () => { throw new Error('QuotaExceededError') }
+    expect(store.set('dsh-pindou:works', '[]', true)).toBe(false)
+    expect(store.status).toBe('ok')
+    expect(store.set(STORAGE_KEY, '{}')).toBe(false)
+    expect(store.status).toBe('unavailable')
+  })
+
+  it('a game keeps its work id only while ironed, and only a whole number', () => {
+    const base = { ...defaultState(), board: setCell(createBoard(16), 0, 0, 1) }
+    expect(parseState(serializeState({ ...base, ironed: true, work: 123 })).state.work).toBe(123)
+    expect(parseState(serializeState({ ...base, ironed: false, work: 123 })).state.work).toBeNull()
+    const raw = JSON.parse(serializeState({ ...base, ironed: true, work: 1 }))
+    expect(parseState(JSON.stringify({ ...raw, work: 1.5 })).state.work).toBeNull()
+    expect(parseState(JSON.stringify({ ...raw, work: '9' })).state.work).toBeNull()
+    expect(defaultState().work).toBeNull()
+  })
+})

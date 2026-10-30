@@ -3,7 +3,7 @@
 // it must stay self-contained (no imports, no closures over module scope).
 //
 // It reports:
-// - leaks:    host rules (selectors without a pd- class) that match our elements, with
+// - leaks:    host rules (any rule outside the plugin's own <style id="dsh-pindou-…">) that match our elements, with
 //             the properties they set (design I1: find what bleeds in, don't guess)
 // - icons:    every <svg>: rendered size and whether it carries .pd-i (B1)
 // - round:    every element drawn as a circle (border-radius ≥ 50%): its corner-shape (I1)
@@ -36,7 +36,7 @@ export function auditPanel() {
       if (rule.cssRules && !(rule instanceof CSSStyleRule)) { walk(rule.cssRules, sheet); continue }
       if (!(rule instanceof CSSStyleRule)) continue
       const sel = rule.selectorText
-      if (!sel || /\bpd-/.test(sel)) continue
+      if (!sel) continue
       for (const part of splitTop(sel)) {
         const base = part.replace(/::?(before|after|placeholder|selection|marker|-webkit-[\w-]+)\b/g, '').trim() || '*'
         let hit = null
@@ -52,6 +52,9 @@ export function auditPanel() {
     }
   }
   for (const sheet of document.styleSheets) {
+    // the plugin's own stylesheets (styles.ts, picture-styles.ts …); their class names ship short, so
+    // telling them apart by a `pd-` in the selector no longer works
+    if (sheet.ownerNode?.id?.startsWith('dsh-pindou-')) continue
     let rules
     try { rules = sheet.cssRules } catch { continue }
     walk(rules, sheet)
@@ -110,7 +113,7 @@ export function auditPanel() {
     const rect = el.getBoundingClientRect()
     const perLine = own.length / Math.max(1, n)
     if (n >= 3 && perLine < 2.5) wraps.push({ el: `${el.tagName.toLowerCase()}.${el.className}`, text: own.slice(0, 20), lines: n, width: Math.round(rect.width), why: 'one char per line' })
-    else if (el.closest('button') && !el.closest('.pd-tpl, .pd-big, .pd-ex, .pd-mi') && n > 1) wraps.push({ el: `${el.tagName.toLowerCase()}.${el.className}`, text: own.slice(0, 20), lines: n, width: Math.round(rect.width), why: 'button label wrapped' })
+    else if (el.closest('button') && !el.closest('.pd-tpl, .pd-big, .pd-mi') && n > 1) wraps.push({ el: `${el.tagName.toLowerCase()}.${el.className}`, text: own.slice(0, 20), lines: n, width: Math.round(rect.width), why: 'button label wrapped' })
     else if (rect.width > 0 && rect.width < fs * 1.5 && n > 1) wraps.push({ el: `${el.tagName.toLowerCase()}.${el.className}`, text: own.slice(0, 20), lines: n, width: Math.round(rect.width), why: 'squeezed' })
   }
 
@@ -179,5 +182,98 @@ export function auditPanel() {
   return {
     leaks: [...leaks.values()].map(l => ({ selector: l.selector, props: [...l.props], example: l.example })),
     icons, round, wraps, contrast,
+  }
+}
+
+// Spec §18.5 / O3: the ring of every guide dot (`.pd-cell.pd-g::after`, first box-shadow)
+// against the board it sits on, one cell per colour code, in the normal (`hot` false) or the
+// selected-colour state (`hot` true). Same self-contained rule as above.
+export function guideRings([codes, hot]) {
+  const rgb = s => (/rgba?\(([^)]+)\)/.exec(s)?.[1] ?? '').split(',').map(Number)
+  const lum = ([r, g, b]) => { const f = x => { const v = x / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b) }
+  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+  const board = rgb(getComputedStyle(document.querySelector('.pd-board')).backgroundColor)
+  return [...codes].map((code) => {
+    const cell = document.querySelector(`.pd-board .pd-cell.pd-g${hot ? '.pd-hot' : ':not(.pd-hot)'}[data-code="${code}"]`)
+    if (!cell) return { code, hot, missing: true, ok: false }
+    // first shadow, e.g. "rgb(133, 133, 132) 0px 0px 0px 1px inset": the 4th length is the ring width
+    const first = getComputedStyle(cell, '::after').boxShadow.split(/,(?![^(]*\))/)[0] ?? ''
+    const ring = rgb(first)
+    const width = /inset/.test(first) ? Number(first.match(/[\d.]+px/g)?.[3]?.slice(0, -2) ?? 0) : 0
+    const alpha = ring.length === 4 ? ring[3] : 1
+    const r = ratio(ring, board)
+    return { code, hot, ring: first, ratio: Math.round(r * 100) / 100, width, ok: alpha === 1 && width >= 1 && r >= 3 }
+  })
+}
+
+// Wait for the plugin's finite animations (beads landing, toasts sliding in), freeze the looping ones, wait two frames,
+// then return one viewport-clipped box per top-level .pd-root / .pd-portal (empty when none is on screen).
+export async function settlePlugin() {
+  const ours = el => !!el && !!(el instanceof Element ? el : null)?.closest('.pd-root, .pd-portal')
+  const finite = document.getAnimations().filter(a => ours(a.effect?.target) && Number.isFinite(a.effect?.getComputedTiming().endTime))
+  await Promise.race([Promise.allSettled(finite.map(a => a.finished)), new Promise(r => { setTimeout(r, 2000) })])
+  // infinite ones (the entry's pulsing dot, a generating shimmer) are frozen at t=0 until
+  // resumePlugin(), so two runs capture the same frame
+  const loops = document.getAnimations().filter(a => ours(a.effect?.target) && !Number.isFinite(a.effect?.getComputedTiming().endTime))
+  for (const a of loops) { a.pause(); a.currentTime = 0 }
+  globalThis.__pdFrozen = loops
+  await new Promise(r => { requestAnimationFrame(() => { requestAnimationFrame(r) }) })
+  // one crop per plugin root: the union would span the host chat between the pill and the
+  // panel, and bring the host clock and streamed text back into the comparison
+  return [...document.querySelectorAll('.pd-root, .pd-portal')]
+    .filter(e => !e.parentElement?.closest('.pd-root, .pd-portal'))
+    .map(e => e.getBoundingClientRect())
+    .map(r => ({ x: Math.max(0, Math.floor(r.left)), y: Math.max(0, Math.floor(r.top)), right: Math.min(innerWidth, Math.ceil(r.right)), bottom: Math.min(innerHeight, Math.ceil(r.bottom)) }))
+    .filter(r => r.right > r.x && r.bottom > r.y)
+    .map(r => ({ x: r.x, y: r.y, width: r.right - r.x, height: r.bottom - r.y }))
+}
+
+/** Restart the animations settlePlugin() froze. */
+export function resumePlugin() {
+  for (const a of globalThis.__pdFrozen ?? []) a.play()
+  globalThis.__pdFrozen = []
+}
+
+// Design R3-2: what the visible toast covers — any control of the panel (buttons, swatches,
+// focusable elements) or bead cell of the board, other than the toast's own button. Returns
+// null when no toast is shown.
+export function toastCovers() {
+  const toast = document.querySelector('.pd-root .pd-toast')
+  if (!toast) return null
+  const t = toast.getBoundingClientRect()
+  const hit = r => r.width > 0 && r.height > 0 && r.left < t.right && r.right > t.left && r.top < t.bottom && r.bottom > t.top
+  const sel = 'button, [role=radio], [role=switch], input, textarea, a[href], [tabindex]:not([tabindex="-1"]), .pd-board .pd-cell'
+  const covered = [...document.querySelectorAll(`.pd-root :is(${sel})`)]
+    .filter(el => !toast.contains(el) && el !== toast && getComputedStyle(el).visibility !== 'hidden' && hit(el.getBoundingClientRect()))
+    .map(el => `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} ${el.getAttribute('aria-label') ?? (el.textContent ?? '').trim().slice(0, 12)}`)
+  return { toast: [Math.round(t.left), Math.round(t.top), Math.round(t.width), Math.round(t.height)], covered: [...new Set(covered)] }
+}
+
+// Spec v2.0 (22:15): put a long message into the visible toast and measure it. The toast must
+// stay one line, at most panel width − 32, cut with an ellipsis, without moving the status row.
+export async function toastLongLine(text) {
+  const root = document.querySelector('.pd-root')
+  const toast = root?.querySelector('.pd-toast')
+  const span = toast?.querySelector(':scope > span')
+  if (!root || !toast || !span) return null
+  const status = root.querySelector('.pd-status')
+  const before = status?.getBoundingClientRect().height ?? 0
+  span.textContent = text
+  await new Promise(r => { requestAnimationFrame(() => { requestAnimationFrame(r) }) })
+  const t = toast.getBoundingClientRect()
+  const panel = root.getBoundingClientRect()
+  const cs = getComputedStyle(span)
+  const lineH = Number.parseFloat(cs.lineHeight) || Number.parseFloat(cs.fontSize) * 1.4
+  const range = document.createRange()
+  range.selectNodeContents(span)
+  const lines = new Set([...range.getClientRects()].map(r => Math.round(r.top))).size
+  const btn = toast.querySelector('button')
+  return {
+    lines,
+    spanH: Math.round(span.getBoundingClientRect().height), lineH: Math.round(lineH),
+    width: Math.round(t.width), limit: Math.round(panel.width - 32),
+    cut: span.scrollWidth > span.clientWidth, ellipsis: cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap',
+    button: btn ? btn.scrollWidth <= Math.ceil(btn.getBoundingClientRect().width) : true,
+    statusBefore: Math.round(before), statusAfter: Math.round(status?.getBoundingClientRect().height ?? 0),
   }
 }

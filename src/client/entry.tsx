@@ -55,11 +55,12 @@ export function makeEntry(deps: EntryDeps): (props: SessionProps) => ReactElemen
     const running = useRunning(props)
     const dot = useSyncExternalStore(store.subscribe, () => entryDot(store.getSnapshot(), running))
     const open = useStore(store, s => s.panelVisible)
+    const fresh = useStore(store, s => s.fresh)
     return (
       <button
         type="button"
         className={cx('pd-portal', 'pd-entry', dot === 'busy' && 'pd-busy', dot === 'progress' && 'pd-has-progress')}
-        aria-label={running ? t('entryBusyLabel') : t('entryLabel')}
+        aria-label={running ? t('entryBusyLabel') : t('entryLabel') + (dot ? t(fresh ? 'entryFresh' : 'entryProgress') : '')}
         aria-expanded={open}
         aria-keyshortcuts={deps.keyshortcuts}
         title={t('entryLabel')}
@@ -82,7 +83,7 @@ const HINTS_KEPT = 50
 const shownCount = new Map<string, number>()
 
 function sessionStore(): Storage | undefined {
-  try { return typeof globalThis.sessionStorage === 'undefined' ? undefined : globalThis.sessionStorage } catch { return undefined }
+  try { return globalThis.sessionStorage } catch { return undefined }
 }
 
 function readCounts(): Record<string, number> {
@@ -117,7 +118,7 @@ export function resetHintCounts(): void {
 }
 
 function useNarrow(): boolean {
-  const get = (): boolean => typeof window !== 'undefined' && window.innerWidth < HINT_MIN_VIEWPORT
+  const get = (): boolean => globalThis.innerWidth < HINT_MIN_VIEWPORT // (false without a window)
   return useSyncExternalStore((fn) => {
     window.addEventListener('resize', fn)
     return () => { window.removeEventListener('resize', fn) }

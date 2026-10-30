@@ -9,10 +9,16 @@
  *   (`PLATFORM_MODULES` in packages/client/web/src/platform.ts) stay external;
  *   every other import is inlined, and any value import of another
  *   `@deepseek-ai/*` package or a Node builtin fails the build.
+ * - `lib/client.<name>.js` — optional lazy chunks, one per `import()`ed module,
+ *   loaded by the host through `require.async` (scripts/async-chunks.ts).
  */
 import { builtinModules } from 'node:module'
 import { defineConfig, type UserConfig } from 'tsdown'
 import pkg from './package.json' with { type: 'json' }
+import { asyncChunksPlugin, registrationBanner } from './scripts/async-chunks.ts'
+import { shortenClasses } from './scripts/css-classes.ts'
+import { shortenCssVars } from './scripts/css-vars.ts'
+import { aliasJsxRuntime } from './scripts/jsx-alias.ts'
 import { minifyCssModule } from './scripts/minify-css.ts'
 
 const NODE_BUILTINS = new Set([...builtinModules, ...builtinModules.map(id => `node:${id}`)])
@@ -49,9 +55,12 @@ const client: UserConfig = {
   dts: false,
   clean: false,
   sourcemap: false,
-  // Whitespace and syntax only: identifiers stay readable for review, and the
-  // gzip budget (scripts/check-bundle.mjs) still holds with room to spare.
-  minify: { compress: true, mangle: false, codegen: { removeWhitespace: true } },
+  // Local identifiers are mangled (property names, exports and the CSS class names
+  // stay as written), which is what keeps the gzip budget (scripts/check-bundle.mjs)
+  // roomy; review the readable source in src/, not lib/. The factory's `require`
+  // parameter keeps its name: check:bundle audits every `require(...)` and
+  // `require.async(...)` in the shipped text, which a mangled `e(...)` would hide.
+  minify: { compress: true, mangle: { reserved: ['require'] }, codegen: { removeWhitespace: true } },
   deps: {
     neverBundle: PLATFORM_MODULES,
     alwaysBundle: (id: string) => !PLATFORM_MODULES.includes(id),
@@ -61,9 +70,32 @@ const client: UserConfig = {
     // Comments and whitespace in the stylesheet stay in the source only (scripts/minify-css.ts).
     name: 'dsh-client-css-minify',
     transform(code: string, id: string) {
-      return id.replaceAll('\\', '/').endsWith('/src/client/styles.ts') ? { code: minifyCssModule(code), map: null } : null
+      return id.replaceAll('\\', '/').match(/\/src\/client\/(?:picture-|works-)?styles\.ts$/) ? { code: minifyCssModule(code), map: null } : null
     },
   }, {
+    // The stylesheet's custom properties ship under their short names (scripts/css-vars.ts),
+    // in the CSS and in inline `style` keys of every client module, entry and chunks alike.
+    name: 'dsh-client-css-vars',
+    transform(code: string, id: string) {
+      if (!/\/src\/client\/[^?]*\.tsx?$/.test(id.replaceAll('\\', '/'))) return null
+      const out = shortenCssVars(code)
+      return out === code ? null : { code: out, map: null }
+    },
+  }, {
+    // Class names, ids and keyframes ship under their short names too (scripts/css-classes.ts).
+    name: 'dsh-client-classes',
+    transform(code: string, id: string) {
+      if (!/\/src\/client\/[^?]*\.tsx?$/.test(id.replaceAll('\\', '/'))) return null
+      const out = shortenClasses(code)
+      return out === code ? null : { code: out, map: null }
+    },
+  }, {
+    // `(0, rt.jsx)(…)` → a local alias the minifier shortens (scripts/jsx-alias.ts).
+    name: 'dsh-client-jsx-alias',
+    renderChunk(code: string, chunk: { fileName: string }) {
+      return { code: aliasJsxRuntime(code, chunk.fileName), map: null }
+    },
+  }, asyncChunksPlugin(), {
     name: 'dsh-client-bundle-purity',
     resolveId(source: string) {
       if (NODE_BUILTINS.has(source)) {
@@ -77,10 +109,16 @@ const client: UserConfig = {
   }],
   outputOptions: {
     entryFileNames: 'client.js',
-    banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(pkg.name)}, factory: (require) => {`,
+    // `import()` of a module makes it lazy: lib/client.<name>.js, fetched by the host's
+    // module loader on first use (scripts/async-chunks.ts). The first-screen budget
+    // counts lib/client.js only; the async chunks have their own (scripts/check-bundle.mjs).
+    chunkFileNames: 'client.[name].js',
+    banner: chunk => registrationBanner(pkg.name, chunk),
     intro: 'var module = { exports: {} }; var exports = module.exports;',
     footer: 'return module.exports; } });',
-    codeSplitting: false,
+    // lib/client.js is the end of the line: the host runs it as a classic script and
+    // no later bundler reads its /* @__PURE__ */ hints, so ship none. Legal comments stay.
+    comments: { legal: true, annotation: false, jsdoc: false },
   },
 }
 

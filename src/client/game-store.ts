@@ -9,6 +9,7 @@ import {
   inBounds, isColorIndex, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
   remainingByColor, resizeBoard, SafeStore, type SavedState, sanitizePrompt, setCell, type StatusResponse,
   type StorageStatus, templateIdOf, templateKey, type Tool, type TokenUsageInfo, undo,
+  MAX_WORKS, type StoredWork, WORKS_KEY,
 } from '../core/index.ts'
 
 export type AiSize = 12 | 16
@@ -36,17 +37,26 @@ export interface AiState {
   readonly status?: StatusResponse | undefined
 }
 
+/** Source ids of picture patterns start with this (AI ones never contain a `-`). */
+export const PICTURE_PREFIX = 'p-'
+export const isPictureSource = (target: string | null): boolean => target?.startsWith(`board:${PICTURE_PREFIX}`) ?? false
+
+/** What the panel shows; `picture` (spec §18.2) and `works` (§18.4) are pages of home and are saved as `home`. */
+export type ViewMode = Mode | 'picture' | 'works'
+
 export type Overlay = 'coach' | 'done' | 'result' | null
-export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered'
+export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'say'
 
 export interface GameState {
   readonly history: History
   readonly color: number
   readonly tool: Tool
-  readonly mode: Mode
+  readonly mode: ViewMode
   readonly target: string | null
   readonly targetBoard: Board | null
   readonly ironed: boolean
+  /** This game's piece on the works wall (its id) while ironed (spec §18.4). */
+  readonly work: number | null
   /** Iron animation start time, while it runs. */
   readonly ironingSince: number | null
   /** The followed pattern is complete (every target bead in place). */
@@ -82,6 +92,7 @@ export interface GameSnap {
   readonly target: string | null
   readonly targetBoard: Board | null
   readonly ironed: boolean
+  readonly work: number | null
   readonly complete: boolean
   readonly color: number
   readonly tool: Tool
@@ -148,10 +159,13 @@ export class GameStore {
   /** Games replaced by a new one, newest last: undo past a game's first step brings them back. */
   private prevGames: GameSnap[] = []
   private boardSeq = 0
+  /** The works wall as stored, oldest first; a new array on every change. */
+  private wall: StoredWork[]
   /** Games left by undoing a switch, for redo; any edit drops them. */
   private nextGames: GameSnap[] = []
   /** Live visibility of the panel (set by the mounted panel), read when a result lands. */
-  private visibilityProbe: (() => boolean) | null = null
+  /** Each mounted panel's probe → its last "on screen" report. */
+  private readonly panels = new Map<() => boolean, boolean>()
 
   constructor(private readonly deps: GameDeps) {
     this.now = deps.now ?? Date.now
@@ -163,6 +177,12 @@ export class GameStore {
     let target = targetBoard ? saved.target : null
     if (targetBoard && targetBoard.size !== saved.board.size) { target = null; targetBoard = null }
     const storage = deps.store.status
+    // the works wall lives under its own key; before v0.2 there is none (an empty wall).
+    // Only the ids are checked here; the wall page validates every work (core/works.ts, in its chunk).
+    // Anything but an array (or broken JSON) is an empty wall: `filter` throws on it.
+    try {
+      this.wall = (JSON.parse(deps.store.get(WORKS_KEY) ?? '[]') as (StoredWork | null)[]).filter(w => Number.isSafeInteger(w?.i)) as StoredWork[]
+    } catch { this.wall = [] }
     this.state = {
       history: createHistory(saved.board),
       color: saved.color,
@@ -171,6 +191,7 @@ export class GameStore {
       target,
       targetBoard,
       ironed: saved.ironed,
+      work: saved.work,
       ironingSince: null,
       complete: targetBoard !== null && completion(saved.board, targetBoard).done,
       celebrateAt: null,
@@ -186,6 +207,9 @@ export class GameStore {
       panelVisible: false,
       fresh: false,
     }
+    // ironed but not on the wall: closed mid-iron, or a piece ironed before v0.2 (never a blank
+    // board: a damaged save falls back to one, and iron() refuses it too)
+    if (saved.ironed && saved.work === null && saved.board.cells.some(c => c !== EMPTY)) this.collect()
   }
 
   // ── store protocol ────────────────────────────────────────────────
@@ -206,23 +230,32 @@ export class GameStore {
     this.set({ ai: { ...this.state.ai, ...patch } }, false)
   }
 
-  /** The panel reports its visibility; showing it clears the "fresh result" dot. */
-  setPanelVisible(visible: boolean): void {
-    if (visible === this.state.panelVisible) return
-    this.set({ panelVisible: visible, ...(visible ? { fresh: false } : {}) }, false)
+  /**
+   * Every mounted panel (split view, several sessions) registers a synchronous
+   * "am I on screen" probe. The panel counts as visible while ANY registered
+   * panel is on screen, so a hidden or later-mounted panel never overrides a
+   * visible one, and removing one panel never unregisters another. `check`
+   * re-samples this panel; `remove` unregisters it (on unmount). A result that
+   * lands between two reports is judged on the live probes (spec §15.1-3).
+   * Showing a panel clears the "fresh result" dot.
+   */
+  addPanel(probe: () => boolean): { readonly check: () => void; readonly remove: () => void } {
+    this.panels.set(probe, false)
+    return {
+      check: () => this.seePanels(probe),
+      // once deleted, `probe` matches no key: nothing is re-read, the rest are OR'd
+      remove: () => { this.panels.delete(probe); this.seePanels(probe) },
+    }
   }
 
-  /**
-   * The mounted panel registers a synchronous "am I on screen" check, so a
-   * result that lands between two visibility reports is judged on the live
-   * state (spec §15.1-3), not on the last sample. `null` unregisters.
-   */
-  setVisibilityProbe(probe: (() => boolean) | null): void { this.visibilityProbe = probe }
-
-  private panelOnScreen(): boolean {
-    let visible = this.state.panelVisible
-    try { if (this.visibilityProbe) visible = this.visibilityProbe() } catch { /* keep the last report */ }
-    if (visible !== this.state.panelVisible) this.setPanelVisible(visible)
+  /** Re-read the registered probe `only` (omitted: every probe), then OR the reports. */
+  private seePanels(only?: () => boolean): boolean {
+    for (const p of this.panels.keys()) {
+      // a throwing probe keeps its last report
+      if (!only || p === only) try { this.panels.set(p, p()) } catch { /* keep */ }
+    }
+    const visible = [...this.panels.values()].includes(true)
+    if (visible !== this.state.panelVisible) this.set({ panelVisible: visible, fresh: this.state.fresh && !visible }, false)
     return visible
   }
 
@@ -238,9 +271,9 @@ export class GameStore {
   private saved(): SavedState {
     const s = this.state
     return {
-      board: s.history.present, color: s.color, tool: s.tool, mode: s.mode, target: s.target,
+      board: s.history.present, color: s.color, tool: s.tool, mode: s.mode === 'play' || s.mode === 'ai' ? s.mode : 'home', target: s.target,
       pattern: s.target?.startsWith('board:') && s.targetBoard ? encode(s.targetBoard) : null,
-      ironed: s.ironed || s.ironingSince !== null, prefs: s.prefs, done: s.done, coached: s.coached,
+      ironed: s.ironed || s.ironingSince !== null, prefs: s.prefs, done: s.done, coached: s.coached, work: s.work,
     }
   }
 
@@ -269,7 +302,7 @@ export class GameStore {
   }
 
   // ── navigation & prefs ────────────────────────────────────────────
-  go(mode: Mode): void {
+  go(mode: ViewMode): void {
     if (mode === this.state.mode) return
     this.last = null
     this.set({ mode, overlay: mode === 'play' ? this.state.overlay : null })
@@ -286,7 +319,7 @@ export class GameStore {
     }
     this.switchGame({
       history: createHistory(createBoard(s.history.present.size)), target: null, targetBoard: null,
-      ironed: false, complete: false, color: s.color, tool: s.tool,
+      ironed: false, work: null, complete: false, color: s.color, tool: s.tool,
     }, { mode: 'play', overlay: s.coached ? null : 'coach' })
   }
 
@@ -299,11 +332,11 @@ export class GameStore {
 
   private snap(): GameSnap {
     const s = this.state
-    return { history: commit(s.history), target: s.target, targetBoard: s.targetBoard, ironed: s.ironed, complete: s.complete, color: s.color, tool: s.tool }
+    return { history: commit(s.history), target: s.target, targetBoard: s.targetBoard, ironed: s.ironed, work: s.work, complete: s.complete, color: s.color, tool: s.tool }
   }
 
   private static apply(g: GameSnap): Partial<GameState> {
-    return { history: g.history, target: g.target, targetBoard: g.targetBoard, ironed: g.ironed, complete: g.complete, color: g.color, tool: g.tool }
+    return { history: g.history, target: g.target, targetBoard: g.targetBoard, ironed: g.ironed, work: g.work, complete: g.complete, color: g.color, tool: g.tool }
   }
 
   /** An undo toast speaks about the game on screen; leaving or swapping that game retires it. */
@@ -450,7 +483,8 @@ export class GameStore {
     if (this.locked) return
     if (!canUndo(this.state.history)) { this.restorePreviousGame(); return }
     this.last = null
-    this.set({ history: undo(this.state.history) })
+    // the step an undo toast offers is gone now (or no longer the last one): the toast goes too (R3-3)
+    this.set({ history: undo(this.state.history), ...this.dropUndoToast() })
     this.afterChange()
   }
 
@@ -533,12 +567,10 @@ export class GameStore {
     const s = this.state
     const fresh = createBoard(board.size)
     this.switchGame({
-      history: createHistory(fresh), target, targetBoard: board, ironed: false, complete: false,
+      history: createHistory(fresh), target, targetBoard: board, ironed: false, work: null, complete: false,
       color: firstColor(fresh, board, s.color), tool: 'paint',
     }, { mode: 'play', overlay: s.coached ? null : 'coach' })
   }
-
-  leaveTarget(): void { this.cancelDone(); this.set({ target: null, targetBoard: null, complete: false, celebrateAt: null }) }
 
   /** Put every pattern bead in place (AI patterns: "fill board"). Undoable. */
   fillTarget(): void {
@@ -568,6 +600,38 @@ export class GameStore {
     const done = id !== null && findTemplate(id) !== undefined && this.state.complete && !this.state.done.includes(id)
       ? [...this.state.done, id] : this.state.done
     this.set({ ironed: true, ironingSince: null, overlay: 'result', done, celebrateAt: this.now() })
+    this.collect()
+  }
+
+  // ── works wall (spec §18.4) ───────────────────────────────────────
+  /** The wall as stored, oldest first; the same array until it changes (a useSyncExternalStore snapshot). */
+  works = (): readonly StoredWork[] => this.wall
+
+  /**
+   * Replace the wall (the wall page deletes, restores and cleans through this).
+   * Written right away under its own key; a refused write (quota) leaves the wall
+   * in memory for this session and never touches the game's save (SafeStore.set `side`).
+   */
+  setWall(next: StoredWork[]): void {
+    this.wall = next
+    this.deps.store.set(WORKS_KEY, JSON.stringify(next), true)
+    this.set({}, false)
+  }
+
+  /**
+   * The ironed piece goes on the wall, the oldest leaves past 60. Its id is the
+   * ironing time, kept past the newest id. A `board:` source up to 16×16 keeps
+   * its pattern too (still under 1 KB), so 再拼一次 can follow it again.
+   */
+  private collect(): void {
+    const s = this.state
+    const b = s.history.present
+    const w: StoredWork = {
+      i: Math.max(this.now(), (this.wall.at(-1)?.i ?? 0) + 1), n: b.size, b: encode(b), s: s.target,
+      ...(s.target?.startsWith('board:') && s.targetBoard && b.size < 24 ? { p: encode(s.targetBoard) } : {}),
+    }
+    this.setWall([...this.wall, w].slice(-MAX_WORKS))
+    this.set({ work: w.i })
   }
 
   /** Leaving a game mid-iron: finish it now, so the ironed piece belongs to that game and not the next. */
@@ -578,8 +642,11 @@ export class GameStore {
   }
 
   unIron(): void {
-    if (this.state.ironingSince !== null || !this.state.ironed) return
-    this.set({ ironed: false, overlay: null, celebrateAt: null })
+    const s = this.state
+    if (s.ironingSince !== null || !s.ironed) return
+    // the piece leaves the wall with the ironing
+    if (s.work !== null) this.setWall(this.wall.filter(w => w.i !== s.work))
+    this.set({ ironed: false, work: null, overlay: null, celebrateAt: null })
   }
 
   /** "Make another": back to the start page with the ironed piece kept for undo. */
@@ -667,11 +734,20 @@ export class GameStore {
     })
   }
 
+  /**
+   * Picture to pattern (spec §18.2): the quantised picture becomes the guide of
+   * a new `board:p-…` game titled 「我的图纸」; only this pattern is saved.
+   */
+  /** A new game following a picture pattern; with prefix '' an AI-like `board:` source (再拼一次 of an AI work). */
+  startPicture(board: Board, prefix = PICTURE_PREFIX): void {
+    this.startPattern(`board:${prefix}${this.now().toString(36)}${(++this.boardSeq).toString(36)}`, board)
+  }
+
   /** A generated pattern becomes the faint guide on a fresh board, like a template. */
   private finishAi(result: AiResult): void {
-    this.set({ ai: { ...this.state.ai, phase: 'done', error: undefined, result }, fresh: !this.panelOnScreen() }, false)
+    this.set({ ai: { ...this.state.ai, phase: 'done', error: undefined, result }, fresh: !this.seePanels() }, false)
     // every generation is its own board, even when the picture is the same (spec v1.6 §4.3)
-    this.startPattern(`board:${this.now().toString(36)}${(++this.boardSeq).toString(36)}`, result.board)
+    this.startPicture(result.board, '')
   }
 }
 

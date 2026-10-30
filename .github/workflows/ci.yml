@@ -24,7 +24,8 @@ jobs:
       - run: pnpm run test
       - run: pnpm run build
       - name: lib/ is committed and up to date
-        run: git diff --exit-code -- lib
+        # status, not diff: a new lazy chunk (lib/client.<name>.js) that was never committed is untracked
+        run: git status --porcelain -- lib && test -z "$(git status --porcelain -- lib)"
       - run: pnpm run check:bundle
 
   # engines.node is ">=20.3" (AbortSignal.any in the Host half). pnpm 11 itself

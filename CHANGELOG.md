@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Moved to the next version
+
+- **Daily pattern (每日一拼, spec §18.3, F1)** was taken out of 0.2.0 before release. Its code is kept on the `f1` branch (8f0bc97) and the 60 daily patterns stay with the spec; 0.2.0 has no daily strip, no streak and no `daily:` source.
+
 ### Planned for 0.1.1
 
 These review suggestions were left out of 0.1.0 on purpose:
@@ -11,9 +15,28 @@ These review suggestions were left out of 0.1.0 on purpose:
 - **"Thinking" board while the model runs (design S4)**: a new idle state that needs its own design pass and copy; out of scope for a fix round.
 - **Wrap the stylesheet in `@scope (.pd-root, .pd-portal)` (design S12)**: nothing leaks out today (a unit test rejects any selector without the `pd-` prefix), and host styles leaking in are now handled by the isolation layer. `@scope` would change cascade proximity for all ~260 rules, so it needs its own visual pass on every screen rather than a late fix.
 - **Coach card placement (design N11)**: the card covers the bottom two rows of the board. Spec §4.2 places it exactly there ("卡片覆盖豆板下部，不遮挡调色盘"), so moving it above the board or before the first template needs the spec changed first; left as specified.
-- **Light-mode ghost dots for White and Cream**: the dark-theme rings (N10) bring every colour to ≥ 3:1 on the dark board. On the light board White and Cream ghosts stay below 3:1 as designed (a guide, not content); a light-mode ring needs a design decision.
 - **Replaced games survive a reload** (known limitation of 0.1.0, see below): persist the games kept for undo after switching patterns (N1), so that undo still reaches them after a reload. This changes the storage format.
 - **Pin GitHub Actions to commit SHAs**: CI uses major-version tags (`actions/checkout@v4` and so on). Pinning needs a Renovate/Dependabot rule to keep the SHAs current; otherwise they go stale.
+
+## [0.2.0] - 2026-10-30
+
+### Added
+
+- **Picture to pattern (spec §18.2).** A third entry card, a picture dropped anywhere on the panel, or one pasted on the home page (only while focus is in the panel; the chat box is never touched) opens the picture page: crop to a square (drag, arrow keys, + / -), pick 12 / 16 / 24, 16 / 8 / 4 colours, dithering and background removal, preview, then "Start beading" as a template game titled 我的图纸 / My pattern. PNG, JPG, GIF, WebP and BMP; SVG is refused; files over 20 MB or with a side over 8000 px are refused from the size declared in the file header, wherever it sits in the file (for a GIF, the furthest any of its frames reaches, not just its screen size), before anything is decoded, and a file that declares no size is not decoded at all. Elsewhere than the picture page a dropped or pasted file that is not a picture is ignored.
+- **Privacy of pictures.** Pictures are processed on this device only: no network request, no tokens, the original is never kept or written anywhere; only the quantised pattern is stored.
+- **My works (spec §18.4).** Every ironed piece goes onto a wall (up to 60, oldest dropped first, under 1 KB each); un-ironing takes it off. A row of thumbnails on the home page and a wall page (3 / 4 / 6 columns, newest first, a heading per month) with a detail card: Export PNG, Copy image, Bead it again, and Delete, which asks nothing and can be undone for 5 s (the Delete key takes the same path).
+- **New storage key `dsh-pindou:works`** for the wall, next to the game's `dsh-pindou:v1`. Before 0.2 there is none: an empty wall. A broken value is read as an empty wall.
+
+### Changed
+
+- **Home page:** three entry cards (Free play, AI pattern, Picture), with My works under the templates when there is at least one piece.
+- **Async modules (spec §18.6):** the picture page and the wall page are separate chunks (`lib/client.picture.js`, `lib/client.works.js`), loaded the first time they are opened, with a skeleton after 150 ms. The first-screen bundle stays within its budget (`pnpm run check:bundle`). On a DSH without `require.async` the card reads 需要新版 DSH / Requires a newer DSH and is disabled; if a chunk fails to load, 加载失败，点此重试 / Couldn't load · Retry, with no toast. In both states a dropped or pasted picture is swallowed, so it never becomes a chat attachment.
+- **E2E:** every run keeps its output, DSH home and workspace under its own TMPDIR (`E2E_OUT`, `E2E_DSH_HOME`, `E2E_WS`) on free ports (`E2E_DSH_PORT`, `E2E_LLM_PORT`), starts from a fresh home, and refuses to share them with a live run.
+
+### Fixed
+
+- **Guide dots on the light board are visible for every colour (spec §18.5, O3; was planned for 0.1.1).** The per-colour ring that the dark theme already draws (N10) now has a light-board table too: each colour is darkened toward ink until it stands out, then faded back to just 3.2:1 against the board, and drawn as a 1px inner ring, which stays under the selected-colour halo so selected guides keep ≥ 3:1 as well (R3-1: before, only Black passed when selected). White and Cream were the ones reported, but measured on the light board Yellow, Lime, Pink, Tan, Sky, Orange, Gray and Teal also fell short of 3:1 even at full strength, so all 16 get a ring. Unit tests recompute both tables and check all 16 colours × light/dark × normal/selected; the E2E run seeds a pattern with every colour and measures the computed ring against the real board in light and dark, normal and selected.
+- **The toast no longer covers the palette or Iron/Export (design R3-2).** It was anchored just above the footer, and the play view stacks board, tools, palette and footer down to the bottom edge, so on short windows (and, as the new check found, at 1280×800 too) it sat on swatches. It now drops from the top, under the header, over the read-only status row. E2E checks at 1280×800, 1280×699, 1280×620 and 420×620 (light and dark) assert that no swatch, button or bead cell intersects the toast.
 
 ## [0.1.0] - 2026-10-29
 
@@ -67,4 +90,5 @@ First release of 拼豆小憩 · Bead Break.
 - Credentials are checked without a model call, so a configured but invalid key is only found on the first generation.
 
 [Unreleased]: https://github.com/Teloi/dsh-pindou/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/Teloi/dsh-pindou/compare/v0.1.0...feat/v0.2
 [0.1.0]: https://github.com/Teloi/dsh-pindou/releases/tag/v0.1.0

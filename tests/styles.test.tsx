@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import * as icons from '../src/client/icons.tsx'
 import { CSS } from '../src/client/styles.ts'
-import { contrast as coreContrast, DARK_BOARD, GHOST_RING_TARGET, GHOST_RINGS, ghostRing, mix as coreMix, PALETTE } from '../src/core/index.ts'
+import { contrast as coreContrast, DARK_BOARD, GHOST_RING_TARGET, GHOST_RINGS, GHOST_RINGS_LIGHT, ghostRing, LIGHT_BOARD, mix as coreMix, PALETTE } from '../src/core/index.ts'
 
 const hex = (h: string): [number, number, number] => {
   const v = h.replace('#', '')
@@ -24,6 +24,8 @@ const contrast = (a: string, b: string): number => {
   const x = lum(hex(a)), y = lum(hex(b))
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }
+/** A plain number token (first definition, i.e. the light theme). */
+const numberToken = (name: string): number => Number(new RegExp(`${name}:\\s*([\\d.]+)`).exec(CSS)![1])
 /** The literal a token falls back to when the host does not define it. */
 const token = (name: string, block = CSS.slice(0, CSS.indexOf('body[data-ds-dark-theme]'))): string => {
   const m = new RegExp(`${name}:\\s*(?:var\\([^,]+,\\s*)?(#[0-9A-Fa-f]{6})`).exec(block)
@@ -77,13 +79,147 @@ describe('N10: target ghost dots on the dark board reach 3:1 for all 16 colours'
     expect(fills.filter(f => contrast(f, DARK_BOARD) < 3).length).toBeGreaterThan(8)
   })
   it('the dark theme draws the ring at full strength (faintness in the fill, not in opacity)', () => {
-    expect(CSS).toContain('body[data-ds-dark-theme] .pd-root .pd-cell.pd-g::after{box-shadow:inset 0 0 0 1.5px var(--pd-gr)}')
+    expect(CSS).toContain('body[data-ds-dark-theme] .pd-g{--pd-rw:1.5px;--pd-rc:var(--pd-gr)}')
     const ghost = /\.pd-cell\.pd-g::after\{[^}]*\}/.exec(CSS)![0]
     expect(ghost).not.toMatch(/opacity:var\(--pd-ghost/)
     expect(ghost).toContain('color-mix(in srgb,var(--pd-gc) calc(var(--pd-ga) * 100%),transparent)')
   })
   it('ghostRing keeps hue and never returns below target', () => {
     for (const h of ['#000000', '#26272B', '#1C1D20', '#FFFFFF', '#2D4FA0']) expect(contrast(ghostRing(h), DARK_BOARD)).toBeGreaterThanOrEqual(GHOST_RING_TARGET)
+  })
+})
+
+describe('O3 (spec §18.5): target ghost dots on the light board reach 3:1 for all 16 colours', () => {
+  it('the core board constant is the light --pd-board token', () => {
+    expect(token('--pd-board')).toBe(LIGHT_BOARD)
+  })
+  it('the shipped light ring table is exactly what ghostRing() computes for the palette', () => {
+    expect(GHOST_RINGS_LIGHT).toEqual(PALETTE.map(c => ghostRing(c.hex, LIGHT_BOARD)))
+  })
+  it('the light rings are needed: even the full colour falls short for white, cream and the pastels', () => {
+    const short = PALETTE.filter(c => contrast(c.hex, LIGHT_BOARD) < 3).map(c => c.en)
+    expect(short).toEqual(expect.arrayContaining(['White', 'Cream', 'Yellow', 'Lime']))
+    // the §18.5 draft recipe (28% ink over the board, white and cream only) measures well below 3:1
+    expect(contrast(coreMix(LIGHT_BOARD, '#0F1115', 0.28), LIGHT_BOARD)).toBeLessThan(3)
+  })
+  it('the light theme draws the ring at full strength, also on the selected colour: 1px at 2×, 1.5px on 1× screens (design I6/C3)', () => {
+    const ring = 'inset 0 0 0 var(--pd-rw,1px) var(--pd-rc,var(--pd-grl))'
+    expect(/\.pd-cell\.pd-g::after\{[^}]*\}/.exec(CSS)![0]).toContain(`box-shadow:${ring};`)
+    expect(CSS).toContain(`.pd-g.pd-hot::after{box-shadow:${ring},0 0 0 1px color-mix(`)
+    // a 1px ring at 1× is blended by antialiasing (median ring pixel 2.5–2.8:1 measured); 1.5px there
+    expect(CSS).toContain('@media (max-resolution:1.99dppx){.pd-g{--pd-rw:1.5px}}')
+    // nothing else sets the width or the colour
+    expect(CSS.match(/--pd-rw:\d/g)).toHaveLength(2)
+    expect(CSS.match(/--pd-rc:v/g)).toHaveLength(1)
+  })
+  it('ghostRing on a light board darkens (toward ink), never lightens', () => {
+    for (const h of ['#FFFFFF', '#F6F4EE', '#EEF0F3', '#F7C531', '#000000']) {
+      const r = ghostRing(h, LIGHT_BOARD)
+      expect(contrast(r, LIGHT_BOARD)).toBeGreaterThanOrEqual(GHOST_RING_TARGET)
+      expect(coreContrast(r, '#FFFFFF')).toBeGreaterThan(coreContrast(LIGHT_BOARD, '#FFFFFF'))
+    }
+  })
+})
+
+/** The custom properties a rule sets, e.g. the dark board's or the 1× screen's ring width and table. */
+const varsOf = (rule: string): Record<string, string> => Object.fromEntries([...rule.matchAll(/(--pd-[\w-]+):([^;}]+)/g)].map(m => [m[1]!, m[2]!]))
+
+describe('§18.5 acceptance (design R3-1): 16 colours × light/dark × normal/selected, every guide ring ≥ 3:1 on its board', () => {
+  const dark = CSS.slice(CSS.indexOf('body[data-ds-dark-theme] .pd-root, body[data-ds-dark-theme] .pd-portal {'))
+  const RING_TABLES: Record<string, readonly string[]> = { '--pd-grl': GHOST_RINGS_LIGHT, '--pd-gr': GHOST_RINGS }
+  const DARK_G = varsOf(/body\[data-ds-dark-theme\] \.pd-g\{([^}]*)\}/.exec(CSS)?.[1] ?? '')
+  const ONE_X = varsOf(/@media \(max-resolution:1\.99dppx\)\{\.pd-g\{([^}]*)\}\}/.exec(CSS)?.[1] ?? '')
+  /** The ring a rule draws with the given properties set on the cell: its first box-shadow must be an opaque `inset 0 0 0 <w>px <table>`. */
+  const ringOf = (selector: string, set: Record<string, string>): { width: number; table: readonly string[] } => {
+    const esc = selector.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const rule = new RegExp(`(?:^|[}\\n])${esc}\\{([^}]*)\\}`).exec(CSS)
+    if (!rule) throw new Error(`no rule ${selector}`)
+    // resolve var(--x,fallback) from the innermost out, as the cascade would
+    let shadow = /box-shadow:([^;}]*)/.exec(rule[1]!)?.[1] ?? ''
+    for (let prev = ''; prev !== shadow;) {
+      prev = shadow
+      shadow = shadow.replace(/var\((--pd-(?:rw|rc|grl?))(?:,([^()]*(?:\([^()]*\))?[^()]*))?\)/, (all, name: string, fb?: string) => set[name] ?? (name === '--pd-grl' || name === '--pd-gr' ? `@${name}` : fb ?? all))
+    }
+    const m = /^inset 0 0 0 ([\d.]+)px @(--pd-grl?)(?:,|$)/.exec(shadow)
+    if (!m) throw new Error(`${selector} draws no ring first: ${shadow}`)
+    return { width: Number(m[1]), table: RING_TABLES[m[2]!]! }
+  }
+  const cases = [
+    ['light', 'normal', token('--pd-board'), '.pd-cell.pd-g::after', {}],
+    ['light', 'selected', token('--pd-board'), '.pd-g.pd-hot::after', {}],
+    ['light 1×', 'normal', token('--pd-board'), '.pd-cell.pd-g::after', ONE_X],
+    ['light 1×', 'selected', token('--pd-board'), '.pd-g.pd-hot::after', ONE_X],
+    ['dark', 'normal', token('--pd-board', dark), '.pd-cell.pd-g::after', DARK_G],
+    ['dark', 'selected', token('--pd-board', dark), '.pd-g.pd-hot::after', DARK_G],
+  ] as const
+  it('the widths: 1px on the light board at 2×, 1.5px on 1× screens (design I6/C3) and on the dark board (N10)', () => {
+    expect([ringOf('.pd-cell.pd-g::after', {}).width, ringOf('.pd-cell.pd-g::after', ONE_X).width, ringOf('.pd-cell.pd-g::after', DARK_G).width]).toEqual([1, 1.5, 1.5])
+    expect(ringOf('.pd-cell.pd-g::after', DARK_G).table).toBe(GHOST_RINGS)
+  })
+  for (const [theme, state, board, selector, set] of cases) {
+    describe(`${theme}, ${state}`, () => {
+      const { width, table } = ringOf(selector, set)
+      it('ring is at least 1px wide and covers all 16 colours', () => {
+        expect(width).toBeGreaterThanOrEqual(1)
+        expect(table).toHaveLength(PALETTE.length)
+      })
+      for (const [i, c] of PALETTE.entries()) {
+        it(`${c.code} ${c.en} ${c.hex}: ring ${table[i]} ≥ 3:1 on ${board}`, () => {
+          expect(contrast(table[i]!, board)).toBeGreaterThanOrEqual(3)
+        })
+      }
+    })
+  }
+  it('without the rings no colour would pass on the light board (R3-1 measured 1.01–1.84 normal; selected only black)', () => {
+    const board = token('--pd-board')
+    expect(PALETTE.filter(c => contrast(coreMix(board, c.hex, numberToken('--pd-ghost-alpha')), board) >= 3)).toHaveLength(0)
+    expect(PALETTE.filter(c => contrast(coreMix(board, c.hex, numberToken('--pd-ghost-hot')), board) >= 3).map(c => c.en)).toEqual(['Black'])
+  })
+})
+
+describe('R3-2: the toast never sits over the bottom controls', () => {
+  it('is anchored to the top, under the header, over the read-only status row', () => {
+    expect(CSS).toMatch(/\.pd-toast\{position:absolute;left:50%;top:calc\(env\(safe-area-inset-top,0px\) \+ var\(--pd-header-h\) \+ 4px\);/)
+  })
+  it('no rule anchors it to the bottom (footer, palette and Iron/Export live there at every height)', () => {
+    expect(CSS).not.toMatch(/\.pd-toast\{[^}]*bottom:/)
+  })
+})
+
+/** The declarations of the first top-level rule for exactly `sel`. */
+function cssRule(sel: string): string {
+  const m = new RegExp(`(?:^|\\n|\\})${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\{([^}]*)\\}`).exec(CSS)
+  expect(m, sel).not.toBeNull()
+  return m![1]!
+}
+
+describe('R3-6: the pill\'s main button 「打开拼豆小憩」 is ≥ 32 high to hit, like its ×', () => {
+  it('a ::after reaches 3px above and below the 26px button, inside the button\'s own width', () => {
+    const height = Number(/height:(\d+)px/.exec(cssRule('.pd-pill .pd-pill-go'))![1])
+    const own = cssRule('.pd-pill button')
+    expect(own).toMatch(/position:relative/)
+    const after = cssRule('.pd-pill button::after')
+    expect(after).toMatch(/content:""/)
+    expect(after).toMatch(/position:absolute/)
+    const [top, , bottom = top] = /inset:([^;}]+)/.exec(after)![1]!.split(' ').map(v => -parseFloat(v))
+    expect(height + top! + bottom!).toBeGreaterThanOrEqual(32)
+    expect(/inset:([^;}]+)/.exec(after)![1]!.split(' ')[1]).toBe('0') // never over the ×
+  })
+})
+
+describe('toast width (spec v2.0 22:15): one line, at most panel width − 32, ellipsis', () => {
+  it('the toast is at most the panel width minus 32', () => {
+    expect(cssRule('.pd-toast')).toContain('max-width:calc(100% - 32px)')
+  })
+  it('its text never wraps and ends in an ellipsis when cut', () => {
+    const text = cssRule('.pd-toast>span')
+    for (const decl of ['min-width:0', 'white-space:nowrap', 'overflow:hidden', 'text-overflow:ellipsis']) expect(text).toContain(decl)
+  })
+  it('the undo button keeps its size (never squeezed by the text)', () => {
+    expect(cssRule('.pd-toast button')).toMatch(/flex:none;white-space:nowrap/)
+  })
+  it('no later rule widens the toast again', () => {
+    expect([...CSS.matchAll(/\.pd-toast\{[^}]*max-width:([^;}]*)/g)].map(m => m[1])).toEqual(['calc(100% - 32px)'])
   })
 })
 
@@ -120,11 +256,41 @@ describe('style isolation', () => {
 
 const count = (s: string): number => (s.replace(/\/\*[\s\S]*?\*\//g, '').match(/\{/g) ?? []).length
 
+describe('I1/C1 start cards never cut a title or a status line', () => {
+  const plain = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+  const rules = (sel: string): string => [...plain.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m => m[1]!.trim().split(',').includes(sel)).map(m => m[2]).join(';')
+  it('cards grow with their text: min-height 64, no fixed height, no ellipsis or nowrap anywhere on them', () => {
+    expect(rules('.pd-big')).toMatch(/(^|;)min-height:64px/)
+    expect(rules('.pd-big')).not.toMatch(/(^|;)height:/)
+    expect(plain).not.toMatch(/\.pd-big[^{]*\{[^}]*(text-overflow|white-space:nowrap)/)
+  })
+  it('titles keep CJK words whole and wrap Latin only at spaces; descriptions clamp to two lines; status lines are not clamped', () => {
+    expect(rules('.pd-big b')).toContain('word-break:keep-all')
+    expect(rules('.pd-big b+span')).toMatch(/display:-webkit-box.*-webkit-line-clamp:2/)
+    expect(rules('.pd-big .pd-st')).toBe('display:block')
+  })
+  it('below 480 the icon sits on top and cards are at least 72 high', () => {
+    const q = /@container pd \(max-width: 479px\)\{(.*?\})\}/.exec(plain)?.[1] ?? ''
+    expect(q).toMatch(/\.pd-big\{grid:auto\/minmax\(0,1fr\);min-height:72px/)
+    expect(q).toMatch(/\.pd-big \.pd-ic\{grid-row:auto/)
+    expect(plain).not.toMatch(/max-width: 359px\)\{\.pd-big/)
+  })
+})
+
 describe('build-time CSS minifier', () => {
   it('drops comments and insignificant whitespace but keeps combinators and calc() spacing', async () => {
     const { minifyCss } = await import('../scripts/minify-css.ts')
     expect(minifyCss('/* x */ .pd-root :focus-visible { outline: 2px solid red ; }\n.a > .b, .c{width:calc(100% + 2 * var(--x)) }'))
-      .toBe('.pd-root :focus-visible{outline: 2px solid red}.a > .b,.c{width:calc(100% + 2 * var(--x))}')
+      .toBe('.pd-root :focus-visible{outline:2px solid red}.a > .b,.c{width:calc(100% + 2 * var(--x))}')
+  })
+  it('writes declarations, media features, numbers and colours in their shortest equal form', async () => {
+    const { minifyCss } = await import('../scripts/minify-css.ts')
+    expect(minifyCss('.a{--pd-x: var(--y, #FFFFFF);color: #ffffff80;opacity: 0.60;width:10.50px;top:1.0px;margin:.05em 0.25em}'))
+      .toBe('.a{--pd-x:var(--y,#FFF);color:#ffffff80;opacity:.6;width:10.5px;top:1.0px;margin:.05em .25em}')
+    expect(minifyCss("@property --pd-h { syntax: '<number>'; inherits: true; initial-value: 0.6 }"))
+      .toBe("@property --pd-h{syntax:'<number>';inherits:true;initial-value:.6}")
+    expect(minifyCss('@container pd (max-width: 359px){.a :hover,.b:not(.c) .d{x:calc(1px + 0.5em)}} .pd-g2 .pd-x10{y:#abcabc}'))
+      .toBe('@container pd (max-width:359px){.a :hover,.b:not(.c) .d{x:calc(1px + .5em)}}.pd-g2 .pd-x10{y:#abcabc}')
   })
   it('the shipped stylesheet keeps every rule of the source', async () => {
     const { minifyCss } = await import('../scripts/minify-css.ts')

@@ -58,6 +58,10 @@ function reply(res, model, chunks, usage, delayMs) {
 }
 
 export function startFakeLlm({ port = 0, chatMs = Number(process.env.FAKE_LLM_CHAT_MS ?? 14000) } = {}) {
+  // every model request, for the run's evidence (llm-requests.json): when it came, what it was,
+  // when its reply ended, and whether the host closed it before the end
+  const started = Date.now()
+  const requests = []
   const server = createServer((req, res) => {
     if (req.method === 'GET' && req.url?.endsWith('/models')) {
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -65,6 +69,10 @@ export function startFakeLlm({ port = 0, chatMs = Number(process.env.FAKE_LLM_CH
       return
     }
     let body = ''
+    const r = { n: requests.length + 1, at: Date.now() - started, kind: 'chat', end: null, cut: false }
+    requests.push(r)
+    res.on('finish', () => { r.end = Date.now() - started })
+    res.on('close', () => { if (r.end === null) { r.end = Date.now() - started; r.cut = true } })
     req.on('data', (c) => { body += c })
     req.on('end', () => {
       let json = {}
@@ -73,6 +81,7 @@ export function startFakeLlm({ port = 0, chatMs = Number(process.env.FAKE_LLM_CH
       const model = json.model ?? 'e2e-model'
       const size = Number(/for a (\d+)x\1 bead board/.exec(system)?.[1] ?? 0)
       const user = JSON.stringify(json.messages ?? '')
+      r.kind = size > 0 ? `board ${size}` : /concise title/i.test(system) ? 'title' : 'chat'
       if (size > 0 && user.includes('e2e-429')) {
         // upstream throttling: the host must surface it as rate-limited, not hang or crash
         res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '0' })
@@ -98,7 +107,7 @@ export function startFakeLlm({ port = 0, chatMs = Number(process.env.FAKE_LLM_CH
   return new Promise((resolve) => {
     server.listen(port, '127.0.0.1', () => {
       const address = server.address()
-      resolve({ url: `http://127.0.0.1:${address.port}`, close: () => new Promise(r => { server.closeAllConnections?.(); server.close(() => r()) }) })
+      resolve({ url: `http://127.0.0.1:${address.port}`, requests, inFlight: () => requests.filter(q => q.end === null), close: () => new Promise(r => { server.closeAllConnections?.(); server.close(() => r()) }) })
     })
   })
 }

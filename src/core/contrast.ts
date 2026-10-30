@@ -1,11 +1,16 @@
 /**
- * WCAG contrast helpers, used for the target ghost dots on the dark board
- * (design N10): every one of the 16 colours must stand out at least 3:1
- * (WCAG 1.4.11, non-text) from the board behind it. Only GHOST_RINGS ships
- * in the panel; the helpers are for tests and for recomputing the table.
+ * WCAG contrast helpers, used for the target ghost dots on both boards
+ * (design N10 for dark, spec §18.5 / O3 for light): every one of the 16
+ * colours must stand out at least 3:1 (WCAG 1.4.11, non-text) from the board
+ * behind it. Only the two ring tables ship in the panel; the helpers are for
+ * tests and for recomputing the tables.
  */
 /** The dark board colour (`--pd-board` under the host dark theme; styles.test keeps them equal). */
 export const DARK_BOARD = '#1C1D20'
+/** The light board colour (`--pd-board` under the light theme; styles.test keeps them equal). */
+export const LIGHT_BOARD = '#EEF0F3'
+/** Ink a light-board ring darkens toward (the `--pd-ink` fallback in spec §18.5). */
+export const INK = '#0F1115'
 /** What the ghost ring aims for: 3:1 is the floor, a little headroom against rounding and antialiasing. */
 export const GHOST_RING_TARGET = 3.2
 
@@ -32,16 +37,19 @@ export function mix(a: string, b: string, t: number): string {
 }
 
 /**
- * The ring drawn round a ghost dot on the dark board, as quiet as the rule
- * allows: the colour (lifted toward white when even the full colour is too
- * dark, so black becomes a mid grey and navy a lighter blue) faded into the
- * board just to the target. Every ring ends up near 3.2:1, so no colour's
- * guide shouts louder than another's and the hue still reads.
+ * The ring drawn round a ghost dot, as quiet as the rule allows. The colour
+ * is first pushed away from the board until even the full colour reaches the
+ * target: toward white on a dark board (black becomes a mid grey, navy a
+ * lighter blue), toward ink on a light one (white becomes a grey, cream a
+ * warm grey, yellow an olive). Then it is faded into the board just to the
+ * target, so every ring ends up near 3.2:1, no colour's guide shouts louder
+ * than another's and the hue still reads.
  */
 export function ghostRing(hex: string, board = DARK_BOARD, target = GHOST_RING_TARGET): string {
-  let lifted = '#FFFFFF'
+  const away = contrast('#FFFFFF', board) >= contrast(INK, board) ? '#FFFFFF' : INK
+  let lifted = away
   for (let i = 0; i <= 100; i++) {
-    const c = mix(hex, '#FFFFFF', i / 100)
+    const c = mix(hex, away, i / 100)
     if (contrast(c, board) >= target) { lifted = c; break }
   }
   for (let i = 0; i <= 100; i++) {
@@ -52,11 +60,17 @@ export function ghostRing(hex: string, board = DARK_BOARD, target = GHOST_RING_T
 }
 
 /**
- * Ring colour per palette index: `ghostRing(PALETTE[i].hex)`, written out so
- * the panel bundle carries 16 strings rather than the solver (styles.test
- * recomputes it and checks every ring against the board).
+ * Ring colour per palette index on the dark board: `ghostRing(PALETTE[i].hex)`,
+ * written out so the panel bundle carries 16 strings rather than the solver
+ * (styles.test recomputes it and checks every ring against the board).
  */
 export const GHOST_RINGS: readonly string[] = Object.freeze([
   '#6D6D6C', '#746D57', '#816A28', '#9B5E22', '#CA3139', '#8C6074', '#8558AE', '#4E6AAE',
   '#43718F', '#217871', '#357A3F', '#5E7343', '#8E6248', '#83674E', '#696C72', '#6B6C6F',
+])
+
+/** The same on the light board: `ghostRing(PALETTE[i].hex, LIGHT_BOARD)`. */
+export const GHOST_RINGS_LIGHT: readonly string[] = Object.freeze([
+  '#858584', '#8F8568', '#A18227', '#C17223', '#DC5B62', '#B0748E', '#9B74C0', '#6D84BB',
+  '#4E8CB3', '#21958A', '#3E974A', '#728E4B', '#A17D68', '#A37E5B', '#82868C', '#848589',
 ])

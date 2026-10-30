@@ -15,7 +15,8 @@
  *   moves focus to the fallback. A user who simply clicked somewhere neutral
  *   keeps their focus where the browser put it.
  *
- * Fallback order: the board grid, the first enabled control of the current view,
+ * Fallback order: the board grid, the first enabled control of the current view (a
+ * role=button such as the picture drop zone counts; aria-hidden or tabindex=-1 never does),
  * the header controls, then the region itself.
  */
 import { useEffect, useRef } from 'react'
@@ -38,12 +39,14 @@ export function focusLost(doc: Document): boolean {
 }
 
 export function fallbackTarget(root: Element): HTMLElement | null {
+  // Only what a keyboard user could Tab to: never an aria-hidden or tabindex=-1 helper such
+  // as the picture page's 1 px file input (design I4).
   const pick = (sel: string): HTMLElement | null => {
-    for (const el of root.querySelectorAll<HTMLElement>(sel)) if (canFocus(el)) return el
+    for (const el of root.querySelectorAll<HTMLElement>(sel)) if (canFocus(el) && el.tabIndex >= 0 && !el.closest('[aria-hidden=true]')) return el
     return null
   }
   return pick('[role="grid"]')
-    ?? pick('.pd-view button, .pd-view textarea, .pd-view input')
+    ?? pick('.pd-view :is(button,[role=button],textarea,input)')
     ?? pick('.pd-head button')
     ?? (root instanceof HTMLElement && root.tabIndex >= -1 && root.hasAttribute('tabindex') ? root : null)
 }
