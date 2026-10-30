@@ -1,7 +1,7 @@
 // End-to-end run against DSH Web started from source: e2e/suite.mjs (usage and setup there).
 //
 //   node e2e/run.mjs                   # everything into $TMPDIR/pindou-e2e-out (E2E_OUT; screenshots in its assets/)
-//   node e2e/run.mjs --update-assets   # also refresh the README screenshots + GIF in docs/assets
+//   node e2e/run.mjs --update-assets   # the same, and write the README panel shots to docs/assets/screens
 //
 // The plugin ships short class names (scripts/css-classes.ts); e2e/classes-hook.mjs rewrites the
 // suite's readable `pd-…` names to them as it loads, so this entry registers it first.

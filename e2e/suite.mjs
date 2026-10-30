@@ -1,8 +1,9 @@
 // End-to-end run against DSH Web started from source.
 //
-//   node e2e/run.mjs                   # everything into $TMPDIR/pindou-e2e-out (E2E_OUT; screenshots in its assets/)
-//   node e2e/run.mjs --update-assets   # also refresh the README screenshots + GIF in docs/assets
-//                                      # (same as E2E_UPDATE_ASSETS=1)
+//   node e2e/run.mjs                   # everything into $TMPDIR/pindou-e2e-out (E2E_OUT; screenshots in its assets/,
+//                                      # the README panel shots in its screens/)
+//   node e2e/run.mjs --update-assets   # the same, but the README panel shots go to docs/assets/screens
+//                                      # (same as E2E_UPDATE_ASSETS=1); the README GIFs are recorded by hand
 //
 // Needs a DeepSeek Harness checkout (DSH_SRC, default /home/box/src/deepseek-harness,
 // built with `pnpm build`) and a Chrome/Chromium (CHROME, default /usr/bin/google-chrome).
@@ -33,7 +34,10 @@ const CHROME = process.env.CHROME ?? '/usr/bin/google-chrome'
 const DIRS = runDirs()
 const { home: DSH_HOME, ws: WS, out: OUT } = DIRS
 const UPDATE_ASSETS = process.argv.includes('--update-assets') || process.env.E2E_UPDATE_ASSETS === '1'
-const ASSETS = UPDATE_ASSETS ? join(REPO, 'docs/assets') : join(OUT, 'assets')
+// Full-window screenshots (audited, for review) always stay in the run's output; only the README's
+// panel shots (section S) can be written into the repo.
+const ASSETS = join(OUT, 'assets')
+const SCREENS = UPDATE_ASSETS ? join(REPO, 'docs/assets/screens') : join(OUT, 'screens')
 const FFMPEG = process.env.FFMPEG ?? 'ffmpeg'
 // Optional archive of every screenshot (and its audit) for a manual self-check, outside the repo.
 const SELFCHECK = process.env.E2E_SELFCHECK_DIR ? resolve(process.env.E2E_SELFCHECK_DIR) : null
@@ -922,7 +926,83 @@ async function worksSection() {
   }
 }
 
-// E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works (the rest of the suite is unchanged)
+// ── S. README screenshots: the plugin panel only, 400×500 CSS px at 2× (800×1000 PNG), light and dark ──
+// The designer's states (bead-break readme/_src/screens.mjs): a seeded save and a wall of 12 works,
+// a running chat, the left sidebar collapsed, the panel opened from the entry, the pointer parked
+// off the panel. Each PNG is reduced to a 256-colour palette (ffmpeg, no dithering: flat UI stays
+// crisp) so it stays under 100 KB. The GIFs next to them are recorded by hand, not here.
+const SCREEN_W = 400, SCREEN_H = 500, SCREEN_MAX_BYTES = 100 * 1024
+const SCREEN_REST = [200, 300]
+const SCREEN_SAVE = JSON.stringify({ v: 1, size: 16, board: '.'.repeat(256), color: 4, tool: 'paint', mode: 'home', target: null, ironed: false, prefs: { busyHint: true, showGuide: true, showCodes: false }, done: [], coached: true })
+const SCREEN_WORKS = readFileSync(join(REPO, 'e2e/fixtures/readme-works.json'), 'utf8')
+const SCREEN_PICTURE = join(REPO, 'e2e/fixtures/readme-strawberry.png')
+/** Width and height from a PNG's IHDR. */
+const pngSize = (buf) => ({ w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) })
+const SCREEN_STATES = {
+  home: async () => {},
+  ai: async (p) => {
+    await p.locator('.pd-root button', { hasText: 'AI 生成' }).first().click()
+    await p.locator('.pd-ai-box textarea').waitFor()
+    await p.waitForTimeout(1200)
+    await p.locator('.pd-ai-box textarea').fill('一只橘猫')
+    await p.locator('.pd-ai-box button.pd-primary:not([disabled])').click()
+    await p.locator('.pd-board').waitFor({ timeout: 30000 })
+    await p.waitForTimeout(1500)
+    await p.locator('.pd-root button', { hasText: '一键铺满' }).first().click()
+    await p.locator('.pd-overlay button', { hasText: '再改改' }).first().click()
+    await p.waitForTimeout(900)
+  },
+  picture: async (p) => {
+    await p.locator('.pd-root button', { hasText: '图片转图纸' }).first().click()
+    await p.locator('.pd-pic-file').waitFor({ state: 'attached', timeout: 15000 })
+    await p.waitForTimeout(1200)
+    await p.locator('.pd-pic-file').setInputFiles(SCREEN_PICTURE)
+    await p.waitForTimeout(2500)
+    // the options under the preview: the panel's scroller moved down by 400 px
+    await p.evaluate(() => { const sc = [...document.querySelectorAll('.pd-root *')].find(e => e.scrollHeight > e.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(e).overflowY)); if (sc) sc.scrollTop = 400 })
+    await p.waitForTimeout(800)
+  },
+  works: async (p) => {
+    await p.locator('.pd-root button', { hasText: '我的作品' }).first().click()
+    await p.waitForTimeout(1800)
+  },
+}
+async function readmeScreens() {
+  const raw = join(OUT, 'screens-raw')
+  mkdirSync(raw, { recursive: true })
+  mkdirSync(SCREENS, { recursive: true })
+  for (const scheme of ['light', 'dark']) {
+    for (const [state, act] of Object.entries(SCREEN_STATES)) {
+      const name = `screen-${state}-${scheme}`
+      const p = await newPage({ viewport: { width: 891, height: 538 }, colorScheme: scheme }, 'zh', seedInit(SCREEN_WORKS, `localStorage.setItem('dsh-pindou:v1', ${JSON.stringify(SCREEN_SAVE)})`))
+      await startSession(p, '帮我把 utils/date.ts 重构一下，顺便补上单元测试')
+      const collapse = p.getByRole('button', { name: '收起侧边栏' })
+      if (await collapse.count() && await collapse.first().isVisible()) { await collapse.first().click(); await p.waitForTimeout(500) }
+      await p.locator('.pd-entry').click()
+      await p.locator('.pd-root').waitFor()
+      await p.mouse.move(...SCREEN_REST)
+      await p.waitForTimeout(2500)
+      await act(p)
+      await p.mouse.move(...SCREEN_REST)
+      await p.waitForTimeout(700)
+      await animationsDone(p, name)
+      const r = await panelBox(p)
+      check(`S [${name}] the panel is at least ${SCREEN_W}×${SCREEN_H} at 891×538`, !!r && r.width >= SCREEN_W && r.height >= SCREEN_H, JSON.stringify(r))
+      const rawPng = join(raw, `${name}.png`), out = join(SCREENS, `${name}.png`)
+      await p.screenshot({ path: rawPng, clip: { x: Math.round(r?.x ?? 0), y: Math.round(r?.y ?? 0), width: SCREEN_W, height: SCREEN_H } })
+      const q = spawnSync(FFMPEG, ['-y', '-loglevel', 'error', '-i', rawPng, '-vf', 'split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];[b][p]paletteuse=dither=none', '-frames:v', '1', out], { stdio: 'inherit' })
+      const buf = q.status === 0 ? readFileSync(out) : Buffer.alloc(24)
+      const { w, h } = pngSize(buf)
+      check(`S [${name}] ${w}×${h} (want 800×1000), ${Math.round(buf.length / 1024)} KB (≤ 100 KB)`, q.status === 0 && w === 2 * SCREEN_W && h === 2 * SCREEN_H && buf.length <= SCREEN_MAX_BYTES)
+      log('  📷', relative(REPO, out))
+      if (SELFCHECK) { mkdirSync(SELFCHECK, { recursive: true }); copyFileSync(out, join(SELFCHECK, `${name}.png`)) }
+      await p.context().close()
+    }
+  }
+}
+
+// E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works,
+// E2E_ONLY=s just the README panel shots (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
 try {
   {
@@ -957,6 +1037,7 @@ try {
   sections: {
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
   if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
+  if (ONLY === 's') { log('S. README panel screenshots'); await readmeScreens(); break sections }
   // ── T1. picture to pattern (spec §18.2) + lazy modules (spec §18.6), in the real product ──
   log('T1. picture to pattern')
   {
@@ -1410,7 +1491,7 @@ try {
   await shot(p, 'pill-light', { clip: { x: Math.max(0, geo.card[0] - 40), y: Math.max(0, geo.pill[1] - 40), width: Math.min(geo.vw, geo.card[2] - geo.card[0] + 80), height: geo.card[3] - geo.pill[1] + 60 } })
   await shot(p, 'busy-overview-light')
 
-  // ── B. open from the pill, home + play + GIF ──
+  // ── B. open from the pill, home + play ──
   log('B. panel (light)')
   await p.locator('.pd-pill-go').click()
   await p.locator('.pd-root').waitFor()
@@ -1466,15 +1547,7 @@ try {
       if (!T.confetti && document.querySelector('.pd-confetti')) T.confetti = performance.now()
     }).observe(document.querySelector('.pd-root'), { childList: true, subtree: true })
   })
-  // GIF frames: place a few beads following the ghost guide
-  const frames = join(OUT, 'frames')
-  rmSync(frames, { recursive: true, force: true })
-  mkdirSync(frames, { recursive: true })
-  const pb = await panelBox(p)
-  let n = 0
-  const frame = async () => { await p.screenshot({ path: join(frames, `f${String(n++).padStart(3, '0')}.png`), clip: pb }) }
-  await frame()
-  // follow the ghost guide colour by colour, a frame every few beads
+  // follow the ghost guide colour by colour
   const swatches = p.locator('.pd-sw:not(.pd-dim)')
   let placed = 0
   for (let k = 0; k < await swatches.count(); k++) {
@@ -1494,22 +1567,19 @@ try {
     }))
     for (const [x, y] of spots) {
       await p.mouse.click(x, y)
-      if (++placed % 6 === 0) await frame()
-      if (placed === 40) await shot(p, 'play-light')
+      if (++placed === 40) await shot(p, 'play-light')
     }
   }
   check('template completes by following the guide', await p.locator('.pd-prog.pd-full').count() === 1, `${placed} beads`)
   await p.waitForTimeout(600)
   const tm = await p.evaluate(() => ({ ...window.pdT }))
   check('I5 “done” card appears ~260 ms after the last bead, no confetti yet', tm.done - tm.up >= 200 && tm.done - tm.up < 700 && tm.confetti === 0, `done +${Math.round(tm.done - tm.up)}ms`)
-  for (let i = 0; i < 4; i++) { await p.waitForTimeout(300); await frame() }
+  await p.waitForTimeout(1200)
   await shot(p, 'complete-light')
   check('N8 done card replaces tools + palette in the flow, not over them', await p.evaluate(cardFlow), JSON.stringify(await p.evaluate(cardFlowInfo)))
   const iron = p.locator('.pd-overlay button.pd-warm[data-primary]')
   await iron.click()
-  for (let i = 0; i < 6; i++) { await p.waitForTimeout(250); await frame() }
-  await p.waitForTimeout(1200)
-  for (let i = 0; i < 6; i++) await frame()
+  await p.waitForTimeout(3000)
   await shot(p, 'ironed-light')
   check('ironing reaches the result card', await p.locator('button.pd-primary[data-primary]').count() === 1)
   const tm2 = await p.evaluate(() => ({ ...window.pdT }))
@@ -1529,10 +1599,6 @@ try {
   await p.waitForTimeout(200)
   const fm = await focusDesc(p)
   check('I2 Esc in the menu returns focus to the menu button', fm.includes('[menu-btn]'), fm)
-  const gif = spawnSync(FFMPEG, ['-y', '-loglevel', 'error', '-framerate', '4', '-i', join(frames, 'f%03d.png'),
-    '-vf', 'scale=420:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=3',
-    '-loop', '0', join(ASSETS, 'demo.gif')], { stdio: 'inherit' })
-  check('demo GIF written', gif.status === 0)
 
   // ── C. dark theme follows the host ──
   // The section-A chat turn streams for FAKE_LLM_CHAT_MS and then ends on the host's clock, which
@@ -2017,6 +2083,10 @@ try {
   // ── K. O3 / §18.5: every colour's guide ring measured on the real page, light and dark, at 2× and 1× ──
   log('K. guide rings (spec §18.5)')
   await guideRingSection()
+
+  // ── S. the README's panel screenshots (docs/assets/screens with --update-assets) ──
+  log('S. README panel screenshots')
+  await readmeScreens()
   }
 
   check('no page errors from the plugin', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
