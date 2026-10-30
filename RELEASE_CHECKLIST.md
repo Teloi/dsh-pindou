@@ -3,7 +3,7 @@
 本地已完成 / Done locally:
 
 - [x] `pnpm run check` 全绿（lint、typecheck、测试、构建、`lib/` 一致、bundle 形状）
-- [x] `pnpm run e2e` 全部检查通过，截图和 GIF 在 `docs/assets/`
+- [x] `pnpm run e2e` 全部检查通过，截图和 GIF 在 `docs/assets/`（v0.1.0 当时如此；现在 README 截图在 `docs/assets/screens/`，横幅和动图由设计师手工制作，见 CONTRIBUTING）
 - [x] 真实安装验证：`dsh plugin --profile web add git+file://…#feat/pindou-break-v0.1.0` 退出码 0，无需 `allowBuilds`
 - [x] `package.json` version `0.1.0`、`displayName` "Bead Break"、`keywords` 含 `dsh-plugin`、`dsh.bundle.patch` 存在、无安装脚本
 - [x] README（中/英）、CONTRIBUTING（中/英）、CHANGELOG、LICENSE（MIT）
