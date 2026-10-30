@@ -1,0 +1,4 @@
+lib/** linguist-generated=true
+* text=auto eol=lf
+*.png binary
+*.gif binary

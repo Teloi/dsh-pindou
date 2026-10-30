@@ -1,0 +1,17 @@
+# dsh-pindou bundle patch: mounts the Host half (the AI-generation route) into
+# the profile. The browser half is discovered from package.json `dsh.client`.
+#
+# Optional overrides in your profile's cordis.patch.yml (same id):
+#
+#   - id: pindou
+#     config:
+#       provider: deepseek-official   # pin a route; default = DSH default model
+#       model: deepseek-v4-flash      # (provider and model go together)
+#       apiKeyEnv: DEEPSEEK_API_KEY   # direct DeepSeek fallback when no route works
+#       maxTokens: 1024               # hard cap per generation
+#       timeoutMs: 30000
+#       mock: false                   # true / "ok" | "malformed" | "truncated" | "hostile" | "error" (tests only)
+#
+- insert:
+    - id: pindou
+      name: 'dsh-pindou'

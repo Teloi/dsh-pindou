@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm run build
+      - name: lib/ is committed and up to date
+        run: git diff --exit-code -- lib
+      - run: pnpm run check:bundle
+
+  # engines.node is ">=20.3" (AbortSignal.any in the Host half). pnpm 11 itself
+  # needs Node 22+, so install with 24, then switch Node and run the unit tests,
+  # the bundle check and a Host import directly with the matrix version.
+  node:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --version
+      - run: node node_modules/vitest/vitest.mjs run
+      - run: node scripts/check-bundle.mjs
+      - name: Host half loads
+        run: node -e "import('./lib/index.js').then(m => { if (typeof m.apply !== 'function') process.exit(1) })"
