@@ -7,7 +7,7 @@ Thanks for helping out!
 ## Setup
 
 - Node.js 24 and pnpm 11 for development (pinned in `packageManager` in `package.json`; pnpm 11 itself needs Node ≥ 22.13). The plugin runs on Node ≥ 20.3; CI runs the unit tests, the bundle check and the Host import on Node 20 and 24.
-- For E2E you also need a built DeepSeek Harness checkout (`DSH_SRC`, default `/home/box/src/deepseek-harness`), Chrome/Chromium (`CHROME`, default `/usr/bin/google-chrome`) and ffmpeg (for the GIF).
+- For E2E you also need a built DeepSeek Harness checkout (`DSH_SRC`, default `/home/box/src/deepseek-harness`), Chrome/Chromium (`CHROME`, default `/usr/bin/google-chrome`) and ffmpeg (to reduce the README screenshots to 256 colours).
 
 ## Commands
 
@@ -20,7 +20,7 @@ pnpm run build          # writes lib/
 pnpm run check:bundle   # checks the shape of lib/ (ModuleLoader wrapper, react-only requires, lazy chunks loaded only via require.async) and gzip sizes: first-screen lib/client.js ≤ 40 KB, lazy lib/client.<name>.js chunks ≤ 20 KB together, each at most 90% of its budget
 pnpm run check          # all of the above
 pnpm run e2e            # end-to-end: DSH Web from source + a fake model server; screenshots and logs go to $TMPDIR/pindou-e2e-out (E2E_OUT; give concurrent runs their own TMPDIR)
-pnpm run e2e -- --update-assets   # same, and refresh the README images in docs/assets (or E2E_UPDATE_ASSETS=1)
+pnpm run e2e -- --update-assets   # same, and write the README panel screenshots to docs/assets/screens (or E2E_UPDATE_ASSETS=1; add E2E_ONLY=s for just those shots)
 E2E_SELFCHECK_DIR=/some/dir pnpm run e2e   # also copy screenshots, checks.json and style-leaks.json there
 node e2e/compare-shots.mjs <runA> <runB>  # compare the plugin crops (plugin/: settled, host left out) of two E2E runs; a change that must not alter the look keeps them all identical
 ```
@@ -32,7 +32,8 @@ node e2e/compare-shots.mjs <runA> <runB>  # compare the plugin crops (plugin/: s
 - **Layers**: `src/core` has no DOM or DSH dependencies; `src/client` depends only on `react`; DSH server code lives in `src/host`.
 - **Styles**: every class name and CSS custom property uses the `pd-` prefix, selectors are scoped under `.pd-root` or `.pd-portal`, and colors come from host variables where possible. Constraints and locked decisions are in [docs/dsh-ui-constraints.md](docs/dsh-ui-constraints.md).
 - **Copy**: add every new string to `COPY` in `src/core/i18n.ts` as a `key: [中文, English]` pair. The wording is pinned by `tests/__snapshots__/i18n.test.ts.snap`; for an intended change run `pnpm exec vitest run -u tests/i18n.test.ts` and say so in the commit. The product name only comes from `APP_NAME_ZH` / `APP_NAME_EN`.
-- **E2E audits**: every screenshot also runs `e2e/audit.mjs` in the page: icons carry `.pd-i` and stay 8–24 px, round things keep `corner-shape: round`, no label wraps one character per line, and text contrast is ≥ 4.5:1 (3:1 for large text). Host rules that reach plugin elements fail the run unless listed, with a reason, in `ACCEPTED_LEAKS` in `e2e/run.mjs`. Results are in `audit/` in the output dir.
+- **README images**: the 8 panel screenshots in `docs/assets/screens/` (800×1000, four pages, light and dark) come from section S of the E2E run and show only the plugin panel. The banner `docs/assets/readme-banner-*.png` and the GIFs `docs/assets/readme-demo-*.gif` are made and recorded by hand by the designer; E2E never writes or overwrites them, so ask the designer to re-record them when the UI changes visibly. E2E's full-window screenshots stay in `assets/` in the output dir and are not committed.
+- **E2E audits**: every screenshot (except the README panel shots) also runs `e2e/audit.mjs` in the page: icons carry `.pd-i` and stay 8–24 px, round things keep `corner-shape: round`, no label wraps one character per line, and text contrast is ≥ 4.5:1 (3:1 for large text). Host rules that reach plugin elements fail the run unless listed, with a reason, in `ACCEPTED_LEAKS` in `e2e/run.mjs`. Results are in `audit/` in the output dir.
 - **Lazy loading**: large, self-contained features go behind `import()` and ship as `lib/client.<name>.js`, which the host loads on demand. A lazy module must not share local modules with the entry (the host can't load a common chunk, so the build fails); pass shared values in as arguments or `import type` them. Commit new chunks with the rest of `lib/`.
 - **Focus**: new popovers, cards or menus use `useFocusReturn` from `src/client/focus.ts`; don't move focus by hand.
 - **Secrets**: never put an API key in code, tests or screenshots. Tests and E2E use the mock or `e2e/fake-llm.mjs`.
@@ -41,5 +42,5 @@ node e2e/compare-shots.mjs <runA> <runB>  # compare the plugin crops (plugin/: s
 ## Before opening a PR
 
 1. `pnpm run check` passes.
-2. If you changed the UI, run `pnpm run e2e` and make sure it passes; when the README images need refreshing, run `pnpm run e2e -- --update-assets` and commit what changed in docs/assets.
+2. If you changed the UI, run `pnpm run e2e` and make sure it passes; when the README images need refreshing, run `pnpm run e2e -- --update-assets` and commit what changed in docs/assets/screens; the banner and GIFs need the designer.
 3. Add a line under "Unreleased" in [CHANGELOG.md](CHANGELOG.md).
