@@ -12,11 +12,24 @@ const range = pkg.engines.dsh
 const admits = (version: string): boolean => semver.satisfies(version, range, { includePrerelease: true })
 
 describe('engines.dsh, compared the way DSH compares it', () => {
-  it.each(['0.2.1-rc.3', '0.2.1-rc.5', '0.2.1', '0.2.2-alpha.2', '0.3.0'])('admits DSH %s', (version) => {
+  // rc.4 and rc.10 pin the numeric order of pre-release ids (rc.10 > rc.3, not "1" < "3" as text);
+  // 0.3.0-rc.1 and 1.0.0-beta.1 are pre-releases of later versions, which DSH admits only because
+  // it passes includePrerelease (npm's default semantics would refuse them).
+  it.each([
+    '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.1-rc.10', '0.2.1', '0.2.2-alpha.2', '0.3.0', '0.3.0-rc.1',
+    '1.0.0-beta.1', '1.0.0',
+  ])('admits DSH %s', (version) => {
     expect(admits(version), `${range} should admit ${version}`).toBe(true)
   })
 
-  it.each(['0.2.1-rc.2', '0.2.1-rc.0', '0.2.0', '0.1.9'])('refuses DSH %s', (version) => {
+  // alpha, beta and a bare `rc` all sort before rc.3 within 0.2.1.
+  it.each([
+    '0.2.1-rc.2', '0.2.1-rc.0', '0.2.1-rc', '0.2.1-alpha', '0.2.1-alpha.9', '0.2.1-beta.1', '0.2.0', '0.1.9',
+  ])('refuses DSH %s', (version) => {
     expect(admits(version), `${range} should refuse ${version}`).toBe(false)
+  })
+
+  it('orders pre-release ids by number, so rc.10 comes after rc.3', () => {
+    expect(semver.gt('0.2.1-rc.10', '0.2.1-rc.3')).toBe(true)
   })
 })
