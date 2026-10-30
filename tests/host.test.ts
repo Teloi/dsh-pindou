@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { decode, encodeRows, GENERATE_PATH, STATUS_PATH, TEMPLATES } from '../src/core/index.ts'
+import { decode, encode, encodeRows, GENERATE_PATH, STATUS_PATH, TEMPLATES } from '../src/core/index.ts'
 import { apply, inject, profileKeyRef, resolveConfig } from '../src/host/index.ts'
 import { deriveKeyRef, Generator, scrubMessage, type GeneratorDeps } from '../src/host/generate.ts'
 import type { FetchRoute, HostContext, LlmRuntimeLike, StreamChunk } from '../src/host/types.ts'
@@ -90,7 +90,7 @@ describe('generator routes', () => {
       llm: () => llm, defaultModel: () => ({ currentSelection: () => ({ provider: 'p', model: 'm' }) }),
       env: n => (n === 'DEEPSEEK_API_KEY' ? 'sk-test' : undefined), fetch: fetchFn as unknown as typeof fetch,
     }))
-    expect(await withKey.generate('cat', 16)).toMatchObject({ ok: true, model: 'deepseek/deepseek-chat', usage: { input: 80, output: 120 } })
+    expect(await withKey.generate('cat', 16)).toMatchObject({ ok: true, model: 'deepseek/deepseek-flash', usage: { input: 80, output: 120 } })
   })
 
   it('direct route sends a capped request and handles HTTP errors', async () => {
@@ -100,13 +100,86 @@ describe('generator routes', () => {
     expect(g.route().kind).toBe('direct')
     expect(await g.generate('cat', 12)).toMatchObject({ ok: false, error: 'not-configured' })
     const body = JSON.parse(String(calls[0]!.body))
-    expect(body).toMatchObject({ max_tokens: 1024, stream: false, model: 'deepseek-chat' })
+    expect(body).toMatchObject({ max_tokens: 1024, stream: false, model: 'deepseek-flash', thinking: { type: 'disabled' } })
     expect(body.messages).toHaveLength(2)
 
     const rate = new Generator(deps({ env: () => 'sk-test', fetch: (async () => new Response('', { status: 429 })) as unknown as typeof fetch }))
     expect(await rate.generate('cat', 12)).toMatchObject({ ok: false, error: 'rate-limited' })
     const junk = new Generator(deps({ env: () => 'sk-test', fetch: (async () => new Response('<html>')) as unknown as typeof fetch }))
     expect(await junk.generate('cat', 12)).toMatchObject({ ok: false, error: 'upstream' })
+  })
+
+  it('defaults the direct fallback to deepseek-flash (deepseek-chat was retired on 2026-07-24)', () => {
+    expect(resolveConfig(undefined).fallbackModel).toBe('deepseek-flash')
+    expect(resolveConfig({}).fallbackModel).toBe('deepseek-flash')
+    const g = new Generator(deps({ env: () => 'sk-test' }))
+    expect(g.route()).toEqual({ kind: 'direct', model: 'deepseek-flash' })
+  })
+
+  it('direct route turns thinking off, so reasoning cannot eat the 1024-token cap', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)))
+      return Response.json({ choices: [{ message: { content: heartRows }, finish_reason: 'stop' }] })
+    })
+    const g = new Generator(deps({ env: () => 'sk-test', fetch: fetchFn as unknown as typeof fetch }))
+    expect(await g.generate('heart', 16)).toMatchObject({ ok: true, model: 'deepseek/deepseek-flash' })
+    expect(fetchFn.mock.calls[0]![0]).toBe('https://api.deepseek.com/chat/completions')
+    expect(bodies[0]).toMatchObject({ model: 'deepseek-flash', thinking: { type: 'disabled' }, max_tokens: 1024 })
+    expect(bodies[0]).not.toHaveProperty('reasoning_effort')
+  })
+
+  it('a configured fallbackModel / baseUrl still wins; thinking is only sent to DeepSeek', async () => {
+    const run = async (config: Record<string, unknown>) => {
+      const bodies: Record<string, unknown>[] = []
+      const urls: string[] = []
+      const fetchFn = vi.fn(async (url: string, init: RequestInit) => {
+        urls.push(url); bodies.push(JSON.parse(String(init.body)))
+        return Response.json({ choices: [{ message: { content: heartRows }, finish_reason: 'stop' }] })
+      })
+      const g = new Generator(deps({ config: resolveConfig({ minIntervalMs: 0, ...config }), env: () => 'sk-test', fetch: fetchFn as unknown as typeof fetch }))
+      const r = await g.generate('heart', 16)
+      return { r, body: bodies[0]!, url: urls[0]!, route: g.route(), status: await g.status() }
+    }
+    // Legacy name kept on purpose by the user: honoured as given.
+    const legacy = await run({ fallbackModel: 'deepseek-chat' })
+    expect(legacy.body).toMatchObject({ model: 'deepseek-chat', thinking: { type: 'disabled' } })
+    expect(legacy.r).toMatchObject({ ok: true, model: 'deepseek/deepseek-chat' })
+    expect(legacy.status).toMatchObject({ route: 'direct', model: 'deepseek-chat' })
+    // DeepSeek model on another OpenAI-compatible host: still a DeepSeek model, thinking still off.
+    const proxied = await run({ baseUrl: 'https://proxy.example.com/v1', fallbackModel: 'deepseek-v4-pro' })
+    expect(proxied.url).toBe('https://proxy.example.com/v1/chat/completions')
+    expect(proxied.body).toMatchObject({ model: 'deepseek-v4-pro', thinking: { type: 'disabled' } })
+    // Some other model on some other host: no DeepSeek-only field that a strict server could reject.
+    const other = await run({ baseUrl: 'https://llm.example.com/v1', fallbackModel: 'qwen-plus' })
+    expect(other.body).toMatchObject({ model: 'qwen-plus' })
+    expect(other.body).not.toHaveProperty('thinking')
+    // The official host always gets the toggle, whatever the model is called.
+    const official = await run({ fallbackModel: 'my-alias' })
+    expect(official.body).toMatchObject({ model: 'my-alias', thinking: { type: 'disabled' } })
+  })
+
+  it('direct route ignores reasoning_content and keeps only the answer', async () => {
+    const fetchFn = vi.fn(async () => Response.json({
+      choices: [{ message: { role: 'assistant', reasoning_content: 'Let me think.\n' + '0'.repeat(400) + '\nmaybe rows of 9s', content: heartRows }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 80, completion_tokens: 300, completion_tokens_details: { reasoning_tokens: 180 } },
+    }))
+    const g = new Generator(deps({ env: () => 'sk-test', fetch: fetchFn as unknown as typeof fetch }))
+    const r = await g.generate('heart', 16)
+    expect(r).toMatchObject({ ok: true, repaired: false, usage: { input: 80, output: 300, reasoning: 180 } })
+    if (r.ok) expect(r.flat).toBe(encode(TEMPLATES[0]!.board))
+    // Thinking spent the whole cap and no answer came back: a parse error, never the reasoning text.
+    const spent = new Generator(deps({ env: () => 'sk-test', fetch: (async () => Response.json({
+      choices: [{ message: { reasoning_content: heartRows, content: '' }, finish_reason: 'length' }],
+    })) as unknown as typeof fetch }))
+    expect(await spent.generate('heart', 16)).toMatchObject({ ok: false, error: 'parse' })
+  })
+
+  it('a retired or unknown model name surfaces as an upstream error, not as not-configured', async () => {
+    for (const status of [400, 422]) {
+      const g = new Generator(deps({ env: () => 'sk-test', fetch: (async () => Response.json({ error: { message: 'Model Not Exist' } }, { status })) as unknown as typeof fetch }))
+      expect(await g.generate('cat', 12)).toMatchObject({ ok: false, error: 'upstream', message: `HTTP ${status}` })
+    }
   })
 
   it('marks truncated (max-tokens) replies and repairs them', async () => {

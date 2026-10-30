@@ -22,6 +22,9 @@ These review suggestions were left out of 0.1.0 on purpose:
 
 ### Fixed
 
+- **Direct DeepSeek fallback uses `deepseek-flash` with thinking off.** The default `fallbackModel` was `deepseek-chat`, a name DeepSeek announced would be discontinued on 2026-07-24; the current model is `deepseek-flash`. It thinks by default and its reasoning counts against `max_tokens`, so the direct request now sends `thinking: {"type": "disabled"}` (always to `api.deepseek.com`, and to `deepseek-*` models on another `baseUrl`; other models on other hosts never get the field). `reasoning_content` in a reply is ignored. A `fallbackModel` set in config is still used as given. Only the direct fallback changes; the DSH model route is untouched.
+- **直连 DeepSeek 兜底改用 `deepseek-flash` 并关闭思考模式。** 原来的默认 `fallbackModel` 是 `deepseek-chat`，DeepSeek 已公告它于 2026-07-24 停用，现行模型名是 `deepseek-flash`。新模型默认开启思考，思考的 token 也计入 `max_tokens`，所以直连请求现在带上 `thinking: {"type": "disabled"}`（发往 `api.deepseek.com` 时总是带；`baseUrl` 指向其他服务时只对 `deepseek-*` 模型带，其他模型不带这个字段）。回复里的 `reasoning_content` 会被忽略。配置里自己写的 `fallbackModel` 照常生效。只改直连兜底，走 DSH 模型的路径不变。
+
 - **Installs on DSH 0.2.1 release candidates, including the desktop app.** `engines.dsh` was `>=0.2.1`, and DSH compares pre-releases too, so 0.2.1-rc.3 (bundled with the desktop app) and 0.2.1-rc.5 (npm `latest`) refused the plugin with `is incompatible with dsh`. It is now `>=0.2.1-rc.3`; the full E2E suite passes on rc.3 and rc.5, and the host features the plugin uses, `require.async` included, are already there in rc.3. Versions before rc.3 are still refused.
 - **在 DSH 0.2.1 的候选版（包括桌面客户端）上能装了。** 原来 `engines.dsh` 是 `>=0.2.1`，DSH 比较时也算预发布版，所以桌面客户端自带的 0.2.1-rc.3 和 npm `latest` 的 0.2.1-rc.5 都会以 `is incompatible with dsh` 拒装。现在改为 `>=0.2.1-rc.3`：完整 E2E 在 rc.3 和 rc.5 上都通过，插件用到的宿主功能（包括 `require.async`）在 rc.3 里都已经有了。rc.3 之前的版本仍会被拒绝。
 

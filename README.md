@@ -98,7 +98,7 @@ dsh plugin --profile desktop remove dsh-pindou
 模型按下面的顺序选：
 
 1. **DSH 当前的默认模型**（和你聊天用的是同一个，无需额外配置）。
-2. 如果 DSH 没有可用的模型路由，而环境变量里有 `DEEPSEEK_API_KEY`，直接调用 DeepSeek API（`deepseek-chat`）。
+2. 如果 DSH 没有可用的模型路由，而环境变量里有 `DEEPSEEK_API_KEY`，直接调用 DeepSeek API（`deepseek-flash`，关闭思考模式）。
 3. 都没有时，AI 页会提示「还没有可用的模型」，模板和自由拼不受影响。
 
 检测只看凭据有没有配置，不会为此调用模型；账号登录等无法提前确认的情况会提示「首次生成会检测模型配置」。Key 失效时，第一次生成失败后会一直显示未配置，直到你点「重新检测」。DSH 没有给插件开放跳到「模型」设置的接口，「打开 DSH 设置」按钮只在能用设置快捷键打开时出现（打开的是设置首页），其他情况只给文字步骤。
@@ -125,7 +125,7 @@ dsh plugin --profile desktop remove dsh-pindou
 | `provider` + `model` | — | 固定使用某个 DSH 模型路由，两个必须一起给 |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | 直连兜底读取的环境变量名 |
 | `baseUrl` | `https://api.deepseek.com` | 直连兜底的地址（只允许 https，测试时可用 http://localhost） |
-| `fallbackModel` | `deepseek-chat` | 直连兜底用的模型 |
+| `fallbackModel` | `deepseek-flash` | 直连兜底用的模型（DeepSeek 已于 2026-07-24 停用 `deepseek-chat`） |
 | `maxTokens` | `1024` | 每次生成的输出上限 |
 | `timeoutMs` | `30000` | 单次生成超时 |
 | `minIntervalMs` | `1500` | 两次生成的最短间隔 |
