@@ -1348,7 +1348,12 @@ async function bigAria() {
  * own colour (not transparent, not the board). The same check on the frame once every tile is in, and a screenshot.
  */
 async function bigTileGap() {
-  const p = await bigPage()
+  // the default 2× screen, then 1.5× (fractional device pixels everywhere)
+  for (const dsf of [2, 1.5]) await tileGapAt(dsf)
+}
+async function tileGapAt(dsf) {
+  const sfx = dsf === 2 ? '' : '-dpr1.5'
+  const p = await bigPage({ deviceScaleFactor: dsf })
   await startPreset(p, 58)
   const cdp = await p.context().newCDPSession(p)
   await p.evaluate(() => {
@@ -1366,9 +1371,13 @@ async function bigTileGap() {
     for (let i = 0; i < 400 && c.draw(); i++);
     const cx = c.cw / 2, cy = c.ch / 2, s = 16, k = s / fit.s
     c.setView({ s, ox: cx - (cx - fit.ox) * k, oy: cy - (cy - fit.oy) * k })
+    // colour distances: another pixel (24), another cell's colour (60)
+    const tol = { px: 24, cell: 60 }
+    const far = (a, q) => Math.hypot(a[0] - q[0], a[1] - q[1], a[2] - q[2], a[3] - q[3]) > tol.px
+    const neither = (v, a, z) => Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) > tol.cell && Math.hypot(v[0] - z[0], v[1] - z[1], v[2] - z[2]) > tol.cell
     const look = () => {
-      const { s: vs, ox, oy } = c.view, d = c.el.width / c.cw, x = c.el.getContext('2d'), { w, cells } = c.game.get().history.present
-      const img = x.getImageData(0, 0, c.el.width, c.el.height).data
+      const { s: vs, ox, oy } = c.view, d = c.el.width / c.cw, cx2 = c.el.getContext('2d'), { w, cells } = c.game.get().history.present
+      const img = cx2.getImageData(0, 0, c.el.width, c.el.height).data
       let n = 0, blank = 0, off = 0
       for (let yy = Math.max(0, Math.ceil(-oy / vs)); yy < 208 && oy + (yy + 1) * vs <= c.ch; yy += 2) {
         for (let xx = Math.max(0, Math.ceil(-ox / vs)); xx < 208 && ox + (xx + 1) * vs <= c.cw; xx += 2) {
@@ -1379,7 +1388,79 @@ async function bigTileGap() {
           else if (Math.hypot(img[j] - want[0], img[j + 1] - want[1], img[j + 2] - want[2]) > 90) off++
         }
       }
-      return { n, blank, off }
+      // designer steering 2: across every tile boundary (cells at multiples of T) the two pixels at the seam each
+      // match a pixel just outside it on one side: no third colour (no bright seam), sampled through bead centres
+      const b = Math.min(128, 2 ** Math.ceil(Math.log2(Math.max(1, vs * d)))), T = Math.max(1, (256 / b) | 0)
+      const px = (x, y) => { const j = (y * c.el.width + x) * 4; return [img[j], img[j + 1], img[j + 2], img[j + 3]] }
+      let edges = 0, seam = 0
+      const seams = []
+      const across = (at, pick) => {
+        for (const o of [-1, 0]) {
+          const v = pick(at + o), l = pick(at - 2), r = pick(at + 1)
+          edges++
+          if (far(v, l) && far(v, r)) { seam++; if (seams.length < 4) seams.push({ at: at + o, v, l, r }) }
+        }
+      }
+      const ys = [], xs = []
+      for (let q = Math.max(0, Math.ceil(-oy / vs)); q < 208 && oy + (q + 1) * vs <= c.ch; q += 3) ys.push([Math.round((oy + (q + 0.5) * vs) * d), q])
+      for (let q = Math.max(0, Math.ceil(-ox / vs)); q < 208 && ox + (q + 1) * vs <= c.cw; q += 3) xs.push([Math.round((ox + (q + 0.5) * vs) * d), q])
+      // the gap test: how many pixels around a cell edge match neither cell's colour (the board between beads,
+      // anti-aliasing); a seam widens it, so at tile boundaries it may be no wider than at ordinary cell edges
+      const rgbOf = (x, y) => { const h = c.pal[cells[y * w + x]]; return [1, 3, 5].map(q => parseInt(h.slice(q, q + 2), 16)).concat(255) }
+      const gap = (e, pick, a, z) => { let g = 0; for (let i = e - 1; i >= e - 6 && neither(pick(i), a, z); i--) g++; for (let i = e; i < e + 6 && neither(pick(i), a, z); i++) g++; return g }
+      let gapT = 0, gapC = 0, maskN = 0, maskDiff = 0
+      const edgeAt = (o, X) => Math.round((o + X * vs) * d)
+      // the pattern test: every cell comes from the same sprite at a whole-pixel pitch, so which pixels near an
+      // edge show the board (between beads) is the same at a tile boundary as one cell earlier; a seam breaks it
+      const P = Math.round(vs * d), whole = Math.abs(vs * d - P) < 0.05, bgc = px(edgeAt(ox, T + 1), edgeAt(oy, T + 1)), isBg = v => Math.hypot(v[0] - bgc[0], v[1] - bgc[1], v[2] - bgc[2]) <= 12
+      const nearBg = a => Math.hypot(a[0] - bgc[0], a[1] - bgc[1], a[2] - bgc[2]) <= 40
+      const pattern = (e, pick, cs) => {
+        if (!whole || cs.some(nearBg)) return
+        maskN++
+        for (let i = -4; i < 4; i++) if (isBg(pick(e + i)) !== isBg(pick(e - P + i))) { maskDiff++; return }
+      }
+      for (let X = T; X < 207; X += T) {
+        const e = edgeAt(ox, X)
+        if (e > 8 && e < c.el.width - 8) {
+          for (const [y, q] of ys) {
+            across(e, x => px(x, y))
+            const pick = x => px(x, y)
+            gapT = Math.max(gapT, gap(e, pick, rgbOf(X - 1, q), rgbOf(X, q)))
+            pattern(e, pick, [rgbOf(X - 2, q), rgbOf(X - 1, q), rgbOf(X, q)])
+            gapC = Math.max(gapC, gap(edgeAt(ox, X - 1), pick, rgbOf(X - 2, q), rgbOf(X - 1, q)), gap(edgeAt(ox, X + 1), pick, rgbOf(X, q), rgbOf(X + 1, q)))
+          }
+        }
+      }
+      for (let Y = T; Y < 207; Y += T) {
+        const e = edgeAt(oy, Y)
+        if (e > 8 && e < c.el.height - 8) {
+          for (const [x, q] of xs) {
+            across(e, y => px(x, y))
+            const pick = y => px(x, y)
+            gapT = Math.max(gapT, gap(e, pick, rgbOf(q, Y - 1), rgbOf(q, Y)))
+            pattern(e, pick, [rgbOf(q, Y - 2), rgbOf(q, Y - 1), rgbOf(q, Y)])
+            gapC = Math.max(gapC, gap(edgeAt(oy, Y - 1), pick, rgbOf(q, Y - 2), rgbOf(q, Y - 1)), gap(edgeAt(oy, Y + 1), pick, rgbOf(q, Y), rgbOf(q, Y + 1)))
+          }
+        }
+      }
+      // and anywhere on the frame: no column / row one pixel wide that matches neither neighbour (a blended seam,
+      // e.g. the 29-cell divider drawn at a fractional position), sampled every 3rd row / column
+      const W = c.el.width, H = c.el.height, thin = [], unit = c.game.get().unit
+      // the 29-cell dividers (plan §2.4) are meant to be there: a crisp line of max(1, round(0.06 × cell)) px whose
+      // pixels blend the accent with the cell under each; skipped here, checked to be that wide below
+      const lw = Math.max(1, Math.round(0.06 * vs * d)), div = (e, o) => unit > 0 && Array.from({ length: Math.floor(208 / unit) }, (_, i) => Math.round((o + (i + 1) * unit * vs) * d)).some(at => e >= at - lw && e <= at + lw)
+      for (let x = 1; x < W - 1; x++) { if (div(x, ox)) continue; let q = 0; for (let y = 0; y < H; y += 3) if (far(px(x, y), px(x - 1, y)) && far(px(x, y), px(x + 1, y))) q++; if (q > 20) thin.push(`x${x}:${q}`) }
+      for (let y = 1; y < H - 1; y++) { if (div(y, oy)) continue; let q = 0; for (let x = 0; x < W; x += 3) if (far(px(x, y), px(x, y - 1)) && far(px(x, y), px(x, y + 1))) q++; if (q > 20) thin.push(`y${y}:${q}`) }
+      // the dividers themselves: no blended fringe pixel just outside the line on either side
+      let fringe = 0
+      if (unit > 0) for (let i = 1; i * unit < 208; i++) {
+        for (const [o, len, ss, pick] of [[ox, W, ys, (a, b2) => px(a, b2)], [oy, H, xs, (a, b2) => px(b2, a)]]) {
+          const first = Math.round((o + i * unit * vs) * d) - Math.floor(lw / 2), last = first + lw - 1
+          if (first < 3 || last > len - 4) continue
+          for (const [t] of ss) if (far(pick(first - 1, t), pick(first - 2, t)) || far(pick(last + 1, t), pick(last + 2, t))) fringe++
+        }
+      }
+      return { n, blank, off, edges, seam, seams, thin: thin.slice(0, 8), fringe, gapT, gapC, maskN, maskDiff }
     }
     const t0 = performance.now()
     const missing = c.draw()
@@ -1389,11 +1470,12 @@ async function bigTileGap() {
     return { missing, mid, full: look(), frames, fillMs: Math.round(performance.now() - t0), midPng }
   })
   // the mid-zoom frame itself (the canvas as drawn, tiles still missing)
-  if (PHASE2_SHOTS) writeFileSync(join(PHASE2_SHOTS, 'tile-gap-mid.png'), Buffer.from(res.midPng.split(',')[1], 'base64'))
+  if (PHASE2_SHOTS) writeFileSync(join(PHASE2_SHOTS, `tile-gap-mid${sfx}.png`), Buffer.from(res.midPng.split(',')[1], 'base64'))
   delete res.midPng
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
-  await bigShot(p, 'tile-gap-full')
-  check('BIG tiles: mid-zoom on 208² (tiles still missing after one budgeted frame) every sampled cell shows its own colour — no blank, no board colour', res.missing && res.mid.n > 150 && res.mid.blank === 0 && res.mid.off === 0 && res.full.blank === 0 && res.full.off === 0, JSON.stringify(res))
+  await bigShot(p, `tile-gap-full${sfx}`)
+  check(`BIG tiles @${dsf}×: mid-zoom on 208² (tiles still missing after one budgeted frame) every sampled cell shows its own colour — no blank, no board colour`, res.missing && res.mid.n > 150 && res.mid.blank === 0 && res.mid.off === 0 && res.full.blank === 0 && res.full.off === 0, JSON.stringify(res))
+  check(`BIG tiles @${dsf}×: no seam at tile boundaries mid-zoom or after fill-in — mid frame: each boundary pixel matches a side (no third colour), no one-pixel blended line anywhere; mid and filled: the gap at a tile boundary no wider than at ordinary cell edges and the board-between-beads pattern the same as one cell earlier`, res.mid.edges > 40 && res.mid.seam === 0 && res.mid.thin.length === 0 && res.mid.gapT <= res.mid.gapC && res.full.edges > 40 && res.full.gapT <= res.full.gapC && res.mid.maskN > 40 && res.mid.maskDiff === 0 && res.full.maskN > 40 && res.full.maskDiff === 0, JSON.stringify({ dpr: dsf, mid: [res.mid.edges, res.mid.seam, res.mid.seams, res.mid.thin, res.mid.gapT, res.mid.gapC, res.mid.maskN, res.mid.maskDiff, res.mid.fringe], full: [res.full.gapT, res.full.gapC, res.full.maskN, res.full.maskDiff, res.full.seam, res.full.fringe] }))
   await p.context().close()
 }
 

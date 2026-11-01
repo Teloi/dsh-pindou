@@ -343,13 +343,17 @@ export class BigCanvas {
     const { s, ox, oy } = this.view
     const k0 = s * dpr
     const b = Math.min(128, 2 ** Math.ceil(Math.log2(Math.max(1, k0))))
-    const lod = lodOf(s), T = Math.max(1, (TILE / b) | 0), k = k0 / b
+    const lod = lodOf(s), T = Math.max(1, (TILE / b) | 0)
     this.#shown = this.view
     this.el.style.transform = ''
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, this.el.width, this.el.height)
+    // every edge on a whole device pixel: cell c starts at ex(c) / ey(c), so a tile, the base layer
+    // standing in for one and their neighbours meet exactly; no smoothing, so no blended edge either
+    const ex = (c: number): number => Math.round((ox + c * s) * dpr), ey = (c: number): number => Math.round((oy + c * s) * dpr)
+    ctx.imageSmoothingEnabled = false
     ctx.fillStyle = this.#th.bg
-    ctx.fillRect(ox * dpr, oy * dpr, w * k0, h * k0)
+    ctx.fillRect(ex(0), ey(0), ex(w) - ex(0), ey(h) - ey(0))
     this.#layers.set(`${b}/${lod}`, [b, lod])
     const t0 = performance.now()
     let built = 0, more = false
@@ -371,14 +375,12 @@ export class BigCanvas {
             this.#bytes -= old.width * old.height * 4
           }
         }
-        const dx = (ox + tx * span) * dpr, dy = (oy + ty * span) * dpr
-        if (t) ctx.drawImage(t, dx, dy, t.width * k, t.height * k)
+        const x = tx * T, y = ty * T, n = Math.min(T, w - x), m = Math.min(T, h - y)
+        const dx = ex(x), dy = ey(y), dw = ex(x + n) - dx, dh = ey(y + m) - dy
+        if (t) ctx.drawImage(t, dx, dy, dw, dh)
         else {
           more = true
-          const n = Math.min(T, w - tx * T), m = Math.min(T, h - ty * T)
-          ctx.imageSmoothingEnabled = false
-          ctx.drawImage(this.#base, tx * T, ty * T, n, m, dx, dy, n * k0, m * k0)
-          ctx.imageSmoothingEnabled = true
+          ctx.drawImage(this.#base, x, y, n, m, dx, dy, dw, dh)
         }
       }
     }
@@ -387,10 +389,11 @@ export class BigCanvas {
     if (g.unit > 0) {
       ctx.strokeStyle = this.#th.accent
       ctx.globalAlpha = 0.7
-      ctx.lineWidth = Math.max(1, 0.06 * k0)
+      // whole device pixels too: a crisp line on the cell edge, not two half-blended ones (designer steering 2)
+      const lw = ctx.lineWidth = Math.max(1, Math.round(0.06 * k0)), o = (lw % 2) / 2
       ctx.beginPath()
-      for (let x = g.unit; x < w; x += g.unit) { ctx.moveTo((ox + x * s) * dpr, oy * dpr); ctx.lineTo((ox + x * s) * dpr, (oy + h * s) * dpr) }
-      for (let y = g.unit; y < h; y += g.unit) { ctx.moveTo(ox * dpr, (oy + y * s) * dpr); ctx.lineTo((ox + w * s) * dpr, (oy + y * s) * dpr) }
+      for (let x = g.unit; x < w; x += g.unit) { ctx.moveTo(ex(x) + o, ey(0)); ctx.lineTo(ex(x) + o, ey(h)) }
+      for (let y = g.unit; y < h; y += g.unit) { ctx.moveTo(ex(0), ey(y) + o); ctx.lineTo(ex(w), ey(y) + o) }
       ctx.stroke()
       ctx.globalAlpha = 1
     }
