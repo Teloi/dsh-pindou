@@ -1533,6 +1533,57 @@ async function bigI3() {
   }
 }
 
+/** I4: the narrow-panel layout of the big page (toolbar rows, swatch, overflow, 「更多」, hint) */
+const narrowLook = p => p.evaluate(() => {
+  const vis = [...document.querySelectorAll('.pd-bk-play .pd-tools > *')].filter(e => e.getBoundingClientRect().width > 0)
+  const sc = document.querySelector('.pd-scroll'), pal = document.querySelector('.pd-bk-play .pd-palette').getBoundingClientRect(), view = document.querySelector('.pd-bk-play').getBoundingClientRect()
+  const more = document.querySelector('.pd-bk-more')
+  return {
+    rows: new Set(vis.map(e => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2) })).size, n: vis.length,
+    sw: Math.round(document.querySelector('.pd-bk-play .pd-swb').getBoundingClientRect().width),
+    over: sc ? sc.scrollWidth - sc.clientWidth : null, palOut: Math.round(pal.right - view.right), more: more ? more.getBoundingClientRect().width > 0 : false,
+    inline: [...document.querySelectorAll('.pd-bk-x .pd-tool')].map(e => e.getBoundingClientRect().width > 0),
+    hint: [...document.querySelectorAll('.pd-bk-play p[role=status]')].map(e => e.textContent),
+  }
+})
+
+/**
+ * Review I4: a 300 px panel on a 58×58 board: 28 px swatches, nothing wider than the panel, one toolbar row with
+ * clear and export under 「更多」, and the 「拖宽侧栏体验更好」 hint the first time only. With a mouse and with touch (36 px hits).
+ */
+async function bigI4() {
+  for (const touch of [false, true]) {
+    const p = await bigPage(touch ? { hasTouch: true } : {})
+    const tag = touch ? ' (touch)' : ' (mouse)'
+    await setWidth(p, 300)
+    await startPreset(p, 58)
+    const a = await narrowLook(p)
+    await bigShot(p, `big-i4-300${touch ? '-touch' : ''}`)
+    check(`BIG I4 300 px${tag}: one toolbar row (clear and export under 「更多」), 28 px swatches, no horizontal overflow`,
+      a.rows === 1 && a.more && a.inline.every(v => !v) && a.sw === 28 && a.over === 0 && a.palOut <= 0, JSON.stringify(a))
+    check(`BIG I4 300 px${tag}: a 58×58 board shows 「拖宽侧栏体验更好」 the first time`, a.hint.some(h => h.startsWith('拖宽侧栏体验更好')), JSON.stringify(a.hint))
+    // 「更多」 opens clear and export below; Escape folds them again
+    await p.locator('.pd-bk-more').click()
+    const open = await p.evaluate(() => ({ exp: document.querySelector('.pd-bk-more').getAttribute('aria-expanded'), shown: [...document.querySelectorAll('.pd-bk-x .pd-tool')].map(e => [e.getAttribute('aria-label'), e.getBoundingClientRect().width > 0]) }))
+    if (!touch) await bigShot(p, 'big-i4-300-more')
+    await p.keyboard.press('Escape')
+    const shut = await p.evaluate(() => ({ exp: document.querySelector('.pd-bk-more').getAttribute('aria-expanded'), shown: [...document.querySelectorAll('.pd-bk-x .pd-tool')].some(e => e.getBoundingClientRect().width > 0) }))
+    check(`BIG I4 300 px${tag}: 「更多」 opens 清空 and 导出 PNG, Escape folds them`, open.exp === 'true' && open.shown.map(x => x.join()).join('|') === '清空,true|导出 PNG,true' && shut.exp === 'false' && !shut.shown, JSON.stringify({ open, shut }))
+    if (!touch) {
+      // the hint is once ever: a new 58×58 board in the same narrow panel goes without it
+      await p.locator('.pd-bk-top .pd-btn', { hasText: '新建' }).click()
+      await startPreset(p, 58)
+      const again = await narrowLook(p)
+      check('BIG I4 the hint does not come back on the next big board', !again.hint.some(h => h.startsWith('拖宽侧栏体验更好')), JSON.stringify(again.hint))
+    }
+    // 560 px: clear and export back in the toolbar, no 「更多」
+    await setWidth(p, 560)
+    const w = await narrowLook(p)
+    check(`BIG I4 560 px${tag}: clear and export in the toolbar, no 「更多」, one row, no overflow`, w.rows === 1 && !w.more && w.inline.every(Boolean) && w.over === 0, JSON.stringify(w))
+    await p.context().close()
+  }
+}
+
 /** A share code over 20 KB is never truncated: 「复制分享码」 becomes 「导出图纸文件」 + the reason (designer steering 3). */
 async function bigShare() {
   const p = await bigPage()
@@ -1817,6 +1868,7 @@ async function bigSection() {
   const before = pageErrors.length
   await bigAria()
   await bigI3()
+  await bigI4()
   await bigTileGap()
   await bigStoreChunk()
   await undoParity()
@@ -1862,6 +1914,7 @@ try {
     await h.close()
   }
   sections: {
+  if (ONLY === 'i4') { log('BIG. review I4 narrow panel e2e'); await bigI4(); break sections }
   if (ONLY === 'sc') { log('BIG. store chunk delayed / failed'); await bigStoreChunk(); break sections }
   if (ONLY === 'tg') { log('BIG. tile gaps mid-zoom'); await bigTileGap(); break sections }
   if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }

@@ -31,7 +31,7 @@ const STRINGS = {
     zoomIn: '放大', zoomOut: '缩小', fit: '适合大小', map: '小地图', colors: '颜色', blocks: '块列表', next: '下一块',
     whole: '全图', px: '{n} px/格', at: '第 {y} 行第 {x} 列', empty: '空', want: '图纸要 {c}', wrong: '放错了，图纸要 {c}', done: '{b} 完成！按 N 去下一块', allDone: '全部完成',
     cell: '{b} 板，{at}，{v}', board: '{w}×{h} 画布。方向键移动，空格或回车放豆，Delete 擦除，Shift+方向键跳一块，N 下一块，+ − 0 缩放，M 小地图，L 块列表',
-    libFail: '这部分没加载出来，请稍后再试', only: '只看本色', loading: '正在读取存档…', noStore: '浏览器存储不可用，进度不会保存', held: '本次进度不会保存', close: '关闭',
+    libFail: '这部分没加载出来，请稍后再试', only: '只看本色', loading: '正在读取存档…', noStore: '浏览器存储不可用，进度不会保存', held: '本次进度不会保存', close: '关闭', more: '更多', wide: '拖宽侧栏体验更好',
   },
   en: {
     title: 'More sizes', presets: 'Pegboards', custom: 'Custom', w: 'Width', h: 'Height', unit: 'Blocks', none: 'One block', start: 'Start',
@@ -43,7 +43,7 @@ const STRINGS = {
     zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit', map: 'Minimap', colors: 'Colours', blocks: 'Blocks', next: 'Next block',
     whole: 'Whole', px: '{n} px/cell', at: 'row {y}, column {x}', empty: 'empty', want: 'pattern wants {c}', wrong: 'Wrong bead: the pattern wants {c}', done: '{b} done! Press N for the next block', allDone: 'All done',
     cell: 'Block {b}, {at}, {v}', board: '{w}×{h} board. Arrows move, Space or Enter places, Delete erases, Shift+arrows jump a block, N next block, + − 0 zoom, M minimap, L block list',
-    libFail: 'This part didn’t load. Try again later.', only: 'This colour only', loading: 'Reading saves…', noStore: 'Browser storage unavailable — progress will not be saved', held: 'Progress this session will not be saved', close: 'Close',
+    libFail: 'This part didn’t load. Try again later.', only: 'This colour only', loading: 'Reading saves…', noStore: 'Browser storage unavailable — progress will not be saved', held: 'Progress this session will not be saved', close: 'Close', more: 'More', wide: 'Drag the sidebar wider for a better view',
   },
 } as const
 type Key = keyof (typeof STRINGS)['zh']
@@ -88,6 +88,8 @@ const TOOLS: ReadonlyArray<[BigTool, string, Key]> = [['paint', 'B', 'paint'], [
 const saveGame = (st: SaveStore, g: BigGame): ReturnType<SaveStore['save']> => { const { unit, color, target } = g.get(); return st.save(SAVE_ID, g.board, { u: unit, c: color, t: target ? 1 : 0 }) }
 /** Arrow keys in a palette or list: right and down go forward, left and up back. */
 const arrow = (k: string): number => (k === 'ArrowRight' || k === 'ArrowDown' ? 1 : k === 'ArrowLeft' || k === 'ArrowUp' ? -1 : 0)
+/** The 「拖宽侧栏体验更好」 hint was shown. */
+const HINT_KEY = 'dsh-pindou:big-hint'
 
 const isTyping = (el: EventTarget | null): boolean => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))
 
@@ -256,6 +258,8 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
   const [share, setShare] = useState<string | null | false>(false)
   const [saveErr, setSaveErr] = useState(false)
   const [active, setActive] = useState(0)
+  const [more, setMore] = useState(false)
+  const [hint, setHint] = useState(false)
   const uid = useId().replaceAll(':', '')
   const pal = kit.palette
 
@@ -276,7 +280,11 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         c.resize(wrap.clientWidth, ch)
       }
     }
-    if (wrap.clientWidth < 360) setMini(false)
+    if (wrap.clientWidth < 360) {
+      setMini(false)
+      // a big board in a narrow panel: once, ever, a quiet line suggests a wider sidebar (review I4)
+      try { const ls = localStorage; if (Math.max(game.board.w, game.board.h) >= 58 && !ls.getItem(HINT_KEY)) { ls.setItem(HINT_KEY, '1'); setHint(true) } } catch { /* storage blocked */ }
+    }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(wrap)
@@ -352,6 +360,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
   const clear = (): void => { if (game.clear()) setToast(true) }
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key === 'Escape' && more) { e.stopPropagation(); setMore(false); return }
     if (e.key === 'Escape' && share !== false) { e.stopPropagation(); setShare(false); return }
     if (isTyping(e.target)) return
     const mod = e.metaKey || e.ctrlKey
@@ -430,11 +439,16 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <button type="button" className="pd-tool" aria-label={t('redo')} title={`${t('redo')} (⇧⌘Z)`}
           disabled={!game.canRedo} onClick={() => { game.redo() }}>{ic(5)}</button>
         <span className="pd-sep" aria-hidden />
-        <button type="button" className="pd-tool" aria-label={t('clear')} title={t('clear')}
-          disabled={board.cells.every(c => c === EMPTY)} onClick={clear}>{ic(6)}</button>
-        <button type="button" className="pd-tool" aria-label={t('png')} title={t('png')}
-          disabled={board.cells.every(c => c === EMPTY)} onClick={() => { kit.exportBoard(env, { board, target: null }) }}>{ic(7)}</button>
+        {/* a narrow panel keeps one row: clear and export fold under 「更多」 (review I4, plan §3.1 fig. 3) */}
+        <button type="button" className="pd-tool pd-bk-more" aria-label={t('more')} title={t('more')} aria-expanded={more} aria-controls={`${uid}-x`} onClick={() => { setMore(!more) }}>⋯</button>
+        <span id={`${uid}-x`} className={more ? 'pd-bk-x pd-on' : 'pd-bk-x'}>
+          <button type="button" className="pd-tool" aria-label={t('clear')} title={t('clear')}
+            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { setMore(false); clear() }}>{ic(6)}</button>
+          <button type="button" className="pd-tool" aria-label={t('png')} title={t('png')}
+            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { setMore(false); kit.exportBoard(env, { board, target: null }) }}>{ic(7)}</button>
+        </span>
       </div>
+      {hint ? <p className="pd-tokens pd-bk-bar" role="status"><span>{t('wide')}</span><button type="button" className="pd-ib" aria-label={t('close')} onClick={() => { setHint(false) }}>×</button></p> : null}
       {/* IDB only slow this time: one line of secondary text under the toolbar, no card (designer S1, plan 修订 21:35) */}
       {local && slow ? <p className="pd-tokens" role="status">{lib!.UNSAVED_SLOW[lang]}</p> : null}
       <div className="pd-bk-cv" ref={wrapRef}>

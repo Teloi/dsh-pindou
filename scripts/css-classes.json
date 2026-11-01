@@ -165,5 +165,7 @@
   "pd-bk-share": "pdgi",
   "pd-bk-bar": "pdgj",
   "pd-bk-load": "pdgk",
-  "pd-bk-skel": "pdgl"
+  "pd-bk-skel": "pdgl",
+  "pd-bk-more": "pdgm",
+  "pd-bk-x": "pdgn"
 }

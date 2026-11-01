@@ -47,6 +47,20 @@ export const BIG_CSS = `
 @container pd (min-width: 561px){.pd-bk-mini{width:120px;height:120px}}
 .pd-bk-mini.pd-off{display:none}
 .pd-bk-mm{position:absolute;right:6px;top:6px;width:32px;height:32px}
+/* the palette's 8 columns share the width, never wider than the panel (review I4) */
+.pd-bk-play .pd-palette{grid-template-columns:repeat(8,minmax(0,1fr))}
+.pd-bk-play .pd-sw{width:auto}
+/* clear and export sit in the toolbar; a narrow panel folds them under 「更多」 for one row (plan §3.1 fig. 3) */
+.pd-bk-play .pd-tools{position:relative}
+.pd-bk-play .pd-bk-more{display:none}
+.pd-bk-x{display:contents}
+@container pd (max-width: 340px){
+  .pd-bk-play .pd-tools{flex-wrap:nowrap}
+  .pd-bk-play .pd-palette{--pd-swatch:28px}
+  .pd-bk-play .pd-bk-more{display:grid}
+  .pd-bk-x{display:none}
+  .pd-bk-x.pd-on{display:flex;position:absolute;right:0;top:100%;z-index:5;padding:2px;border-radius:var(--pd-radius-ctl);background:var(--pd-surface-raised);box-shadow:0 2px 8px rgba(0,0,0,.18)}
+}
 /* below 360 the minimap starts folded into its button (plan §3.4) */
 .pd-bk-blocks{margin-top:var(--pd-gap);font-size:12.5px;color:var(--pd-text-2)}
 .pd-bk-blocks summary{cursor:pointer;min-height:28px;display:flex;align-items:center}
