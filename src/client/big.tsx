@@ -83,6 +83,11 @@ function useStore(): SaveStore | null {
 // tool order: paint, erase, pick, fill (kit.icons follows it, then undo, redo, clear, png)
 const TOOLS: ReadonlyArray<[BigTool, string, Key]> = [['paint', 'B', 'paint'], ['erase', 'E', 'erase'], ['pick', 'I', 'pick'], ['fill', 'G', 'fill']]
 
+/** Save the game with what resumes it: blocks, colour, whether there is a pattern. */
+const saveGame = (st: SaveStore, g: BigGame): ReturnType<SaveStore['save']> => { const { unit, color, target } = g.get(); return st.save(SAVE_ID, g.board, { u: unit, c: color, t: target ? 1 : 0 }) }
+/** Arrow keys in a palette or list: right and down go forward, left and up back. */
+const arrow = (k: string): number => (k === 'ArrowRight' || k === 'ArrowDown' ? 1 : k === 'ArrowLeft' || k === 'ArrowUp' ? -1 : 0)
+
 const isTyping = (el: EventTarget | null): boolean => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))
 
 function download(name: string, blob: Blob): void {
@@ -118,7 +123,7 @@ export function BigPage({ env, kit }: { readonly env: Env; readonly kit: BigKit 
     const g = new BigGame(s.board, s.target, s.unit, s.color)
     setGame(g)
     if (!fresh || !st) return
-    void st.save(SAVE_ID, s.board, { u: s.unit, c: g.get().color, t: s.target ? 1 : 0 })
+    void saveGame(st, g)
     if (s.target) void st.save(TARGET_ID, s.target)
     else void st.remove(TARGET_ID)
   }
@@ -311,7 +316,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
     prev.current = { board, cx: s.cx, cy: s.cy, done }
     // autosave: at once when a block is done, else 2 s after the last edit
     if (board === p.board || !st || !st.canSave(w, h)) return
-    const save = (): void => { void st.save(SAVE_ID, game.board, { u: s.unit, c: game.get().color, t: target ? 1 : 0 }).then((r) => { setSaveErr(!r.ok) }) }
+    const save = (): void => { void saveGame(st, game).then((r) => { setSaveErr(!r.ok) }) }
     if (fresh) { save(); return }
     const id = setTimeout(save, 2000)
     return () => { clearTimeout(id) }
@@ -319,7 +324,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
   }, [board, s.cx, s.cy])
   // leaving the page saves what the 2 s timer has not
   useEffect(() => () => {
-    if (st?.canSave(game.board.w, game.board.h)) void st.save(SAVE_ID, game.board, { u: game.get().unit, c: game.get().color, t: game.get().target ? 1 : 0 })
+    if (st?.canSave(game.board.w, game.board.h)) void saveGame(st, game)
   }, [game, st])
 
   const nextBlock = (d: 1 | -1): void => {
@@ -460,7 +465,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
               className={target && !used ? 'pd-sw pd-dim' : 'pd-sw'} style={{ '--pd-c': p.hex } as CSSProperties}
               onClick={() => { game.set({ color: i }) }}
               onKeyDown={(e) => {
-                const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+                const d = arrow(e.key)
                 if (!d) return
                 e.preventDefault()
                 e.stopPropagation()
@@ -483,7 +488,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
             if (blocks[i]) { setActive(i); jump(blocks[i]) }
           }}
           onKeyDown={(e) => {
-            const d = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
+            const d = arrow(e.key)
             if (d) { e.preventDefault(); e.stopPropagation(); setActive(a => Math.max(0, Math.min(blocks.length - 1, a + d))) }
             else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); jump(blocks[active]!) }
           }}>

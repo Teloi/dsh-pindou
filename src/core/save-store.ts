@@ -85,18 +85,20 @@ export interface IdbLike {
   open(name: string, version?: number): IDBOpenDBRequest
 }
 
+// every caller catches a rejection and only cares that it happened, so it carries the DOMException as is
 function req<T>(r: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     r.addEventListener('success', () => { resolve(r.result) })
-    r.addEventListener('error', () => { reject(r.error ?? new Error('idb request failed')) })
+    r.addEventListener('error', () => { reject(r.error) })
   })
 }
 
 function done(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
+    const no = (): void => { reject(tx.error) }
     tx.addEventListener('complete', () => { resolve() })
-    tx.addEventListener('error', () => { reject(tx.error ?? new Error('idb transaction failed')) })
-    tx.addEventListener('abort', () => { reject(tx.error ?? new Error('idb transaction aborted')) })
+    tx.addEventListener('error', no)
+    tx.addEventListener('abort', no)
   })
 }
 
