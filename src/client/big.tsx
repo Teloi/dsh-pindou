@@ -14,7 +14,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { blank, EMPTY } from '../core/big-board.ts'
 import type { Board } from '../core/board.ts'
 import { encodeV4, parseShareCode, shareCodeFits } from '../core/codec-v4.ts'
-import { SaveStore, UNSAVED_TOO_BIG } from '../core/save-store.ts'
+import { SaveStore, UNSAVED_SLOW, UNSAVED_TOO_BIG } from '../core/save-store.ts'
 import { BigCanvas, type View } from './big-canvas.ts'
 import { BigGame, type BigTool } from './big-game.ts'
 import { BIG_CSS } from './big-styles.ts'
@@ -173,10 +173,13 @@ function Setup({ t, env, st, onStart }: { readonly t: T; readonly env: Env; read
     if (!b || Math.max(b.w, b.h) > UI_MAX) { setErr(t('bad')); return }
     onStart({ board: blank(b.w, b.h), target: b, unit: b.w > 29 || b.h > 29 ? 29 : 0 }, true)
   }
-  const cantSave = st?.status().backend === 'local'
+  // IDB missing or broken: the full notice up front. IDB only slow this time (2 s timeout): nothing,
+  // and one quiet line once a custom size over 58 is typed in (plan 修订 20:25)
+  const s0 = st?.status()
+  const local = s0?.backend === 'local'
   return (
     <>
-      {cantSave ? <Notice>{UNSAVED_TOO_BIG[env.lang]}</Notice> : null}
+      {local && !s0.slow ? <Notice>{UNSAVED_TOO_BIG[env.lang]}</Notice> : null}
       {saved
         ? <button type="button" className="pd-btn pd-primary pd-bk-wide" onClick={() => { onStart(saved.start, false) }}>{t('resume')} · {saved.label}</button>
         : null}
@@ -201,6 +204,7 @@ function Setup({ t, env, st, onStart }: { readonly t: T; readonly env: Env; read
         </label>
         <button type="button" className="pd-btn" onClick={custom}>{t('start')}</button>
       </div>
+      {local && s0.slow && !st!.canSave(Number(w), Number(h)) ? <p className="pd-tokens" role="status">{UNSAVED_SLOW[env.lang]}</p> : null}
       <h3 className="pd-sec"><label htmlFor={uid}>{t('code')}</label></h3>
       <div className="pd-bk-form">
         <textarea id={uid} rows={2} value={code} placeholder={t('codeHint')} onChange={(e) => { setCode(e.target.value); setErr('') }} />
@@ -379,7 +383,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <button type="button" className="pd-btn" aria-expanded={share !== false} onClick={openShare}>{t('share')}</button>
         <button type="button" className="pd-btn" onClick={onNew}>{t('newGame')}</button>
       </div>
-      {!canSave && st?.status().backend === 'local' ? <Notice>{UNSAVED_TOO_BIG[lang]}</Notice> : saveErr ? <Notice>{t('saveFailed')}</Notice> : null}
+      {!canSave && st?.status().backend === 'local' ? <Notice>{(st.status().slow ? UNSAVED_SLOW : UNSAVED_TOO_BIG)[lang]}</Notice> : saveErr ? <Notice>{t('saveFailed')}</Notice> : null}
       {share !== false
         ? (
           <div className="pd-bk-share">

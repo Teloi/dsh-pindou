@@ -1330,6 +1330,25 @@ async function bigStorage() {
   await h.locator('.pd-bk-sizes').waitFor({ timeout: 4000 })
   const late = await h.evaluate(() => ({ load: !!document.querySelector('.pd-bk-load'), notes: [...document.querySelectorAll('.pd-bk-note')].map(n => n.textContent) }))
   check('BIG slow IndexedDB: nothing for the first 300 ms, then a still skeleton + 「正在读取存档…」, then the setup after the 2 s fallback', !early.sizes && mid.load === '正在读取存档…' && mid.skel && !late.load && mid.asked > 0, JSON.stringify({ early, mid, late }))
+  // review IMPORTANT 3 / plan 修订 20:25: after the timeout no 「此环境无法保存大图进度…」; one quiet line only for a size over 58
+  const SLOW = '这次没连上浏览器数据库，大于 58×58 的图案关闭后不会保存'
+  const quiet = () => h.evaluate(() => ({ notes: [...document.querySelectorAll('.pd-bk-note')].map(n => n.textContent), line: [...document.querySelectorAll('.pd-bk p[role=status]')].map(n => n.textContent), toast: document.querySelector('.pd-toast')?.textContent ?? null }))
+  const at40 = await quiet()
+  await h.locator('.pd-bk-form input').nth(0).fill('78')
+  await h.locator('.pd-bk-form input').nth(1).fill('78')
+  await h.waitForTimeout(150)
+  const at78 = await quiet()
+  await bigShot(h, 'big-setup-idb-slow-78')
+  await h.locator('.pd-bk-form input').nth(0).fill('58')
+  await h.locator('.pd-bk-form input').nth(1).fill('58')
+  await h.waitForTimeout(150)
+  const at58 = await quiet()
+  check('BIG slow IndexedDB: no notice at 40×30 or 58×58, and only 「这次没连上浏览器数据库，大于 58×58 的图案关闭后不会保存」 once 78×78 is typed in (no 此环境无法保存大图进度)',
+    at40.notes.length === 0 && at40.line.length === 0 && at58.line.length === 0 && at58.notes.length === 0 && at78.notes.length === 0 && at78.line.length === 1 && at78.line[0] === SLOW && !/此环境/.test(JSON.stringify([at40, at58, at78])) && at40.toast === null,
+    JSON.stringify({ at40, at58, at78 }))
+  await startPreset(h, 78)
+  const play78 = await quiet()
+  check('BIG slow IndexedDB: a 78×78 board plays with the same quiet line (not the full notice)', play78.notes.length === 1 && play78.notes[0] === SLOW, JSON.stringify(play78))
   await h.context().close()
 
   // neither IndexedDB nor localStorage: 「浏览器存储不可用，进度不会保存」 once, dismissible, not in the way

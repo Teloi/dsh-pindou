@@ -63,12 +63,20 @@ export interface StoreStatus {
   /** Bytes in IDB, and whether they pass the 4 MB soft cap. */
   readonly bytes: number
   readonly nearFull: boolean
+  /** IDB did not answer within the timeout (it may work next time); false when it is missing or broken. */
+  readonly slow: boolean
 }
 
 /** The notice for a big board that cannot be saved here (plan §4.3). */
 export const UNSAVED_TOO_BIG = {
   zh: '此环境无法保存大图进度，关闭面板后会丢失。建议选 58×58 以内，或完成后导出图片。',
   en: 'Progress on big boards can’t be saved here and is lost when the panel closes. Pick 58×58 or smaller, or export an image when done.',
+} as const
+
+/** The lighter line after IDB timed out (plan 修订 20:25): only for a board bigger than 58×58. */
+export const UNSAVED_SLOW = {
+  zh: '这次没连上浏览器数据库，大于 58×58 的图案关闭后不会保存',
+  en: 'Couldn’t reach the browser database this time: patterns bigger than 58×58 won’t be saved once closed.',
 } as const
 
 // —— a promise face over the slice of IndexedDB we use ——
@@ -92,8 +100,8 @@ function done(tx: IDBTransaction): Promise<void> {
   })
 }
 
-/** Open the database, or undefined when IDB is missing, blocked or broken (never throws). */
-export async function openDb(idb: IdbLike | undefined, timeoutMs = 2000): Promise<IDBDatabase | undefined> {
+/** Open the database: undefined when IDB is missing, blocked or broken, null when it gave no answer in time (never throws). */
+export async function openDb(idb: IdbLike | undefined, timeoutMs = 2000): Promise<IDBDatabase | null | undefined> {
   if (!idb) return undefined
   try {
     const r = idb.open(DB_NAME, DB_VERSION)
@@ -102,7 +110,7 @@ export async function openDb(idb: IdbLike | undefined, timeoutMs = 2000): Promis
     })
     // the timer is left to run out: resolving a settled race does nothing
     let late = false
-    const timeout = new Promise<undefined>(resolve => { setTimeout(() => { late = true; resolve(undefined) }, timeoutMs) })
+    const timeout = new Promise<null>(resolve => { setTimeout(() => { late = true; resolve(null) }, timeoutMs) })
     // a connection that turns up after we gave up is closed, or it would block every later version upgrade (audit A1-3);
     // a kept one steps aside when another tab upgrades the database
     return await Promise.race([req(r).then((d) => {
@@ -156,6 +164,7 @@ export class SaveStore {
   #persisted = false
   #bytes = 0
   #backendKind: SaveBackend = 'memory'
+  #slow = false
 
   readonly #deps: SaveStoreDeps
 
@@ -164,7 +173,9 @@ export class SaveStore {
   /** Open IDB (falls back to localStorage, then memory) and ask for persistence once. */
   static async open(deps: SaveStoreDeps): Promise<SaveStore> {
     const s = new SaveStore(deps)
-    s.#db = await openDb(deps.idb, deps.timeoutMs)
+    const db = await openDb(deps.idb, deps.timeoutMs)
+    s.#slow = db === null
+    s.#db = db ?? undefined
     if (s.#db) {
       s.#backendKind = 'idb'
       try { s.#persisted = (await deps.storageManager?.persist?.()) === true } catch { s.#persisted = false }
@@ -176,7 +187,7 @@ export class SaveStore {
   }
 
   status(): StoreStatus {
-    return { backend: this.#backendKind, persisted: this.#persisted, bytes: this.#bytes, nearFull: this.#bytes > SOFT_CAP_BYTES }
+    return { backend: this.#backendKind, persisted: this.#persisted, bytes: this.#bytes, nearFull: this.#bytes > SOFT_CAP_BYTES, slow: this.#slow }
   }
 
   /** Can a `w × h` board be saved here at all? (The new-board wizard asks before starting.) */

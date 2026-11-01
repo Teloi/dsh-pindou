@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { decodeV4, encodeV4 } from '../src/core/codec-v4.ts'
 import { type Board, createBoard, defaultState, EMPTY, parseState, serializeState, setCell, STORAGE_KEY } from '../src/core/index.ts'
 import {
-  LEGACY_ID, LOCAL_MAX_SIDE, LOCAL_SAVE_PREFIX, openDb, SaveStore, SOFT_CAP_BYTES, UNSAVED_TOO_BIG,
+  LEGACY_ID, LOCAL_MAX_SIDE, LOCAL_SAVE_PREFIX, openDb, SaveStore, SOFT_CAP_BYTES, UNSAVED_SLOW, UNSAVED_TOO_BIG,
 } from '../src/core/save-store.ts'
 import { FakeIdb, fakeLocal } from './fake-idb.ts'
 /** The entry's v0.2 parser, injected as client.big.js does (a chunk may not import storage.ts). */
@@ -21,7 +21,7 @@ describe('save store: IndexedDB first', () => {
     const idb = new FakeIdb()
     let asked = 0
     const store = await SaveStore.open({ legacy, idb, local: fakeLocal(), storageManager: { persist: async () => { asked++; return false } } })
-    expect(store.status()).toEqual({ backend: 'idb', persisted: false, bytes: 0, nearFull: false })
+    expect(store.status()).toEqual({ backend: 'idb', persisted: false, bytes: 0, nearFull: false, slow: false })
     expect(asked).toBe(1)
     const big = noisy(208, 208)
     const r = await store.save('g1', big, { target: 'board:x' })
@@ -77,7 +77,7 @@ describe('save store: when IDB is unavailable', () => {
   it('closes a connection that arrives after the 2 s give-up, so it cannot block later upgrades (audit A1-3)', async () => {
     const idb = new FakeIdb()
     idb.faults.open = 'late'
-    expect(await openDb(idb, 50)).toBeUndefined()
+    expect(await openDb(idb, 50)).toBeNull()
     await new Promise(r => setTimeout(r, 200))
     expect(idb.closed).toBe(1)
     // a connection in time stays open, and steps aside when another tab upgrades
@@ -104,7 +104,8 @@ describe('save store: when IDB is unavailable', () => {
       idb.faults.open = fault
       const local = fakeLocal()
       const store = await SaveStore.open({ legacy, idb, local, timeoutMs: 50 })
-      expect(store.status()).toMatchObject({ backend: 'local', persisted: false })
+      // only a timeout is "slow" (the lighter >58 line, plan 修订 20:25); error/throw keep the full notice
+      expect(store.status()).toMatchObject({ backend: 'local', persisted: false, slow: fault === 'hang' })
       // ≤ 58 saves to localStorage, compressed
       const b58 = noisy(LOCAL_MAX_SIDE, 40)
       const r = await store.save('mid', b58)
@@ -139,8 +140,9 @@ describe('save store: when IDB is unavailable', () => {
     const idb = new FakeIdb()
     idb.faults.open = 'hang'
     const t0 = Date.now()
-    expect(await openDb(idb, 30)).toBeUndefined()
+    expect(await openDb(idb, 30)).toBeNull()
     expect(Date.now() - t0).toBeLessThan(1000)
+    expect(UNSAVED_SLOW.zh).toBe('这次没连上浏览器数据库，大于 58×58 的图案关闭后不会保存')
   })
 })
 
