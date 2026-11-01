@@ -867,7 +867,8 @@ async function worksSection() {
     const row = await c.evaluate(worksRow)
     check('W ironing puts the piece on the wall at once, 取消熨烫 takes it off, ironing again puts it back; home shows 「我的作品 · 1」', ironed === 1 && withdrawn === 0 && await wallCount(c) === 1 && row?.title === '我的作品 · 1', JSON.stringify({ ironed, withdrawn, row }))
     await c.context().close()
-    // broken entries: only those go (written back cleaned); unreadable JSON is an empty wall and the game still saves
+    // broken entries: the wall shows only the good ones and leaves the stored list as it is (review IMPORTANT 2 / A1-6, d8d0daa:
+    // v0.3 never deletes what it can't show); unreadable JSON is an empty wall and the game still saves
     const good = seedWorks(3)
     const broken = JSON.stringify([good[0], { i: 'x' }, good[1], { i: 5, n: 16, b: 'zz', s: null }, null, good[2]])
     const b = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(broken))
@@ -875,9 +876,9 @@ async function worksSection() {
     await openPanel(b)
     await b.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
     await b.waitForTimeout(200)
-    const cleaned = await b.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:works')).map(x => x.i))
+    const kept = await b.evaluate(() => localStorage.getItem('dsh-pindou:works'))
     const brow = await b.evaluate(worksRow)
-    check('W broken entries in storage: only they are dropped (3 of 6 kept, written back), 「我的作品 · 3」', cleaned.join() === good.map(x => x.i).join() && brow.title === '我的作品 · 3' && brow.thumbs === 3, JSON.stringify({ cleaned, brow }))
+    check('W broken entries in storage: the wall shows the 3 good ones (「我的作品 · 3」) and the stored list is left as it was', kept === broken && brow.title === '我的作品 · 3' && brow.thumbs === 3, JSON.stringify({ same: kept === broken, brow }))
     await b.context().close()
     const j = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit('{oops'))
     await startSession(j, '看看 README')
