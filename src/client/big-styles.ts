@@ -22,6 +22,8 @@ export const BIG_CSS = `
 .pd-bk-skel{height:240px;margin-bottom:8px;border-radius:var(--pd-radius-board);background:radial-gradient(circle,var(--pd-border) 34%,transparent 38%) 0 0/14px 14px,var(--pd-surface)}
 .pd-bk-err{margin:6px 0 0;color:var(--pd-danger);font-size:12.5px}
 .pd-bk-wide{width:100%;margin:8px 0 4px}
+/* the setup page's visible heading, for screen-reader navigation (plan 修订 20:25) */
+.pd-bk h2{margin:0 0 8px;font-size:15px;font-weight:600;color:var(--pd-text)}
 /* setup: presets two up on a narrow panel, four up from 360 */
 .pd-bk-sizes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 @container pd (min-width: 360px){.pd-bk-sizes{grid-template-columns:repeat(4,minmax(0,1fr))}}

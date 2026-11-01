@@ -179,6 +179,7 @@ function Setup({ t, env, st, onStart }: { readonly t: T; readonly env: Env; read
   const local = s0?.backend === 'local'
   return (
     <>
+      <h2>{t('title')}</h2>
       {local && !s0.slow ? <Notice>{UNSAVED_TOO_BIG[env.lang]}</Notice> : null}
       {saved
         ? <button type="button" className="pd-btn pd-primary pd-bk-wide" onClick={() => { onStart(saved.start, false) }}>{t('resume')} · {saved.label}</button>

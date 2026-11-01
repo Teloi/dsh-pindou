@@ -1185,6 +1185,9 @@ const bigSaid = (s, v) => `${String.fromCharCode(65 + Math.floor(s.cy / 29))}${M
 /** The canvas widget for keys and screen readers (plan §3.6). */
 async function bigAria() {
   const p = await bigPage()
+  // review suggestion 3: a visible h2 「更多尺寸」 on the setup page for screen-reader navigation
+  const h2 = await p.evaluate(() => { const e = document.querySelector('.pd-bk h2'); return e && { text: e.textContent, shown: e.getBoundingClientRect().height > 0, first: e === document.querySelector('.pd-bk h1, .pd-bk h2, .pd-bk h3') } })
+  check('BIG setup page has a visible h2 「更多尺寸」, its first heading', h2?.text === '更多尺寸' && h2.shown && h2.first, JSON.stringify(h2))
   await startPreset(p, 58)
   const host = bigHost(p)
   const a = await host.evaluate(el => ({ role: el.getAttribute('role'), label: el.getAttribute('aria-label'), tab: el.tabIndex }))
