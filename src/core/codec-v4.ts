@@ -18,12 +18,12 @@
  * any work, and inflate stops as soon as the output passes w × h.
  *
  * Not exported from core/index.ts: nothing on the first screen imports it; the
- * big-board chunk (client.big.js, phase 2) does. pd1 stays readable through
- * {@link parseShareCode}.
+ * big-board chunk (client.big.js) does, so it imports no entry module
+ * (big-board.ts). pd1 stays readable through {@link parseShareCode} with the
+ * entry's pd1 decoder passed in.
  */
-import { type Board, isSide, MAX_SIDE } from './board.ts'
-import { fromShareCode } from './codec.ts'
-import { COLOR_COUNT, EMPTY } from './palette.ts'
+import { COLOR_COUNT, EMPTY, isSide, MAX_SIDE } from './big-board.ts'
+import type { Board } from './board.ts'
 
 /** 64 colour symbols; the first 16 are pd1's codes. */
 export const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_'
@@ -212,10 +212,23 @@ export async function decodeV4(code: string, colors: number = COLOR_COUNT): Prom
   return { ok: true, enc, board: { w, h, cells: Object.freeze(cells) } }
 }
 
-/** Any share code: pd1 (square, sync) or pd2. Undefined for anything else or invalid. */
-export async function parseShareCode(code: string, colors: number = COLOR_COUNT): Promise<Board | undefined> {
+/**
+ * Any share code: pd1 (square, through `pd1`, the entry's codec.ts decoder) or
+ * pd2. Undefined for anything else or invalid.
+ */
+export async function parseShareCode(code: string, pd1?: (code: string) => Board | undefined, colors: number = COLOR_COUNT): Promise<Board | undefined> {
   const text = code.trim()
-  if (text.startsWith('pd1:')) return fromShareCode(text)
+  if (text.startsWith('pd1:')) return pd1?.(text)
   const r = await decodeV4(text, colors)
   return r.ok ? r.board : undefined
 }
+
+/**
+ * Longest share code the UI offers to copy (steering 3, plan §4.3): past it the
+ * copy button is swapped for 「导出图纸文件」 before anyone clicks. A code is
+ * never cut short; a board whose code does not fit is shared as a file.
+ */
+export const SHARE_CODE_MAX = 20 * 1024
+
+/** Does this code fit in a copied share code? (Measured up front, never by trying.) */
+export const shareCodeFits = (code: string): boolean => code.length <= SHARE_CODE_MAX

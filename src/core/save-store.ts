@@ -21,9 +21,9 @@
  * not exported from core/index.ts and costs the first screen nothing (it goes
  * into client.big.js in phase 2).
  */
-import { type Board } from './board.ts'
+import type { Board } from './board.ts'
 import { decodeV4, encodeV4 } from './codec-v4.ts'
-import { parseState, STORAGE_KEY, type StorageLike } from './storage.ts'
+import type { StorageLike } from './storage.ts'
 
 export const DB_NAME = 'dsh-pindou'
 export const DB_VERSION = 1
@@ -125,6 +125,13 @@ export interface SaveStoreDeps {
   readonly storageManager?: { persist?: () => Promise<boolean> } | undefined
   readonly now?: () => number
   readonly timeoutMs?: number
+  /**
+   * The v0.2 game save to copy into IDB on {@link SaveStore.migrate}: its key
+   * and the entry's parser (storage.ts `STORAGE_KEY` / `parseState`), passed in
+   * because a lazy chunk may not import entry modules. Without it migrate only
+   * moves fallback saves.
+   */
+  readonly legacy?: { readonly key: string; readonly parse: (raw: string) => { readonly board: Board } | undefined } | undefined
 }
 
 /** What {@link SaveStore.migrate} did with each localStorage key. */
@@ -239,16 +246,17 @@ export class SaveStore {
       if (await this.putVerified(rec)) this.dropLocal(key, out)
       else out.kept.push(key)
     }
-    const raw = this.safeGet(STORAGE_KEY)
-    if (raw !== null) {
-      const { state, corrupt } = parseState(raw)
-      if (corrupt) out.corrupt.push(STORAGE_KEY)
+    const legacy = this.deps.legacy
+    const raw = legacy ? this.safeGet(legacy.key) : null
+    if (legacy && raw !== null) {
+      const state = legacy.parse(raw)
+      if (!state) out.corrupt.push(legacy.key)
       else {
         const rec: SaveRecord = { id: LEGACY_ID, code: await encodeV4(state.board), w: state.board.w, h: state.board.h, at: (this.deps.now ?? Date.now)(), meta: { v1: raw.length <= 64 * 1024 ? raw : null } }
         // copied or not, the game save stays: the first screen reads it
         const copied = await this.putVerified(rec)
-        if (copied) out.copied.push(STORAGE_KEY)
-        else out.kept.push(STORAGE_KEY)
+        if (copied) out.copied.push(legacy.key)
+        else out.kept.push(legacy.key)
       }
     }
     return out

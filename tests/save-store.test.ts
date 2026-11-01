@@ -5,6 +5,8 @@ import {
   LEGACY_ID, LOCAL_MAX_SIDE, LOCAL_SAVE_PREFIX, openDb, SaveStore, SOFT_CAP_BYTES, UNSAVED_TOO_BIG,
 } from '../src/core/save-store.ts'
 import { FakeIdb, fakeLocal } from './fake-idb.ts'
+/** The entry's v0.2 parser, injected as client.big.js does (a chunk may not import storage.ts). */
+const legacy = { key: STORAGE_KEY, parse: (raw: string) => { const r = parseState(raw); return r.corrupt ? undefined : r.state } }
 
 function noisy(w: number, h: number, seed = 1): Board {
   let s = seed
@@ -18,7 +20,7 @@ describe('save store: IndexedDB first', () => {
   it('opens IDB, asks persist() once, and round-trips 208² boards', async () => {
     const idb = new FakeIdb()
     let asked = 0
-    const store = await SaveStore.open({ idb, local: fakeLocal(), storageManager: { persist: async () => { asked++; return false } } })
+    const store = await SaveStore.open({ legacy, idb, local: fakeLocal(), storageManager: { persist: async () => { asked++; return false } } })
     expect(store.status()).toEqual({ backend: 'idb', persisted: false, bytes: 0, nearFull: false })
     expect(asked).toBe(1)
     const big = noisy(208, 208)
@@ -77,7 +79,7 @@ describe('save store: when IDB is unavailable', () => {
       const idb = new FakeIdb()
       idb.faults.open = fault
       const local = fakeLocal()
-      const store = await SaveStore.open({ idb, local, timeoutMs: 50 })
+      const store = await SaveStore.open({ legacy, idb, local, timeoutMs: 50 })
       expect(store.status()).toMatchObject({ backend: 'local', persisted: false })
       // ≤ 58 saves to localStorage, compressed
       const b58 = noisy(LOCAL_MAX_SIDE, 40)
@@ -119,13 +121,13 @@ describe('save store: migration', () => {
     const idb = new FakeIdb()
     idb.faults.open = 'error'
     const local = fakeLocal()
-    const offline = await SaveStore.open({ idb, local })
+    const offline = await SaveStore.open({ legacy, idb, local })
     const a = noisy(40, 30, 3)
     await offline.save('a', a)
     await offline.save('b', noisy(20, 20, 4))
     // IDB comes back, but the first write attempt fails: nothing is removed
     idb.faults = { put: true }
-    const s1 = await SaveStore.open({ idb, local })
+    const s1 = await SaveStore.open({ legacy, idb, local })
     const r1 = await s1.migrate()
     expect(r1.moved).toEqual([])
     expect(r1.kept.toSorted()).toEqual([`${LOCAL_SAVE_PREFIX}a`, `${LOCAL_SAVE_PREFIX}b`])
@@ -145,7 +147,7 @@ describe('save store: migration', () => {
   it('keeps a local copy when its removal fails, and lets a newer IDB save win', async () => {
     const idb = new FakeIdb()
     const local = fakeLocal()
-    const store = await SaveStore.open({ idb, local, now: () => 100 })
+    const store = await SaveStore.open({ legacy, idb, local, now: () => 100 })
     const newer = noisy(16, 16, 9)
     await store.save('g', newer)
     local.setItem(`${LOCAL_SAVE_PREFIX}g`, JSON.stringify({ id: 'g', code: await encodeV4(createBoard(16)), w: 16, h: 16, at: 50 }))
@@ -162,7 +164,7 @@ describe('save store: migration', () => {
     local.setItem(`${LOCAL_SAVE_PREFIX}x`, '{not json')
     local.setItem(`${LOCAL_SAVE_PREFIX}y`, JSON.stringify({ id: 'y', code: 'pd2:8x8:t:???', w: 8, h: 8, at: 1 }))
     local.setItem(STORAGE_KEY, '{"size":16,"board":"oops"}')
-    const store = await SaveStore.open({ idb, local })
+    const store = await SaveStore.open({ legacy, idb, local })
     const r = await store.migrate()
     expect(r.corrupt.toSorted()).toEqual([STORAGE_KEY, `${LOCAL_SAVE_PREFIX}x`, `${LOCAL_SAVE_PREFIX}y`].toSorted())
     expect(r.moved).toEqual([])
@@ -177,7 +179,7 @@ describe('save store: migration', () => {
     const board = setCell(createBoard(24), 3, 3, 9)
     const v2 = JSON.stringify({ v: 2, size: 24, board: serializeState({ ...defaultState(), board }).match(/"board":"([^"]+)"/)![1], color: 9, tool: 'fill', mode: 'play', done: ['heart'] })
     local.setItem(STORAGE_KEY, v2)
-    const store = await SaveStore.open({ idb, local })
+    const store = await SaveStore.open({ legacy, idb, local })
     const r = await store.migrate()
     expect(r.copied).toEqual([STORAGE_KEY])
     expect(local.data.get(STORAGE_KEY)).toBe(v2)
@@ -200,7 +202,7 @@ describe('save store: migration', () => {
     const plain = await encodeV4(big, { enc: 't' })
     const rec = JSON.stringify({ id: 'p', code: plain, w: 58, h: 58, at: 5, meta: { note: 'n'.repeat(3000) } })
     local.setItem(`${LOCAL_SAVE_PREFIX}p`, rec)
-    const store = await SaveStore.open({ idb, local })
+    const store = await SaveStore.open({ legacy, idb, local })
     const r = await store.migrate()
     expect(r).toMatchObject({ moved: [`${LOCAL_SAVE_PREFIX}p`], copied: [STORAGE_KEY], corrupt: [] })
     expect((await store.load(LEGACY_ID))?.board).toEqual(board)
@@ -214,7 +216,16 @@ describe('save store: migration', () => {
     idb.faults.open = 'error'
     const local = fakeLocal()
     local.setItem(STORAGE_KEY, serializeState(defaultState()))
+    const store = await SaveStore.open({ legacy, idb, local })
+    expect(await store.migrate()).toEqual({ moved: [], copied: [], kept: [], corrupt: [] })
+  })
+
+  it('without the legacy parser, migrate leaves the v0.2 game save alone', async () => {
+    const idb = new FakeIdb()
+    const local = fakeLocal()
+    local.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board: setCell(createBoard(16), 1, 1, 3) }))
     const store = await SaveStore.open({ idb, local })
     expect(await store.migrate()).toEqual({ moved: [], copied: [], kept: [], corrupt: [] })
+    expect(local.getItem(STORAGE_KEY)).not.toBeNull()
   })
 })

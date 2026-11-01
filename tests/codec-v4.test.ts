@@ -1,9 +1,10 @@
+import { appendFileSync } from 'node:fs'
 import { deflateRawSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import {
-  ALPHABET, decodeV4, encodeV4, expandRuns, hasDeflate, MAX_PAYLOAD, parseShareCode, plainOf, runLength,
+  ALPHABET, SHARE_CODE_MAX, shareCodeFits, decodeV4, encodeV4, expandRuns, hasDeflate, MAX_PAYLOAD, parseShareCode, plainOf, runLength,
 } from '../src/core/codec-v4.ts'
-import { type Board, createBoard, encode, EMPTY, setCell, TEMPLATES, toShareCode } from '../src/core/index.ts'
+import { type Board, createBoard, encode, EMPTY, fromShareCode, setCell, TEMPLATES, toShareCode } from '../src/core/index.ts'
 
 /** Deterministic PRNG so failures reproduce. */
 function rng(seed: number): () => number {
@@ -148,12 +149,35 @@ describe('codec v4 (pd2)', () => {
 
   it('reads pd1 share codes as before, and pd2 through the same door', async () => {
     const b = setCell(createBoard(12), 4, 4, 3)
-    expect(await parseShareCode(toShareCode(b))).toEqual(b)
-    expect(await parseShareCode(`  ${toShareCode(b)}\n`)).toEqual(b)
-    expect(await parseShareCode('pd1:13:...')).toBeUndefined()
+    expect(await parseShareCode(toShareCode(b), fromShareCode)).toEqual(b)
+    expect(await parseShareCode(`  ${toShareCode(b)}\n`, fromShareCode)).toEqual(b)
+    expect(await parseShareCode('pd1:13:...', fromShareCode)).toBeUndefined()
     const big = noisy(58, 29, 0.4)
     expect(await parseShareCode(await encodeV4(big))).toEqual(big)
     expect(await parseShareCode('pd9:whatever')).toBeUndefined()
     expect(await parseShareCode('pd2:8x8:t:...')).toBeUndefined()
+  })
+
+  it('decides up front whether a code fits a copied share code (steering 3)', async () => {
+    expect(SHARE_CODE_MAX).toBe(20 * 1024)
+    expect(shareCodeFits('x'.repeat(SHARE_CODE_MAX))).toBe(true)
+    expect(shareCodeFits('x'.repeat(SHARE_CODE_MAX + 1))).toBe(false)
+    // the plain mode is always a candidate, so a w × h board's code is at most w·h + header:
+    // every board up to 143² fits, whatever is on it (143² = 20,449 cells)
+    const full143 = noisy(143, 143, 1, 5)
+    expect(shareCodeFits(await encodeV4(full143))).toBe(true)
+    // so at the UI's largest size (116²) the export-file branch cannot be reached; measured:
+    const r = rng(11)
+    const photo116 = { ...stripes(116, 116), cells: Object.freeze(stripes(116, 116).cells.map(c => (r() < 0.35 ? Math.floor(r() * 16) : c))) }
+    const lens = {
+      photo116: (await encodeV4(photo116)).length,
+      noise116: (await encodeV4(noisy(116, 116, 0.35, 11))).length,
+      full116: (await encodeV4(noisy(116, 116, 1, 11))).length,
+    }
+    for (const n of Object.values(lens)) expect(n).toBeLessThan(SHARE_CODE_MAX)
+    expect(lens.full116).toBeLessThanOrEqual(116 * 116 + 16)
+    // past 143² a noisy board can overflow: 208² at 35 % noise does
+    expect(shareCodeFits(await encodeV4(noisy(208, 208, 0.35, 11)))).toBe(false)
+    if (process.env['PD_MEASURE']) appendFileSync(process.env['PD_MEASURE'], `${JSON.stringify(lens)}\n`)
   })
 })

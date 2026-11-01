@@ -97,12 +97,18 @@ describe('diff history', () => {
     expect(d.present).toEqual(s.present)
   })
 
-  it('caps all steps at 4 MB, dropping the oldest, and keeps the newest even alone', () => {
+  it('keeps the same 100 steps as snapshot undo even for whole-board repaints of 208² (steering 1)', () => {
     let h = createHistory(createBoard(208))
-    // each full repaint of 208² is 129,792 B: 32 fit under 4 MB, the 33rd pushes the oldest out
-    for (let i = 0; i < 40; i++) h = push(h, floodFill(clearBoard(h.present), 0, 0, i % 16))
-    expect(h.past).toHaveLength(Math.floor(HISTORY_BYTES / (208 * 208 * 3)))
+    // each full repaint of 208² is 129,792 B; 100 of them (≈ 13 MB) stay under the 16 MB cap
+    for (let i = 0; i < 120; i++) h = push(h, floodFill(clearBoard(h.present), 0, 0, i % 16))
+    expect(h.past).toHaveLength(100)
     expect(historyBytes(h)).toBeLessThanOrEqual(HISTORY_BYTES)
+  })
+
+  it('caps all steps by bytes, dropping the oldest, and keeps the newest even alone', () => {
+    let h = createHistory(createBoard(208))
+    for (let i = 0; i < 40; i++) h = push(h, floodFill(clearBoard(h.present), 0, 0, i % 16), 100, 4 * 1024 * 1024)
+    expect(h.past).toHaveLength(Math.floor(4 * 1024 * 1024 / (208 * 208 * 3)))
     h = push(createHistory(createBoard(8)), floodFill(createBoard(8), 0, 0, 1), 100, 10)
     expect(h.past).toHaveLength(1)
   })

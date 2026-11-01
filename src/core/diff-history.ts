@@ -1,5 +1,5 @@
-import { sameShape, type Board } from './board.ts'
-import { HISTORY_LIMIT } from './history.ts'
+import { HISTORY_LIMIT, sameShape } from './big-board.ts'
+import type { Board } from './board.ts'
 
 /**
  * Undo/redo that stores differences, not boards (plan §4.3, "撤销改差异"), for
@@ -11,7 +11,7 @@ import { HISTORY_LIMIT } from './history.ts'
  * values on the other side of the step (Int8), 3 B per changed cell; undo swaps
  * them in, and the values it replaced become the redo step. A change of size
  * keeps the whole other board. On top of the step count, all steps together
- * stay under {@link HISTORY_BYTES} (4 MB): past it the oldest go.
+ * stay under {@link HISTORY_BYTES} (16 MB): past it the oldest go.
  *
  * The first screen keeps history.ts (boards up to 24², 100 snapshots ≈ 0.5 MB
  * at most): this module costs ~115–180 B gzip there and the entry has 20 B left
@@ -27,7 +27,13 @@ export interface DiffHistory {
   readonly strokeBase?: Board | undefined
 }
 
-export const HISTORY_BYTES = 4 * 1024 * 1024
+/**
+ * 16 MB: above 100 whole-board steps of a 208² board (100 × 43,264 × 3 B ≈
+ * 13 MB), so in practice the step limit is the same 100 as the first screen's
+ * snapshot undo (steering 1: the two must not feel different); the byte cap
+ * only guards against size-change steps piling up.
+ */
+export const HISTORY_BYTES = 16 * 1024 * 1024
 
 /** Bytes a step holds: 3 per changed cell, or one per cell of a whole board. */
 export const stepBytes = (s: Step): number => ('cells' in s ? s.cells.length : s.i.length * 3)
