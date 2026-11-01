@@ -823,24 +823,19 @@ describe('GameStore works wall (spec §18.4)', () => {
     expect(make({ backend: broken }).store.works()).toEqual([])
   })
 
-  it('corrupt wall storage is held as stored, for the wall page to park (A1-6): broken JSON or a non-array is one entry', () => {
-    for (const [bad, held] of [['{', ['{']], ['"x"', ['x']], ['{"i":1}', [{ i: 1 }]], ['null', [null]], ['7', [7]], ['[]', []]] as const) {
+  it('corrupt wall storage: broken JSON or a non-array is an empty wall; entries without an id are left out', () => {
+    for (const bad of ['{', '"x"', '{"i":1}', 'null', '7']) {
       const backend = mem()
       backend.data.set(WORKS_KEY, bad)
-      expect(make({ backend }).store.works()).toEqual(held)
-      expect(backend.data.get(WORKS_KEY)).toBe(bad)
+      expect(make({ backend }).store.works()).toEqual([])
     }
-    const odd = [{ i: 5, n: 12, b: 'x', s: null }, null, { i: 'x' }, { n: 12 }]
     const backend = mem()
-    backend.data.set(WORKS_KEY, JSON.stringify(odd))
+    backend.data.set(WORKS_KEY, JSON.stringify([{ i: 5, n: 12, b: 'x', s: null }, null, { i: 'x' }, { n: 12 }]))
     const { store } = make({ backend, reduced: true })
-    expect(store.works()).toEqual(odd)
-    // a new piece goes after the newest id when the last entry has one, else at the ironing time; nothing is dropped
+    expect(store.works().map(w => w.i)).toEqual([5])
+    // a new piece goes after the newest id; validation of each entry is the wall page's (core/works.ts)
     ironOne(store)
-    expect(store.works().slice(0, 4)).toEqual(odd)
-    expect(store.works()[4]!.i).toBe(1_000_000)
-    store.unIron()
-    expect(JSON.parse(backend.data.get(WORKS_KEY)!)).toEqual(odd)
+    expect(store.works().map(w => w.i)).toEqual([5, 1_000_000])
   })
 
   it('leaving mid-iron still collects the piece (once), for the game it belongs to', () => {

@@ -10,7 +10,6 @@ import { renderExport } from '../src/client/render.ts'
 import type { Env } from '../src/client/ui/context.tsx'
 import { createBoard, decode, encode, findTemplate, makeTranslate, SafeStore, setCell } from '../src/core/index.ts'
 import * as chunk from '../src/client/works.tsx'
-import { parseWorks, WORKS_KEY, WORKS_PARK_KEY } from '../src/core/works.ts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -109,90 +108,25 @@ describe('b4 suggestion: Ctrl+Z / ⌘Z on the wall undoes a delete, like 撤销'
   })
 })
 
-/** v0.2's start: the same cleanWorks (src/core/works.ts is unchanged from v0.2), written back when anything was dropped. */
-const v02Start = (): ReturnType<typeof parseWorks> => {
-  const r = parseWorks(localStorage.getItem(WORKS_KEY))
-  if (r.dropped) localStorage.setItem(WORKS_KEY, JSON.stringify(r.works))
-  return r
-}
-
-/** A store on the real (jsdom) localStorage, the one parkWorks writes to. */
-const liveStore = (): Env => ({ ...env(), store: new GameStore({ store: new SafeStore(localStorage), saveDelayMs: 0 }) })
-/** The wall page (or the home row) on the store's current wall, re-rendered as it changes. */
-const show = async (e: Env, row = false): Promise<void> => {
-  const Live = (): ReturnType<typeof chunk.WorksPage> => {
-    useSyncExternalStore(e.store.subscribe, e.store.getSnapshot)
-    const p = { env: e, kit, wall: e.store.works() }
-    return row ? <chunk.WorksRow {...p} fade={false} /> : <chunk.WorksPage {...p} />
-  }
-  await act(async () => { root.render(<Live />) })
-}
-
-describe('review A1-6 (designer 21:33): entries the wall can’t show leave WORKS_KEY for a key v0.2 never reads', () => {
-  const odd = [{ i: 7, n: 29, b: '.'.repeat(841), s: null }, null, 'x', { i: 2, n: 12, b: 'zz', s: null }]
-  beforeEach(() => { localStorage.clear() })
-
-  it('opening the wall moves them, as they were, to the park key; a v0.2 start afterwards drops nothing', async () => {
-    localStorage.setItem(WORKS_KEY, JSON.stringify([odd[0], wall[0], odd[1], wall[1], odd[2], wall[2], odd[3], wall[3]]))
-    const e = liveStore()
-    await show(e)
+describe('review A1-6: entries the wall can’t show are kept, never written away', () => {
+  it('opening the wall, deleting and undoing leave another version’s entries as stored', async () => {
+    const odd = [{ i: 7, n: 29 as never, b: '.'.repeat(841), s: null }, { i: 8, n: 16 as const, b: '.'.repeat(192), s: null }]
+    const writes: string[] = []
+    const e = { ...env(), store: new GameStore({ store: new SafeStore({ getItem: () => null, setItem: (k: string, v: string) => { if (k === 'dsh-pindou:works') writes.push(v) }, removeItem: () => undefined }), saveDelayMs: 0 }) }
+    e.store.setWall([...odd, ...wall])
+    writes.length = 0
+    const Live = (): ReturnType<typeof chunk.WorksPage> => { useSyncExternalStore(e.store.subscribe, e.store.getSnapshot); return <chunk.WorksPage env={e} kit={kit} wall={e.store.works()} /> }
+    await act(async () => { root.render(<Live />) })
     expect(host.querySelectorAll('.pd-wc')).toHaveLength(4)
-    expect(JSON.parse(localStorage.getItem(WORKS_KEY)!)).toEqual(wall)
-    expect(JSON.parse(localStorage.getItem(WORKS_PARK_KEY)!)).toEqual(odd)
-    // rolled back to v0.2: its start finds nothing to drop and never touches the park key
-    const v02 = v02Start()
-    expect(v02.dropped).toBe(false)
-    expect(v02.works).toEqual(wall)
-    expect(JSON.parse(localStorage.getItem(WORKS_KEY)!)).toEqual(wall)
-    expect(JSON.parse(localStorage.getItem(WORKS_PARK_KEY)!)).toEqual(odd)
-  })
-
-  it('the home row parks too (it is what renders at start), and the park key is outside the 60', async () => {
-    const sixty = Array.from({ length: 60 }, (_, k) => ({ ...wall[0]!, i: 100 + k }))
-    localStorage.setItem(WORKS_KEY, JSON.stringify([...odd, ...sixty.slice(4)]))
-    await show(liveStore(), true)
-    expect(JSON.parse(localStorage.getItem(WORKS_KEY)!)).toEqual(sixty.slice(4))
-    expect(JSON.parse(localStorage.getItem(WORKS_PARK_KEY)!)).toEqual(odd)
-  })
-
-  it('parks once: a later start, a delete and its undo leave the park key as it is', async () => {
-    localStorage.setItem(WORKS_KEY, JSON.stringify([...odd, ...wall]))
-    await show(liveStore())
-    const parked = localStorage.getItem(WORKS_PARK_KEY)
-    act(() => { root.unmount() })
-    root = createRoot(host)
-    await show(liveStore())
-    expect(localStorage.getItem(WORKS_PARK_KEY)).toBe(parked)
+    expect(writes).toEqual([])
     const first = host.querySelector<HTMLElement>('.pd-wc')!
     first.focus()
     await act(async () => { key(first, 'Delete') })
-    expect(JSON.parse(localStorage.getItem(WORKS_KEY)!)).toHaveLength(3)
+    expect(e.store.works().slice(0, 2)).toEqual(odd)
+    expect(JSON.parse(writes.at(-1)!).slice(0, 2)).toEqual(odd)
     await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })) })
-    expect(JSON.parse(localStorage.getItem(WORKS_KEY)!)).toEqual(wall)
-    expect(localStorage.getItem(WORKS_PARK_KEY)).toBe(parked)
-  })
-
-  it('adds to what is already parked; unreadable JSON is parked whole', async () => {
-    localStorage.setItem(WORKS_PARK_KEY, JSON.stringify(['earlier']))
-    localStorage.setItem(WORKS_KEY, '{oops')
-    await show(liveStore())
-    expect(localStorage.getItem(WORKS_KEY)).toBe('[]')
-    expect(JSON.parse(localStorage.getItem(WORKS_PARK_KEY)!)).toEqual(['earlier', '{oops'])
-    expect(v02Start().dropped).toBe(false)
-  })
-
-  it('when the park key can’t be written, WORKS_KEY is left exactly as stored (nothing is lost)', async () => {
-    const raw = JSON.stringify([...odd, ...wall])
-    localStorage.setItem(WORKS_KEY, raw)
-    const real = Storage.prototype.setItem
-    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, v: string) {
-      if (k === WORKS_PARK_KEY) throw new Error('QuotaExceededError')
-      real.call(this, k, v)
-    })
-    await show(liveStore())
-    set.mockRestore()
-    expect(host.querySelectorAll('.pd-wc')).toHaveLength(4)
-    expect(localStorage.getItem(WORKS_KEY)).toBe(raw)
-    expect(localStorage.getItem(WORKS_PARK_KEY)).toBeNull()
+    expect(e.store.works()).toHaveLength(6)
+    // restoring keeps id order, so they sit after the 12s now, unchanged
+    expect(JSON.parse(writes.at(-1)!).filter((w: { i: number }) => w.i > 4)).toEqual(odd)
   })
 })

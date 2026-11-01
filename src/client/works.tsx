@@ -10,7 +10,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import type { StoredWork, Template } from '../core/index.ts'
-import { addWork, cleanWorks, parkWorks, removeWork, type Work } from '../core/works.ts'
+import { addWork, cleanWorks, removeWork, type Work } from '../core/works.ts'
 import type { Env } from './ui/context.tsx'
 import type { WorksKit } from './ui/Works.tsx'
 import { WORKS_CSS } from './works-styles.ts'
@@ -38,20 +38,17 @@ const GAP = 8
 export interface WorksProps {
   readonly env: Env
   readonly kit: WorksKit
-  /** The wall as stored, unchecked (the entry checks nothing). */
+  /** The wall as the entry holds it (ids checked only). */
   readonly wall: readonly StoredWork[]
 }
 
 /**
  * The works this wall can show, oldest first. Entries it can't show (another
- * version's sizes, a damaged one, a repeated id, past 60) leave WORKS_KEY for the
- * park key, once, from an effect: never deleted, and v0.2 never sees them (review A1-6).
+ * version's sizes, a damaged one) are skipped but never written away: deleting
+ * and restoring edit the wall as stored (review A1-6).
  */
-function useWorks({ env, wall }: WorksProps): readonly Work[] {
-  const c = useMemo(() => cleanWorks(wall), [wall])
-  // a refused move (no storage, quota) leaves the wall as stored
-  useEffect(() => { if (c.dropped && parkWorks(c.odd)) env.store.setWall(c.works) }, [c, env])
-  return c.works
+function useWorks({ wall }: WorksProps): readonly Work[] {
+  return useMemo(() => cleanWorks(wall).works, [wall])
 }
 
 /**
