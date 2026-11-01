@@ -181,3 +181,10 @@ describe('codec v4 (pd2)', () => {
     if (process.env['PD_MEASURE']) appendFileSync(process.env['PD_MEASURE'], `${JSON.stringify(lens)}\n`)
   })
 })
+
+describe('codec-v4 limits', () => {
+  it('repeats big-board.ts exactly (the store chunk may not import it)', async () => {
+    const c = await import('../src/core/codec-v4.ts'), b = await import('../src/core/big-board.ts')
+    expect([c.MIN_SIDE, c.MAX_SIDE, c.EMPTY, c.COLOR_COUNT]).toEqual([b.MIN_SIDE, b.MAX_SIDE, b.EMPTY, b.COLOR_COUNT])
+  })
+})

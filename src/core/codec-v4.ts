@@ -18,12 +18,19 @@
  * any work, and inflate stops as soon as the output passes w × h.
  *
  * Not exported from core/index.ts: nothing on the first screen imports it; the
- * big-board chunk (client.big.js) does, so it imports no entry module
- * (big-board.ts). pd1 stays readable through {@link parseShareCode} with the
+ * big page's store chunk (client.big-store.js) does, so it imports no entry module
+ * and nothing the big chunk has (not even big-board.ts). pd1 stays readable through {@link parseShareCode} with the
  * entry's pd1 decoder passed in.
  */
-import { COLOR_COUNT, EMPTY, isSide, MAX_SIDE } from './big-board.ts'
 import type { Board } from './board.ts'
+
+// big-board.ts's limits, repeated: this module ships in lib/client.big-store.js, which may share no
+// module with lib/client.big.js (the loader can't require one chunk from another); a test keeps them equal
+export const MIN_SIDE = 8
+export const MAX_SIDE = 208
+export const EMPTY = -1
+export const COLOR_COUNT = 16
+const isSide = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= MIN_SIDE && (v as number) <= MAX_SIDE
 
 /** 64 colour symbols; the first 16 are pd1's codes. */
 export const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_'

@@ -1667,11 +1667,76 @@ async function bigI2() {
   }
 }
 
+/**
+ * The store chunk (lib/client.big-store.js: saves + share codes, split off client.big.js). Delayed: the setup
+ * shows the skeleton at once, never a blank page, and fills in place. Failed: the setup still opens, the
+ * 「进度不会保存」 bar says so, the board plays, share and import say 「这部分没加载出来」, no page error.
+ */
+const STORE_CHUNK = /\/dsh-pindou\/client\.big-store\.js\?/
+async function bigStoreChunk() {
+  const before = pageErrors.length
+  const open = async (p) => {
+    await startSession(p, '看看 README')
+    await openPanel(p)
+    await p.locator('.pd-start .pd-big', { hasText: /自由拼/ }).click()
+    await p.locator('.pd-board').waitFor()
+    const coach = p.locator('.pd-overlay.pd-coach button')
+    if (await coach.count()) { await coach.first().click(); await p.waitForTimeout(250) }
+    await p.getByRole('button', { name: /^更多尺寸$/ }).click()
+    await p.locator('.pd-bk').waitFor({ timeout: 15000 })
+  }
+  // delayed 1.5 s
+  const d = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+  let asked = 0
+  await d.route(STORE_CHUNK, async (route) => { asked++; await new Promise(r => { setTimeout(r, 1500) }); await route.continue() })
+  await open(d)
+  const look = () => d.evaluate(() => ({ skel: !!document.querySelector('.pd-bk-skel'), sizes: !!document.querySelector('.pd-bk-sizes'), text: document.querySelector('.pd-bk')?.textContent.length ?? 0 }))
+  const early = await look()
+  await d.waitForTimeout(400)
+  const mid = await look()
+  await bigShot(d, 'big-store-chunk-delayed-skeleton')
+  await d.locator('.pd-bk-sizes').waitFor({ timeout: 8000 })
+  const late = await look()
+  const panel = await d.evaluate(() => document.querySelectorAll('.pd-bk').length)
+  await bigShot(d, 'big-store-chunk-delayed-filled')
+  check('BIG store chunk delayed: the skeleton at once (never blank), then the setup fills the same panel', asked > 0 && early.skel && !early.sizes && mid.skel && late.sizes && !late.skel && panel === 1, JSON.stringify({ asked, early, mid, late, panel }))
+  await startPreset(d, 58)
+  await d.waitForTimeout(2600)
+  const saved = await d.evaluate(() => [...document.querySelectorAll('.pd-bk-note')].map(n => n.textContent).join(' '))
+  check('BIG store chunk delayed: a 58×58 board then plays with saves (no 「不会保存」)', !/不会保存/.test(saved), saved)
+  await d.context().close()
+  // failed
+  const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+  let fAsked = 0
+  await f.route(STORE_CHUNK, (route) => { fAsked++; return route.abort('internetdisconnected') })
+  await open(f)
+  await f.locator('.pd-bk-sizes').waitFor({ timeout: 8000 })
+  const bar = await f.evaluate(() => document.querySelector('.pd-bk')?.textContent ?? '')
+  await bigShot(f, 'big-store-chunk-failed-setup')
+  check('BIG store chunk failed: the setup still opens and says 「浏览器存储不可用，进度不会保存」', /进度不会保存/.test(bar), bar.slice(0, 160))
+  await f.locator('.pd-bk textarea').first().fill('pd4:8x8:x')
+  await f.locator('.pd-btn', { hasText: /^导入$/ }).click()
+  const impErr = await f.locator('.pd-bk-err').textContent({ timeout: 5000 }).catch(() => '')
+  check('BIG store chunk failed: import says 「这部分没加载出来，请稍后再试」 and retries the chunk', impErr === '这部分没加载出来，请稍后再试' && fAsked >= 2, JSON.stringify({ impErr, fAsked }))
+  await startPreset(f, 29)
+  const [cx, cy] = await bigCell(f, 2, 2)
+  await f.mouse.click(cx, cy)
+  const painted = await f.evaluate(() => { const g = document.querySelector('.pd-bk-app').pd.game.get(); return g.history.past.length })
+  await f.locator('.pd-bk-top .pd-btn', { hasText: '分享' }).click()
+  const shareErr = await f.locator('.pd-bk-share [role=alert]').textContent({ timeout: 5000 }).catch(() => '')
+  await bigShot(f, 'big-store-chunk-failed-share')
+  check('BIG store chunk failed: the board plays (a click paints) and 分享 says 「这部分没加载出来，请稍后再试」', painted > 0 && shareErr === '这部分没加载出来，请稍后再试', JSON.stringify({ painted, shareErr }))
+  await f.context().close()
+  const errs = pageErrors.splice(before)
+  check('BIG store chunk: no page errors, delayed or failed', errs.length === 0, errs.slice(0, 3).join(' | '))
+}
+
 async function bigSection() {
   const before = pageErrors.length
   await bigAria()
   await bigI3()
   await bigTileGap()
+  await bigStoreChunk()
   await undoParity()
   await bigShare()
   await bigStorage()
@@ -1715,6 +1780,7 @@ try {
     await h.close()
   }
   sections: {
+  if (ONLY === 'sc') { log('BIG. store chunk delayed / failed'); await bigStoreChunk(); break sections }
   if (ONLY === 'tg') { log('BIG. tile gaps mid-zoom'); await bigTileGap(); break sections }
   if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }
   if (ONLY === 'big') { log('BIG. more sizes (v0.3)'); await bigSection(); break sections }

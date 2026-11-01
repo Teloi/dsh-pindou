@@ -13,8 +13,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
 import { blank, EMPTY } from '../core/big-board.ts'
 import type { Board } from '../core/board.ts'
-import { encodeV4, parseShareCode, shareCodeFits } from '../core/codec-v4.ts'
-import { SaveStore, UNSAVED_SLOW, UNSAVED_TOO_BIG } from '../core/save-store.ts'
+import type { SaveStore } from '../core/save-store.ts'
 import { BigCanvas, type View } from './big-canvas.ts'
 import { BigGame, type BigTool } from './big-game.ts'
 import { BIG_CSS } from './big-styles.ts'
@@ -32,7 +31,7 @@ const STRINGS = {
     zoomIn: '放大', zoomOut: '缩小', fit: '适合大小', map: '小地图', colors: '颜色', blocks: '块列表', next: '下一块',
     whole: '全图', px: '{n} px/格', at: '第 {y} 行第 {x} 列', empty: '空', want: '图纸要 {c}', wrong: '放错了，图纸要 {c}', done: '{b} 完成！按 N 去下一块', allDone: '全部完成',
     cell: '{b} 板，{at}，{v}', board: '{w}×{h} 画布。方向键移动，空格或回车放豆，Delete 擦除，Shift+方向键跳一块，N 下一块，+ − 0 缩放，M 小地图，L 块列表',
-    only: '只看本色', loading: '正在读取存档…', noStore: '浏览器存储不可用，进度不会保存', held: '本次进度不会保存', close: '关闭',
+    libFail: '这部分没加载出来，请稍后再试', only: '只看本色', loading: '正在读取存档…', noStore: '浏览器存储不可用，进度不会保存', held: '本次进度不会保存', close: '关闭',
   },
   en: {
     title: 'More sizes', presets: 'Pegboards', custom: 'Custom', w: 'Width', h: 'Height', unit: 'Blocks', none: 'One block', start: 'Start',
@@ -44,7 +43,7 @@ const STRINGS = {
     zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit', map: 'Minimap', colors: 'Colours', blocks: 'Blocks', next: 'Next block',
     whole: 'Whole', px: '{n} px/cell', at: 'row {y}, column {x}', empty: 'empty', want: 'pattern wants {c}', wrong: 'Wrong bead: the pattern wants {c}', done: '{b} done! Press N for the next block', allDone: 'All done',
     cell: 'Block {b}, {at}, {v}', board: '{w}×{h} board. Arrows move, Space or Enter places, Delete erases, Shift+arrows jump a block, N next block, + − 0 zoom, M minimap, L block list',
-    only: 'This colour only', loading: 'Reading saves…', noStore: 'Browser storage unavailable — progress will not be saved', held: 'Progress this session will not be saved', close: 'Close',
+    libFail: 'This part didn’t load. Try again later.', only: 'This colour only', loading: 'Reading saves…', noStore: 'Browser storage unavailable — progress will not be saved', held: 'Progress this session will not be saved', close: 'Close',
   },
 } as const
 type Key = keyof (typeof STRINGS)['zh']
@@ -64,18 +63,18 @@ export const UI_MAX = 116
 type T = (k: Key, p?: Record<string, string | number>) => string
 const tr = (lang: 'zh' | 'en'): T => (k, p) => STRINGS[lang][k].replaceAll(/\{(\w+)\}/g, (_, n: string) => String(p?.[n] ?? ''))
 
+/** lib/client.bigstore.js (saves and share codes); fetched once, again after a failure. */
+type Lib = typeof import('./big-store.ts')
+let lib: Lib | undefined
+let libP: Promise<Lib> | undefined
+const loadLib = (): Promise<Lib> => (libP ??= import('./big-store.ts').then((m) => { lib = m; return m }, (e: unknown) => { libP = undefined; throw e }))
 let store: Promise<SaveStore> | undefined
-/** One save store per session, opened on first use. */
-/** `localStorage` itself throws where storage is blocked (sandboxed frames, some private modes). */
-function localOrNone(): Storage | undefined {
-  try { return globalThis.localStorage } catch { return undefined }
-}
-const openStore = (): Promise<SaveStore> => (store ??= SaveStore.open({ idb: globalThis.indexedDB, local: localOrNone(), storageManager: globalThis.navigator?.storage })
-  // saves made while IDB was down move over once it works again (plan §4.3)
-  .then(async (s) => { await s.migrate().catch(() => {}); return s }))
+/** One save store per session, opened on first use; null when its chunk can't load (no saves this time). */
+const openStore = (): Promise<SaveStore | null> => (store ??= loadLib().then(m => m.openStore())).catch(() => { store = undefined; return null })
 
-function useStore(): SaveStore | null {
-  const [s, set] = useState<SaveStore | null>(null)
+/** The store: undefined while it opens, null without one. */
+function useStore(): SaveStore | null | undefined {
+  const [s, set] = useState<SaveStore | null>()
   useEffect(() => { void openStore().then(set) }, [])
   return s
 }
@@ -129,7 +128,7 @@ export function BigPage({ env, kit }: { readonly env: Env; readonly kit: BigKit 
   }
   return (
     <div className="pd-view pd-bk">
-      {st?.status().backend === 'memory' && !closed
+      {(st === null || st?.status().backend === 'memory') && !closed
         ? (
           <p className="pd-bk-note pd-bk-bar" role="status">
             <span>{t('noStore')}</span>
@@ -137,8 +136,9 @@ export function BigPage({ env, kit }: { readonly env: Env; readonly kit: BigKit 
           </p>
         )
         : null}
-      {!st
-        ? (slow ? <div className="pd-bk-load" role="status"><div className="pd-bk-skel" aria-hidden />{t('loading')}</div> : null)
+      {/* the store chunk not here yet: the skeleton at once, never a blank page; IDB only slow: after 300 ms */}
+      {st === undefined
+        ? (slow || !lib ? <div className="pd-bk-load" role="status"><div className="pd-bk-skel" aria-hidden />{t('loading')}</div> : null)
         : game
           ? <Play env={env} kit={kit} t={t} game={game} st={st} onNew={() => { setGame(null) }} />
           : <Setup t={t} env={env} st={st} onStart={start} />}
@@ -174,7 +174,9 @@ function Setup({ t, env, st, onStart }: { readonly t: T; readonly env: Env; read
     onStart({ board: blank(W, H), target: null, unit }, true)
   }
   const load = async (text: string): Promise<void> => {
-    const b = await parseShareCode(text)
+    const m = await loadLib().catch(() => null)
+    if (!m) { setErr(t('libFail')); return }
+    const b = await m.parseShareCode(text)
     if (!b || Math.max(b.w, b.h) > UI_MAX) { setErr(t('bad')); return }
     onStart({ board: blank(b.w, b.h), target: b, unit: b.w > 29 || b.h > 29 ? 29 : 0 }, true)
   }
@@ -189,7 +191,7 @@ function Setup({ t, env, st, onStart }: { readonly t: T; readonly env: Env; read
     <>
       <h2>{t('title')}</h2>
       {held === 'held' ? <Notice>{t('held')}</Notice> : null}
-      {local && !s0.slow ? <Notice>{UNSAVED_TOO_BIG[env.lang]}</Notice> : null}
+      {local && !s0.slow ? <Notice>{lib!.UNSAVED_TOO_BIG[env.lang]}</Notice> : null}
       {saved
         ? <button type="button" className="pd-btn pd-primary pd-bk-wide" onClick={() => { onStart(saved.start, false) }}>{t('resume')} · {saved.label}</button>
         : null}
@@ -214,7 +216,7 @@ function Setup({ t, env, st, onStart }: { readonly t: T; readonly env: Env; read
         </label>
         <button type="button" className="pd-btn" onClick={custom}>{t('start')}</button>
       </div>
-      {local && s0.slow && !st!.canSave(Number(w), Number(h)) ? <p className="pd-tokens" role="status">{UNSAVED_SLOW[env.lang]}</p> : null}
+      {local && s0.slow && !st!.canSave(Number(w), Number(h)) ? <p className="pd-tokens" role="status">{lib!.UNSAVED_SLOW[env.lang]}</p> : null}
       <h3 className="pd-sec"><label htmlFor={uid}>{t('code')}</label></h3>
       <div className="pd-bk-form">
         <textarea id={uid} rows={2} value={code} placeholder={t('codeHint')} onChange={(e) => { setCode(e.target.value); setErr('') }} />
@@ -379,7 +381,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
     if (share !== false) { setShare(false); return }
     setShare(null)
     // measured up front: the length decides copy vs file before anyone clicks (plan §4.3)
-    void encodeV4(board).then(setShare)
+    void loadLib().then(m => m.encodeV4(board), () => '').then(setShare)
   }
   const fileName = `bead-break-${w}x${h}.pd2.txt`
   const sv = st?.status()
@@ -395,13 +397,15 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <button type="button" className="pd-btn" aria-expanded={share !== false} onClick={openShare}>{t('share')}</button>
         <button type="button" className="pd-btn" onClick={onNew}>{t('newGame')}</button>
       </div>
-      {local && !slow ? <Notice>{UNSAVED_TOO_BIG[lang]}</Notice> : saveErr ? <Notice>{t('saveFailed')}</Notice> : null}
+      {local && !slow ? <Notice>{lib!.UNSAVED_TOO_BIG[lang]}</Notice> : saveErr ? <Notice>{t('saveFailed')}</Notice> : null}
       {share !== false
         ? (
           <div className="pd-bk-share">
             {share === null
               ? <span className="pd-tokens">{t('making')}</span>
-              : shareCodeFits(share)
+              : !share
+                ? <span className="pd-tokens" role="alert">{t('libFail')}</span>
+                : lib!.shareCodeFits(share)
                 ? <button type="button" className="pd-btn" onClick={() => { void navigator.clipboard?.writeText(share).then(() => { env.store.showToast('say', false, { s: t('copied') }) }, () => {}) }}>{t('copy')}</button>
                 : (<>
                   <button type="button" className="pd-btn" onClick={() => { download(fileName, new Blob([share], { type: 'text/plain' })) }}>{t('exportFile')}</button>
@@ -430,7 +434,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
           disabled={board.cells.every(c => c === EMPTY)} onClick={() => { kit.exportBoard(env, { board, target: null }) }}>{ic(7)}</button>
       </div>
       {/* IDB only slow this time: one line of secondary text under the toolbar, no card (designer S1, plan 修订 21:35) */}
-      {local && slow ? <p className="pd-tokens" role="status">{UNSAVED_SLOW[lang]}</p> : null}
+      {local && slow ? <p className="pd-tokens" role="status">{lib!.UNSAVED_SLOW[lang]}</p> : null}
       <div className="pd-bk-cv" ref={wrapRef}>
         {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the canvas widget: focusable for the keys its label lists */}
         <div ref={hostRef} className="pd-bk-app" role="application" tabIndex={0} aria-label={t('board', { w, h })}>
