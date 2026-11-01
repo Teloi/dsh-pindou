@@ -1341,6 +1341,62 @@ async function bigAria() {
   await p.context().close()
 }
 
+/**
+ * Designer (16b55c2 tile budget): mid-zoom, the tiles not built yet are covered, never blank or the board colour. A
+ * 208² board of beads only (every cell holds a colour), CPU ×4: fit, fully drawn; then one jump to 16 px/cell and a
+ * single draw() (the budget leaves tiles missing); every visible cell is sampled inside its bead and must be near its
+ * own colour (not transparent, not the board). The same check on the frame once every tile is in, and a screenshot.
+ */
+async function bigTileGap() {
+  const p = await bigPage()
+  await startPreset(p, 58)
+  const cdp = await p.context().newCDPSession(p)
+  await p.evaluate(() => {
+    let s = 11
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const g = document.querySelector('.pd-bk-app').pd.game
+    g.set({ history: { past: [], present: { w: 208, h: 208, cells: Object.freeze(Array.from({ length: 208 * 208 }, () => Math.floor(r() * 16))) }, future: [] } })
+  })
+  await p.waitForTimeout(500)
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
+  const res = await p.evaluate(() => {
+    const c = document.querySelector('.pd-bk-app').pd
+    const fit = c.fitView()
+    c.setView(fit)
+    for (let i = 0; i < 400 && c.draw(); i++);
+    const cx = c.cw / 2, cy = c.ch / 2, s = 16, k = s / fit.s
+    c.setView({ s, ox: cx - (cx - fit.ox) * k, oy: cy - (cy - fit.oy) * k })
+    const look = () => {
+      const { s: vs, ox, oy } = c.view, d = c.el.width / c.cw, x = c.el.getContext('2d'), { w, cells } = c.game.get().history.present
+      const img = x.getImageData(0, 0, c.el.width, c.el.height).data
+      let n = 0, blank = 0, off = 0
+      for (let yy = Math.max(0, Math.ceil(-oy / vs)); yy < 208 && oy + (yy + 1) * vs <= c.ch; yy += 2) {
+        for (let xx = Math.max(0, Math.ceil(-ox / vs)); xx < 208 && ox + (xx + 1) * vs <= c.cw; xx += 2) {
+          const px = Math.round((ox + (xx + 0.5) * vs) * d), py = Math.round((oy + (yy + 0.22) * vs) * d), j = (py * c.el.width + px) * 4
+          const hex = c.pal[cells[yy * w + xx]], want = [1, 3, 5].map(q => parseInt(hex.slice(q, q + 2), 16))
+          n++
+          if (img[j + 3] === 0) blank++
+          else if (Math.hypot(img[j] - want[0], img[j + 1] - want[1], img[j + 2] - want[2]) > 90) off++
+        }
+      }
+      return { n, blank, off }
+    }
+    const t0 = performance.now()
+    const missing = c.draw()
+    const mid = look(), midPng = c.el.toDataURL()
+    let frames = 1
+    while (c.draw() && frames < 400) frames++
+    return { missing, mid, full: look(), frames, fillMs: Math.round(performance.now() - t0), midPng }
+  })
+  // the mid-zoom frame itself (the canvas as drawn, tiles still missing)
+  if (PHASE2_SHOTS) writeFileSync(join(PHASE2_SHOTS, 'tile-gap-mid.png'), Buffer.from(res.midPng.split(',')[1], 'base64'))
+  delete res.midPng
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+  await bigShot(p, 'tile-gap-full')
+  check('BIG tiles: mid-zoom on 208² (tiles still missing after one budgeted frame) every sampled cell shows its own colour — no blank, no board colour', res.missing && res.mid.n > 150 && res.mid.blank === 0 && res.mid.off === 0 && res.full.blank === 0 && res.full.off === 0, JSON.stringify(res))
+  await p.context().close()
+}
+
 /** I3: record the canvas's view.s every frame for 700 ms; then the distinct scales it went through */
 const zoomSample = p => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; window.pdS = []; const t0 = performance.now(); const f = () => { window.pdS.push([Math.round(performance.now() - t0), c.view.s]); if (performance.now() - t0 < 700) requestAnimationFrame(f) }; requestAnimationFrame(f) })
 const zoomSteps = async (p) => { await p.waitForTimeout(800); return p.evaluate(() => window.pdS.map(x => x[1]).filter((v, i, a) => v !== a[i - 1])) }
@@ -1615,6 +1671,7 @@ async function bigSection() {
   const before = pageErrors.length
   await bigAria()
   await bigI3()
+  await bigTileGap()
   await undoParity()
   await bigShare()
   await bigStorage()
@@ -1658,6 +1715,7 @@ try {
     await h.close()
   }
   sections: {
+  if (ONLY === 'tg') { log('BIG. tile gaps mid-zoom'); await bigTileGap(); break sections }
   if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }
   if (ONLY === 'big') { log('BIG. more sizes (v0.3)'); await bigSection(); break sections }
   if (ONLY === 'i2') { log('BIG. review I-2 e2e'); await bigI2(); break sections }
