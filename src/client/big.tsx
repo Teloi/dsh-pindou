@@ -62,7 +62,7 @@ const UNITS = [29, 52, 57, 78, 104, 14, 16, 50, 0]
 export const UI_MAX = 116
 
 type T = (k: Key, p?: Record<string, string | number>) => string
-const tr = (lang: 'zh' | 'en'): T => (k, p) => STRINGS[lang][k].replaceAll(/\{(\w)\}/g, (_, n: string) => String(p?.[n] ?? ''))
+const tr = (lang: 'zh' | 'en'): T => (k, p) => STRINGS[lang][k].replaceAll(/\{(\w+)\}/g, (_, n: string) => String(p?.[n] ?? ''))
 
 let store: Promise<SaveStore> | undefined
 /** One save store per session, opened on first use. */
