@@ -97,6 +97,25 @@ describe('storage', () => {
     expect(backend.data.size).toBe(3)
   })
 
+  it('the v1 key holds only 12/16/24 squares both ways: writes refuse every other shape, reads back up and notice any other (audit A1-1)', () => {
+    const sizes: Array<[number, number]> = [[8, 8], [12, 12], [16, 16], [20, 20], [24, 24], [29, 29], [58, 58], [208, 208], [16, 12], [12, 16], [24, 16], [40, 30]]
+    for (const [w, h] of sizes) {
+      const ok = w === h && [12, 16, 24].includes(w)
+      const backend = memoryStorage()
+      const store = new SafeStore(backend)
+      const state = { ...defaultState(), board: setCell(createBoard(w, h), 1, 1, 5) }
+      expect(store.saveState(state)).toBe(ok)
+      expect(backend.data.has(STORAGE_KEY)).toBe(ok)
+      // the same shape planted by hand (another version, a bug): never rendered, kept as a backup, the player told
+      backend.data.set(STORAGE_KEY, serializeState(state))
+      const back = new SafeStore(backend)
+      const loaded = back.loadState()
+      expect(loaded.board.w === w && loaded.board.h === h).toBe(ok)
+      expect(back.status).toBe(ok ? 'ok' : 'recovered')
+      expect(backend.data.has(BAD_SAVE_KEY)).toBe(!ok)
+    }
+  })
+
   it('a corrupt save bigger than 64 KB is still backed up before it goes (audit A1-5)', () => {
     const backend = memoryStorage()
     const huge = 'x'.repeat(70 * 1024)
