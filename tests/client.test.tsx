@@ -132,6 +132,9 @@ describe('client apply', () => {
     const alert = host.querySelector('[role=alert]')
     expect(alert?.textContent).toContain('出错了')
     expect(host.querySelector('.pd-tpl')).toBeNull()
+    // plan 修订 20:25: focus is on 重置 as soon as the card shows
+    expect(document.activeElement).toBe(alert!.querySelector('button'))
+    expect(document.activeElement?.textContent).toBe('重置')
     ctx2d.mockReturnValue(null)
     await act(async () => { alert!.querySelector('button')!.click() })
     expect(host.querySelector('[role=alert]')).toBeNull()

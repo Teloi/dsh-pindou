@@ -116,7 +116,8 @@ export function apply(ctx: ClientContext): void {
           <div className="pd-root" role="alert">
             <div className="pd-card">
               {t('crashed')}
-              <button type="button" className="pd-btn" onClick={() => { store.reset(); this.setState({ e: false }) }}>{t('reset')}</button>
+              {/* focus goes to 重置 when the card shows (plan 修订 20:25) */}
+              <button type="button" className="pd-btn" autoFocus onClick={() => { store.reset(); this.setState({ e: false }) }}>{t('reset')}</button>
             </div>
           </div>
         )
