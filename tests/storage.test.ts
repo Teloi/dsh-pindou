@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CACHE_KEY, createBoard, encode, GenerationCache, parseState, SafeStore, serializeState, setCell, STORAGE_KEY,
+  BAD_SAVE_KEY, CACHE_KEY, createBoard, encode, GenerationCache, parseState, SafeStore, serializeState, setCell, STORAGE_KEY,
   defaultState, type StorageLike,
 } from '../src/core/index.ts'
 
@@ -80,6 +80,8 @@ describe('storage', () => {
     store.loadState()
     expect(store.status).toBe('recovered')
     expect(backend.data.has(STORAGE_KEY)).toBe(false)
+    // the unreadable save is kept aside, not thrown away
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe('{"size":16,"board":"oops"}')
   })
 
   it('falls back to memory when storage throws or is missing', () => {

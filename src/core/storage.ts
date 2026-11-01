@@ -10,6 +10,8 @@ export interface StorageLike {
 }
 
 export const STORAGE_KEY = 'dsh-pindou:v1'
+/** Where a save that did not parse is kept (the latest one), instead of being thrown away. */
+export const BAD_SAVE_KEY = 'dsh-pindou:v1:unreadable'
 /** Hard cap on what we write; a full board is ~600 bytes, the cache a few KB. */
 export const MAX_STORED_CHARS = 64 * 1024
 
@@ -207,9 +209,12 @@ export class SafeStore {
   }
 
   loadState(): SavedState {
-    const { state, corrupt } = parseState(this.get(STORAGE_KEY))
+    const raw = this.get(STORAGE_KEY)
+    const { state, corrupt } = parseState(raw)
     if (corrupt) {
       if (this.status === 'ok') this.status = 'recovered'
+      // keep the unreadable save for a later version (or a human) before starting over
+      this.set(BAD_SAVE_KEY, raw!, true)
       this.remove(STORAGE_KEY)
     }
     return state
