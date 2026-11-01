@@ -44,16 +44,43 @@ describe('storage', () => {
     expect(raw.board).toHaveLength(24 * 24)
   })
 
-  it('round-trips w × h boards up to 208 (data layer, plan §2.3)', () => {
-    for (const [w, h] of [[29, 58], [208, 208], [8, 208]] as const) {
-      const board = setCell(createBoard(w, h), w - 1, h - 1, 2)
-      const { state, corrupt } = parseState(serializeState({ ...defaultState(), board }))
-      expect(corrupt).toBe(false)
-      expect(state.board).toEqual(board)
+  it('the v1 key only opens shapes the first screen draws (12, 16, 24 square); any other is unreadable (review I-1)', () => {
+    // a valid v3 save of a w × h board decodes, but the DOM board can't draw it: corrupt, never rendered
+    for (const [w, h] of [[16, 12], [29, 58], [20, 20], [208, 208], [8, 208]] as const) {
+      const raw = JSON.stringify({ v: 3, size: w, h, board: encode(setCell(createBoard(w, h), w - 1, h - 1, 2)) })
+      expect(parseState(raw).corrupt).toBe(true)
+      expect(parseState(raw).state.board.w).toBe(16)
     }
+    for (const n of [12, 16, 24]) expect(parseState(serializeState({ ...defaultState(), board: createBoard(n) })).corrupt).toBe(false)
     // a size the data layer refuses, or cells that don't fill w × h, is corrupt (and falls back)
     expect(parseState(JSON.stringify({ size: 209, board: '.'.repeat(209 * 209) })).corrupt).toBe(true)
     expect(parseState(JSON.stringify({ size: 29, h: 58, board: '.'.repeat(29 * 29) })).corrupt).toBe(true)
+  })
+
+  it('a valid non-square v3 save in the v1 key is backed up and the game starts over (review I-1)', () => {
+    const backend = memoryStorage()
+    const raw = JSON.stringify({ v: 3, size: 16, h: 12, board: encode(setCell(createBoard(16, 12), 15, 11, 3)), color: 3 })
+    backend.data.set(STORAGE_KEY, raw)
+    const store = new SafeStore(backend)
+    const state = store.loadState()
+    expect(state.board).toEqual(createBoard(16))
+    expect(store.status).toBe('recovered')
+    expect(backend.data.has(STORAGE_KEY)).toBe(false)
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe(raw)
+  })
+
+  it('setAside keeps the save under the backup key and clears it (the crash reset); nothing saved, nothing done', () => {
+    const backend = memoryStorage()
+    const store = new SafeStore(backend)
+    store.setAside()
+    expect(store.status).toBe('ok')
+    expect(backend.data.size).toBe(0)
+    const raw = serializeState(defaultState())
+    backend.data.set(STORAGE_KEY, raw)
+    store.setAside()
+    expect(store.status).toBe('recovered')
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe(raw)
+    expect(backend.data.has(STORAGE_KEY)).toBe(false)
   })
 
   it('recovers from corrupt or tampered data field by field', () => {

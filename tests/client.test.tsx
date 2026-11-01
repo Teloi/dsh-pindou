@@ -9,7 +9,7 @@ import { formatKeys, settingsOpener } from '../src/client/settings.ts'
 import { cellSize } from '../src/client/ui/Board.tsx'
 import { panelOnScreen } from '../src/client/ui/App.tsx'
 import { canCopyImage, copyPng, exportFileName, cornerRadii, saveRoute } from '../src/client/render.ts'
-import { createBoard, defaultState, findTemplate, serializeState, setCell, STORAGE_KEY } from '../src/core/index.ts'
+import { BAD_SAVE_KEY, createBoard, defaultState, findTemplate, serializeState, setCell, STORAGE_KEY } from '../src/core/index.ts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -46,6 +46,9 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
   localStorage.clear(); host = document.createElement('div'); document.body.append(host) })
 afterEach(() => { vi.restoreAllMocks(); host.remove(); document.body.innerHTML = '' })
+
+/** jsdom reports an effect error a boundary caught as uncaught too: keep the log quiet. */
+const quietError = (e: ErrorEvent): void => { e.preventDefault() }
 
 /** Split a selector list on top-level commas only (not inside :where()/:is()). */
 function splitTop(list: string): string[] {
@@ -113,6 +116,30 @@ describe('client apply', () => {
     await act(async () => { root.unmount() })
     f.dispose()
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).target).toBe('template:heart')
+  })
+
+  it('review I-1: a render crash shows 「出错了」 + 重置 instead of a blank panel; 重置 sets the save aside and starts over', async () => {
+    const save = serializeState({ ...defaultState(), board: setCell(createBoard(16), 1, 1, 3) })
+    localStorage.setItem(STORAGE_KEY, save)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    window.addEventListener('error', quietError)
+    const ctx2d = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => { throw new Error('boom') })
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    const alert = host.querySelector('[role=alert]')
+    expect(alert?.textContent).toContain('出错了')
+    expect(host.querySelector('.pd-tpl')).toBeNull()
+    ctx2d.mockReturnValue(null)
+    await act(async () => { alert!.querySelector('button')!.click() })
+    expect(host.querySelector('[role=alert]')).toBeNull()
+    expect(host.querySelectorAll('.pd-tpl')).toHaveLength(12)
+    expect(localStorage.getItem(BAD_SAVE_KEY)).toBe(save)
+    await act(async () => { root.unmount() })
+    f.dispose()
+    window.removeEventListener('error', quietError)
   })
 
   for (const desktop of [false, true]) {

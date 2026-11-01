@@ -1,4 +1,4 @@
-import { type Board, type BoardSize, createBoard, DEFAULT_SIZE } from './board.ts'
+import { type Board, type BoardSize, createBoard, DEFAULT_SIZE, isBoardSize } from './board.ts'
 import { decode, encode } from './codec.ts'
 import { isColorIndex } from './palette.ts'
 
@@ -106,10 +106,12 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
   let board = fallback.board
   // v2 saves have `size` (square); v3 adds `h` for w × h boards, `size` stays the width.
   // decode() refuses any side outside 8–208 (a `size` error), which marks the save corrupt.
+  // This key only ever holds a first-screen board (12, 16 or 24 square); any other shape
+  // decodes but would crash the DOM board, so it counts as unreadable too: backed up, not rendered.
   const w = r['size']
   if (typeof w === 'number' && typeof r['board'] === 'string') {
     const d = decode(r['board'], w, typeof r['h'] === 'number' ? r['h'] : w)
-    if (d.ok) board = d.board
+    if (d.ok && d.board.h === w && isBoardSize(w)) board = d.board
     else corrupt = true
   } else {
     corrupt = true
@@ -211,15 +213,18 @@ export class SafeStore {
   }
 
   loadState(): SavedState {
-    const raw = this.get(STORAGE_KEY)
-    const { state, corrupt } = parseState(raw)
-    if (corrupt) {
-      if (this.status === 'ok') this.status = 'recovered'
-      // keep the unreadable save for a later version (or a human) before starting over
-      this.set(BAD_SAVE_KEY, raw!, true)
-      this.remove(STORAGE_KEY)
-    }
+    const { state, corrupt } = parseState(this.get(STORAGE_KEY))
+    if (corrupt) this.setAside()
     return state
+  }
+
+  /** Keep the save for a later version (or a human) and start over (an unreadable save, a reset after a crash). */
+  setAside(): void {
+    const raw = this.get(STORAGE_KEY)
+    if (raw === null) return
+    if (this.status === 'ok') this.status = 'recovered'
+    this.set(BAD_SAVE_KEY, raw, true)
+    this.remove(STORAGE_KEY)
   }
 
   saveState(state: SavedState): boolean {

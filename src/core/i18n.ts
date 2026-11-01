@@ -103,6 +103,8 @@ const COPY = {
   toastExportFailed: ['导出失败', 'Export failed'],
   storageUnavailable: ['浏览器存储不可用，进度不会保存', 'Browser storage unavailable — progress will not be saved'],
   storageRecovered: ['本地存档损坏，已重置', 'Saved data was corrupt and has been reset'],
+  crashed: ['出错了', 'Something went wrong'],
+  reset: ['重置', 'Reset'],
   aiPlaceholder: ['描述你想拼的东西，比如：戴墨镜的柴犬', 'Describe what to make, e.g. a shiba wearing sunglasses'],
   aiLabel: ['描述', 'Description'],
   aiGenerate: ['生成', 'Generate'],

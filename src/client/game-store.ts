@@ -141,7 +141,7 @@ function firstColor(board: Board, target: Board, fallback: number): number {
 }
 
 export class GameStore {
-  #state: GameState
+  #state!: GameState
   readonly #listeners = new Set<() => void>()
   readonly #cache: GenerationCache
   readonly #now: () => number
@@ -160,7 +160,7 @@ export class GameStore {
   #prevGames: GameSnap[] = []
   #boardSeq = 0
   /** The works wall as stored, oldest first; a new array on every change. */
-  #wall: StoredWork[]
+  #wall!: StoredWork[]
   /** Games left by undoing a switch, for redo; any edit drops them. */
   #nextGames: GameSnap[] = []
   /** Live visibility of the panel (set by the mounted panel), read when a result lands. */
@@ -175,6 +175,12 @@ export class GameStore {
     this.#st = deps.setTimeout ?? ((fn, ms) => setTimeout(fn, ms))
     this.#ct = deps.clearTimeout ?? (h => { clearTimeout(h as ReturnType<typeof setTimeout>) })
     this.#cache = new GenerationCache(deps.store)
+    this.#boot()
+  }
+
+  /** Read the save (a fresh game when there is none) into the state. */
+  #boot(): void {
+    const deps = this.#deps
     const saved = deps.store.loadState()
     let targetBoard = resolveTarget(saved.target, saved.pattern, saved.board.w, saved.board.h)
     let target = targetBoard ? saved.target : null
@@ -213,6 +219,16 @@ export class GameStore {
     // ironed but not on the wall: closed mid-iron, or a piece ironed before v0.2 (never a blank
     // board: a damaged save falls back to one, and iron() refuses it too)
     if (saved.ironed && saved.work === null && saved.board.cells.some(c => c !== EMPTY)) this.#collect()
+  }
+
+  /** The panel crashed (index.tsx): set the save aside and start over from a fresh game. */
+  reset(): void {
+    this.#deps.store.setAside()
+    this.#prevGames = []
+    this.#nextGames = []
+    this.#last = null
+    this.#boot()
+    this.#set({}, false)
   }
 
   // ── store protocol ────────────────────────────────────────────────

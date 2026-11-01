@@ -11,7 +11,7 @@
  * Host types are not bundled; the minimal shapes used here are declared below
  * so the bundle depends on nothing but React at runtime.
  */
-import { useSyncExternalStore, type ComponentType, type ReactElement } from 'react'
+import { Component, useSyncExternalStore, type ComponentType, type ReactElement, type ReactNode } from 'react'
 import { en, makeTranslate, SafeStore, browserStorage, zh, type Translate } from '../core/index.ts'
 import { fetchApi } from './api.ts'
 import { makeBusyPill, makeEntry, type SessionProps } from './entry.tsx'
@@ -105,12 +105,34 @@ export function apply(ctx: ClientContext): void {
     open()
   }
 
+  /** A render crash shows a reset (the save is set aside first), never a blank panel for good. */
+  class Guard extends Component<{ readonly t: Translate; readonly children: ReactNode }, { readonly e: boolean }> {
+    override state = { e: false }
+    static getDerivedStateFromError(): { e: boolean } { return { e: true } }
+    override render(): ReactNode {
+      const { t } = this.props
+      return this.state.e
+        ? (
+          <div className="pd-root" role="alert">
+            <div className="pd-card">
+              {t('crashed')}
+              <button type="button" className="pd-btn" onClick={() => { store.reset(); this.setState({ e: false }) }}>{t('reset')}</button>
+            </div>
+          </div>
+        )
+        : this.props.children
+    }
+  }
+
   function Body(): ReactElement {
     const l = useLang()
+    const t = tFor(l)
     return (
-      <EnvContext.Provider value={{ store, lang: l, t: tFor(l), reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works, big }}>
-        <App />
-      </EnvContext.Provider>
+      <Guard t={t}>
+        <EnvContext.Provider value={{ store, lang: l, t, reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works, big }}>
+          <App />
+        </EnvContext.Provider>
+      </Guard>
     )
   }
 

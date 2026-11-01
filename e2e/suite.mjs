@@ -553,6 +553,64 @@ const worksCard = p => p.locator('.pd-start .pd-big').nth(3)
 const rowShot = async (p, name, auditOpts) => { const s = p.locator('.pd-v-home .pd-works'); await s.scrollIntoViewIfNeeded(); await outShot(p, name, { clip: await s.boundingBox() }, auditOpts) }
 const setWidth = async (p, px) => { await p.evaluate(v => { document.querySelector('.pd-root').style.width = v ? `${v}px` : '' }, px); await p.waitForTimeout(300) }
 
+/**
+ * Save safety (designer review v0.3 phase 1, I-1): a valid but non-square v3 save in
+ * `dsh-pindou:v1` (what a v0.3 build could have written) must never crash the panel.
+ * It is unreadable to the first screen: backed up whole, the notice shows, a fresh game opens.
+ */
+async function saveSafetySection() {
+  const errorsBefore = pageErrors.length
+  // 16 wide, 12 tall, valid v3: decodes, but the DOM board only draws 12/16/24 squares
+  const cells = '.'.repeat(16 * 12 - 3) + '3a5'
+  const raw = JSON.stringify({ v: 3, size: 16, h: 12, board: cells, color: 3, tool: 'paint', mode: 'play', target: null, pattern: null, ironed: false, coached: true })
+  const init = `if (!sessionStorage.getItem('v')) { sessionStorage.setItem('v', '1'); localStorage.setItem('dsh-pindou:v1', ${JSON.stringify(raw)}) }`
+  const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', init)
+  await startSession(p, '看看 README')
+  await openPanel(p)
+  const toast = await p.locator('.pd-toast').textContent({ timeout: 5000 }).catch(() => null)
+  const st = await p.evaluate(() => ({
+    home: !!document.querySelector('.pd-v-home'), cells: document.querySelectorAll('.pd-board .pd-cell').length, alert: !!document.querySelector('.pd-root [role=alert]'),
+    backup: localStorage.getItem('dsh-pindou:v1:unreadable'), v1: localStorage.getItem('dsh-pindou:v1'),
+  }))
+  const v1 = st.v1 ? JSON.parse(st.v1) : null
+  // the rest of the save is read field by field (spec §4.3), so it may reopen on a fresh 16 × 16 board or home
+  check('V I-1 a valid 16×12 v3 save in dsh-pindou:v1: no crash, a fresh 16×16 board (or home), the notice shows, the raw save is backed up', (st.home || st.cells === 256) && !st.alert && /存档/.test(toast ?? '') && st.backup === raw, JSON.stringify({ ...st, backup: st.backup === raw, v1: undefined, toast }))
+  // the panel still plays and saves a square board again
+  if (st.home) await p.locator('.pd-start .pd-big').first().click()
+  await p.locator('.pd-board .pd-cell').first().waitFor()
+  const coach = p.locator('.pd-overlay.pd-coach button')
+  if (await coach.count()) await coach.click()
+  await p.locator('.pd-board .pd-cell').first().click()
+  await p.waitForTimeout(800)
+  const after = await p.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:v1') ?? 'null'))
+  check('V I-1 after the reset the game plays and saves a square board to v1', after?.size === after?.h && [12, 16, 24].includes(after?.size), JSON.stringify({ before: v1 && { size: v1.size, h: v1.h }, after: after && { size: after.size, h: after.h } }))
+  await outShot(p, 'v-nonsquare-v1-recovered')
+  await p.context().close()
+  const caused = pageErrors.splice(errorsBefore)
+  check('V no page errors from a non-square v1 save', caused.length === 0, caused.slice(0, 3).join(' | '))
+  // any other render crash: the outer boundary shows 「出错了」 + 重置, never a blank panel; 重置 backs the save up and starts over.
+  // The crash is forced in the plugin's own canvases only (home thumbnails draw in an effect), never the host's.
+  const boom = `window.pdBoom = true; const gc = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (...a) { if (window.pdBoom && this.closest('[aria-label="拼豆小憩"]')) throw new Error('pd e2e boom'); return gc.apply(this, a) }`
+  const c = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${boom}; ${init.replace("'v'", "'c'")}`)
+  await startSession(c, '看看 README')
+  await openPanel(c)
+  // the seeded save opens on the board: go home, where the thumbnails throw
+  if (!(await c.locator('.pd-v-home').count())) { await c.locator('.pd-head .pd-ib').first().click().catch(() => {}) }
+  const fallback = c.locator('.pd-root[role=alert]')
+  await fallback.waitFor({ timeout: 8000 }).catch(() => {})
+  const crashed = { alert: await fallback.count(), text: (await fallback.textContent().catch(() => '')) ?? '' }
+  await outShot(c, 'v-crash-boundary')
+  await c.evaluate(() => { window.pdBoom = false })
+  await fallback.locator('button').click().catch(() => {})
+  await c.waitForTimeout(500)
+  const back = await c.evaluate(() => ({ alert: !!document.querySelector('.pd-root[role=alert]'), root: !!document.querySelector('.pd-root'), backup: !!localStorage.getItem('dsh-pindou:v1:unreadable') }))
+  check('V a render crash shows 「出错了」 + 重置 (not a blank panel); 重置 brings the panel back', crashed.alert === 1 && /出错了/.test(crashed.text) && /重置/.test(crashed.text) && !back.alert && back.root, JSON.stringify({ crashed, back }))
+  await c.context().close()
+  // only the forced error may be reported from that page
+  const rest = pageErrors.splice(errorsBefore).filter(e => !e.includes('pd e2e boom'))
+  check('V no page errors besides the forced one', rest.length === 0, rest.slice(0, 3).join(' | '))
+}
+
 async function worksSection() {
   const errorsBefore = pageErrors.length
   // 1. a slow chunk: the row holds its height while loading, thumbnails fade in (150 ms), loaded once per session
@@ -1002,7 +1060,7 @@ async function readmeScreens() {
 }
 
 // E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works,
-// E2E_ONLY=s just the README panel shots (the rest of the suite is unchanged)
+// E2E_ONLY=s just the README panel shots, E2E_ONLY=v just save safety (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
 try {
   {
@@ -1038,6 +1096,9 @@ try {
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
   if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
   if (ONLY === 's') { log('S. README panel screenshots'); await readmeScreens(); break sections }
+  if (ONLY === 'v') { log('V. save safety (review I-1)'); await saveSafetySection(); break sections }
+  log('V. save safety (review I-1)')
+  await saveSafetySection()
   // ── T1. picture to pattern (spec §18.2) + lazy modules (spec §18.6), in the real product ──
   log('T1. picture to pattern')
   {

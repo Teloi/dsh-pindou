@@ -189,13 +189,12 @@ describe('save store: migration', () => {
     expect(parseState(meta?.v1 ?? null).state).toMatchObject({ color: 9, tool: 'fill', done: ['heart'] })
   })
 
-  it('migrates saves over 20 KB intact', async () => {
+  it('migrates saves over 20 KB intact (and the legacy first-screen save)', async () => {
     const idb = new FakeIdb()
     const local = fakeLocal()
-    // a 150 × 150 v3 game save: 22,500 board characters plus the rest, > 20 KB
-    const board = noisy(150, 150, 12)
+    // the v1 key only ever holds a first-screen board (review I-1/I-2): the biggest, 24 × 24
+    const board = noisy(24, 24, 12)
     const raw = serializeState({ ...defaultState(), board })
-    expect(raw.length).toBeGreaterThan(20 * 1024)
     local.setItem(STORAGE_KEY, raw)
     // and a > 20 KB fallback record (plain-coded, as an old writer might have left it)
     const big = noisy(58, 58, 13)

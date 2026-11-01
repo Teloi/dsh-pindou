@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createBoard, EMPTY, encode, findTemplate, getCell, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
+import { BAD_SAVE_KEY, createBoard, EMPTY, encode, findTemplate, getCell, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
 import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi } from '../src/client/game-store.ts'
 
 function mem(): StorageLike & { data: Map<string, string> } {
@@ -834,5 +834,26 @@ describe('GameStore works wall (spec §18.4)', () => {
     store.iron()
     expect(store.works()[1]).toMatchObject({ s: 'template:heart' })
     expect(store.works()[1]).not.toHaveProperty('p')
+  })
+})
+
+describe('GameStore.reset (the panel crash boundary, review I-1)', () => {
+  it('sets the save aside under the backup key and starts over from a fresh game', () => {
+    const backend = mem()
+    const { store } = make({ backend })
+    store.startFree()
+    store.setColor(4)
+    store.applyAt(2, 2)
+    store.flush()
+    const saved = backend.data.get(STORAGE_KEY)!
+    let calls = 0
+    store.subscribe(() => { calls++ })
+    store.reset()
+    expect(calls).toBe(1)
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe(saved)
+    expect(backend.data.has(STORAGE_KEY)).toBe(false)
+    expect(store.getSnapshot()).toMatchObject({ mode: 'home', storage: 'recovered', toast: { key: 'storageRecovered' } })
+    expect(store.board).toEqual(createBoard(16))
+    expect(store.canUndo).toBe(false)
   })
 })
