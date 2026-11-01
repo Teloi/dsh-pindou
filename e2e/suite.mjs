@@ -1179,6 +1179,9 @@ async function undoParity() {
   await cv.context().close()
 }
 
+/** What the 58×58 (29-blocks) canvas should announce for cell `s`: review IMPORTANT 1 (23195cf read 「A1 板，{at}，空」). */
+const bigSaid = (s, v) => `${String.fromCharCode(65 + Math.floor(s.cy / 29))}${Math.floor(s.cx / 29) + 1} 板，第 ${s.cy + 1} 行第 ${s.cx + 1} 列，${v}`
+
 /** The canvas widget for keys and screen readers (plan §3.6). */
 async function bigAria() {
   const p = await bigPage()
@@ -1192,7 +1195,7 @@ async function bigAria() {
   await p.keyboard.press('ArrowRight')
   await p.waitForTimeout(100)
   const s1 = await bigState(p), l1 = await live()
-  check('BIG arrows move the cursor and the live region reads block, row, column and the cell', s1.cx === s0.cx + 1 && s1.cy === s0.cy && /第 \d+ 行第 \d+ 列/.test(l1) && /空/.test(l1), JSON.stringify({ s0: [s0.cx, s0.cy], s1: [s1.cx, s1.cy], l1 }))
+  check('BIG arrows move the cursor and the live region reads block, row, column and the cell (exact text, no unfilled {placeholder})', s1.cx === s0.cx + 1 && s1.cy === s0.cy && l1 === bigSaid(s1, '空') && !/[{}]/.test(l1), JSON.stringify({ s0: [s0.cx, s0.cy], s1: [s1.cx, s1.cy], l1, want: bigSaid(s1, '空') }))
   await p.keyboard.press('Space')
   await p.waitForTimeout(100)
   const s2 = await bigState(p), i = s1.cy * 58 + s1.cx
@@ -1204,7 +1207,7 @@ async function bigAria() {
   await p.keyboard.press('Shift+ArrowRight')
   await p.waitForTimeout(100)
   const s4 = await bigState(p), l4 = await live()
-  check('BIG Shift+arrow jumps a block (29 cells) and says the new block', s4.cx === Math.min(57, s3.cx + 29) && /板/.test(l4), JSON.stringify({ cx: s4.cx, l4 }))
+  check('BIG Shift+arrow jumps a block (29 cells) and says the new block and the real cell position', s4.cx === Math.min(57, s3.cx + 29) && l4 === bigSaid(s4, '空') && !/[{}]/.test(l4), JSON.stringify({ cx: s4.cx, l4, want: bigSaid(s4, '空') }))
   const z0 = await host.evaluate(el => el.pd.view.s)
   await p.keyboard.press('+')
   await p.waitForTimeout(250)
