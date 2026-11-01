@@ -5,11 +5,13 @@
  * - view: `s` CSS px per cell and the board's offset; zoom levels fit, 4 … 64;
  *   the board stays centred when smaller than the canvas, else may overhang 48 px.
  * - tiles: the board is cut into square tiles of whole cells drawn at a power of
- *   two device px per cell (`b`), at most 512 × 512 device px; a tile is drawn
+ *   two device px per cell (`b`), at most 256 × 256 device px; a tile is drawn
  *   once from pre-rendered bead sprites (drawImage only: no paths or gradients
  *   per frame) and reused at every zoom that maps to its `b`. A frame only
- *   drawImages the visible tiles, at most 4 new ones (the 1 px/cell base layer
- *   stands in for the rest); an edit patches its cells into every cached tile.
+ *   drawImages the visible tiles and builds new ones within a time budget (one
+ *   at least, more while the frame stays under ~10 ms by the measured tile cost;
+ *   the 1 px/cell base layer stands in for the rest); an edit patches its cells
+ *   into every cached tile.
  *   LRU by bytes: 48 MB, 24 MB on touch or DPR ≥ 3.
  * - level of detail: < 5 px/cell flat squares; 5–14 round beads with a hole; ≥ 14
  *   the pattern's colour codes too.
@@ -27,9 +29,11 @@ import type { Board } from '../core/board.ts'
 import type { BigGame } from './big-game.ts'
 
 export const LEVELS = [4, 8, 12, 16, 24, 32, 48, 64]
-const TILE = 512
+const TILE = 256
 const EDGE = 48
 const SETTLE_MS = 120
+/** Work per frame for new tiles: a zoom sweep keeps its frame rate, detail fills in over the next frames. */
+const TILE_BUDGET_MS = 10
 
 export interface View { readonly s: number; readonly ox: number; readonly oy: number }
 interface Theme { bg: string; peg: string; accent: string; danger: string; ga: number; gh: number }
@@ -75,6 +79,8 @@ export class BigCanvas {
   /** [b, lod] of every tile size in the cache, for patching. */
   readonly #layers = new Map<string, [number, number]>()
   #frame = 0
+  /** Running estimate of one new tile's build time (ms). */
+  #tileMs = 4
   #settle: ReturnType<typeof setTimeout> | undefined
   #gesture = false
   readonly #ptrs = new Map<number, Ptr>()
@@ -336,15 +342,18 @@ export class BigCanvas {
     ctx.fillStyle = this.#th.bg
     ctx.fillRect(ox * dpr, oy * dpr, w * k0, h * k0)
     this.#layers.set(`${b}/${lod}`, [b, lod])
-    let budget = 4, more = false
+    const t0 = performance.now()
+    let built = 0, more = false
     const span = T * s
     for (let ty = Math.max(0, Math.floor(-oy / span)); ty <= Math.min(Math.ceil(h / T) - 1, Math.floor((this.ch - oy) / span)); ty++) {
       for (let tx = Math.max(0, Math.floor(-ox / span)); tx <= Math.min(Math.ceil(w / T) - 1, Math.floor((this.cw - ox) / span)); tx++) {
         const key = `${b}/${lod}/${tx}/${ty}`
         let t = this.#tiles.get(key)
-        if (t) { this.#tiles.delete(key); this.#tiles.set(key, t) } else if (budget > 0) {
-          budget--
+        if (t) { this.#tiles.delete(key); this.#tiles.set(key, t) } else if (!built || performance.now() - t0 + this.#tileMs < TILE_BUDGET_MS) {
+          built++
+          const tb = performance.now()
           t = this.#tile(b, lod, T, tx, ty)
+          this.#tileMs = (this.#tileMs + performance.now() - tb) / 2
           this.#tiles.set(key, t)
           this.#bytes += t.width * t.height * 4
           for (const [k2, old] of this.#tiles) {
