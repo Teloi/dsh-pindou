@@ -329,7 +329,8 @@ export class SaveStore {
     const l = this.#deps.local
     if (!l) return false
     try {
-      const probe = `${LOCAL_SAVE_PREFIX}probe`
+      // outside LOCAL_SAVE_PREFIX, so it can never be a save's key (audit A1-2)
+      const probe = 'dsh-pindou:probe:save'
       l.setItem(probe, '1')
       l.removeItem(probe)
       return true

@@ -74,6 +74,16 @@ describe('save store: IndexedDB first', () => {
 })
 
 describe('save store: when IDB is unavailable', () => {
+  it('the localStorage probe never touches a save with the id "probe" (audit A1-2)', async () => {
+    const local = fakeLocal()
+    const store = await SaveStore.open({ local })
+    const b = noisy(16, 16, 4)
+    expect(await store.save('probe', b)).toMatchObject({ ok: true, where: 'local' })
+    const again = await SaveStore.open({ local })
+    expect((await again.load('probe'))?.board).toEqual(b)
+    expect([...local.data.keys()].filter(k => k.includes('probe'))).toEqual([`${LOCAL_SAVE_PREFIX}probe`])
+  })
+
   for (const fault of ['error', 'throw', 'hang'] as const) {
     it(`falls back to localStorage (open ${fault})`, async () => {
       const idb = new FakeIdb()
