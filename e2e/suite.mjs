@@ -1059,6 +1059,30 @@ async function readmeScreens() {
   }
 }
 
+// ── BIG. 更多尺寸: the canvas board in its lazy chunk (plan v0.3 §2–§4) ──
+const bigHost = p => p.locator('.pd-bk-app')
+const bigState = p => p.evaluate(() => { const g = document.querySelector('.pd-bk-app').pd.game; const s = g.get(); return { cells: [...s.history.present.cells], canUndo: g.canUndo, canRedo: g.canRedo, cx: s.cx, cy: s.cy, tool: s.tool, color: s.color } })
+async function openBig(p) {
+  await p.locator('.pd-start .pd-big', { hasText: /自由拼|Free play/ }).click()
+  await p.locator('.pd-board').waitFor()
+  await p.getByRole('button', { name: /^(更多尺寸|More sizes)$/ }).click()
+  await p.locator('.pd-bk').waitFor({ timeout: 15000 })
+  await p.waitForTimeout(300)
+}
+async function bigSection() {
+  const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+  await startSession(p, '看看 README')
+  await openPanel(p)
+  await openBig(p)
+  await outShot(p, 'big-setup')
+  await p.locator('.pd-bk-sizes .pd-btn', { hasText: '58×58' }).click()
+  await bigHost(p).waitFor()
+  await p.waitForTimeout(500)
+  await outShot(p, 'big-58')
+  log(JSON.stringify((await bigState(p)).cells.length))
+  await p.context().close()
+}
+
 // E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works,
 // E2E_ONLY=s just the README panel shots, E2E_ONLY=v just save safety (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
@@ -1093,6 +1117,7 @@ try {
     await h.close()
   }
   sections: {
+  if (ONLY === 'big') { log('BIG. more sizes (v0.3)'); await bigSection(); break sections }
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
   if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
   if (ONLY === 's') { log('S. README panel screenshots'); await readmeScreens(); break sections }

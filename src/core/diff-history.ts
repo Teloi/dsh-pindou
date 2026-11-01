@@ -95,6 +95,12 @@ export function commit(history: DiffHistory, limit = HISTORY_LIMIT, maxBytes = H
   return history.present === base ? settled : push(settled, history.present, limit, maxBytes)
 }
 
+/** Drop an in-progress stroke without a trace (a second finger turned it into a pinch, plan §3.5). */
+export function cancel(history: DiffHistory): DiffHistory {
+  const base = history.strokeBase
+  return base === undefined ? history : { past: history.past, present: base, future: history.future }
+}
+
 export function canUndo(history: DiffHistory): boolean {
   return history.past.length > 0 && history.strokeBase === undefined
 }

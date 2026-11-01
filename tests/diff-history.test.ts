@@ -3,7 +3,7 @@ import * as D from '../src/core/diff-history.ts'
 import * as S from '../src/core/history.ts'
 import { clearBoard, createBoard, floodFill, getCell, paintLine, resizeBoard, setCell, type Board } from '../src/core/board.ts'
 
-const { begin, canRedo, canUndo, commit, createHistory, historyBytes, preview, push, redo, stepBytes, undo, HISTORY_BYTES } = D
+const { begin, cancel, canRedo, canUndo, commit, createHistory, historyBytes, preview, push, redo, stepBytes, undo, HISTORY_BYTES } = D
 
 /** A seeded pattern: every board below is reproducible. */
 function noisy(w: number, h = w, seed = 7): Board {
@@ -127,6 +127,18 @@ describe('diff history', () => {
     h = commit(begin(h))
     expect(h.past).toHaveLength(0)
     expect(h.strokeBase).toBeUndefined()
+  })
+
+  it('cancel drops a stroke without an entry and keeps redo', () => {
+    let h = push(createHistory(base), setCell(base, 1, 1, 2))
+    h = undo(h)
+    const before = h
+    h = begin(h)
+    for (let x = 0; x < 4; x++) h = preview(h, setCell(h.present, x, 3, 5))
+    h = cancel(h)
+    expect(h.present).toBe(before.present)
+    expect([h.past.length, h.future.length, h.strokeBase]).toEqual([0, 1, undefined])
+    expect(cancel(h)).toBe(h)
   })
 
   it('undo during a stroke commits it first; a new change drops redo', () => {

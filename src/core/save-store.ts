@@ -147,50 +147,51 @@ export interface MigrateReport {
 }
 
 export class SaveStore {
-  private db: IDBDatabase | undefined
-  private persisted = false
-  private bytes = 0
-  private backendKind: SaveBackend = 'memory'
-  private readonly memory = new Map<string, SaveRecord>()
+  #db: IDBDatabase | undefined
+  #persisted = false
+  #bytes = 0
+  #backendKind: SaveBackend = 'memory'
 
-  private constructor(private readonly deps: SaveStoreDeps) {}
+  readonly #deps: SaveStoreDeps
+
+  private constructor(deps: SaveStoreDeps) { this.#deps = deps }
 
   /** Open IDB (falls back to localStorage, then memory) and ask for persistence once. */
   static async open(deps: SaveStoreDeps): Promise<SaveStore> {
     const s = new SaveStore(deps)
-    s.db = await openDb(deps.idb, deps.timeoutMs)
-    if (s.db) {
-      s.backendKind = 'idb'
-      try { s.persisted = (await deps.storageManager?.persist?.()) === true } catch { s.persisted = false }
-      try { s.bytes = (await s.allIdb()).reduce((n, r) => n + sizeOf(r), 0) } catch { /* counted as 0 */ }
-    } else if (s.localWorks()) {
-      s.backendKind = 'local'
+    s.#db = await openDb(deps.idb, deps.timeoutMs)
+    if (s.#db) {
+      s.#backendKind = 'idb'
+      try { s.#persisted = (await deps.storageManager?.persist?.()) === true } catch { s.#persisted = false }
+      try { s.#bytes = (await s.#allIdb()).reduce((n, r) => n + sizeOf(r), 0) } catch { /* counted as 0 */ }
+    } else if (s.#localWorks()) {
+      s.#backendKind = 'local'
     }
     return s
   }
 
   status(): StoreStatus {
-    return { backend: this.backendKind, persisted: this.persisted, bytes: this.bytes, nearFull: this.bytes > SOFT_CAP_BYTES }
+    return { backend: this.#backendKind, persisted: this.#persisted, bytes: this.#bytes, nearFull: this.#bytes > SOFT_CAP_BYTES }
   }
 
   /** Can a `w × h` board be saved here at all? (The new-board wizard asks before starting.) */
   canSave(w: number, h: number): boolean {
-    return this.backendKind === 'idb' || (this.backendKind === 'local' && Math.max(w, h) <= LOCAL_MAX_SIDE)
+    return this.#backendKind === 'idb' || (this.#backendKind === 'local' && Math.max(w, h) <= LOCAL_MAX_SIDE)
   }
 
   async save(id: string, board: Board, meta?: unknown): Promise<SaveResult> {
     if (!ID_RE.test(id)) return { ok: false, reason: 'bad-id' }
     if (meta !== undefined && JSON.stringify(meta).length > 4096) return { ok: false, reason: 'too-big-meta' }
     if (!this.canSave(board.w, board.h)) {
-      return { ok: false, reason: this.backendKind === 'memory' ? 'no-storage' : 'unsaved-too-big' }
+      return { ok: false, reason: this.#backendKind === 'memory' ? 'no-storage' : 'unsaved-too-big' }
     }
-    const rec: SaveRecord = { id, code: await encodeV4(board), w: board.w, h: board.h, at: (this.deps.now ?? Date.now)(), ...(meta === undefined ? {} : { meta }) }
-    if (this.backendKind === 'idb') {
-      const ok = await this.putVerified(rec)
+    const rec: SaveRecord = { id, code: await encodeV4(board), w: board.w, h: board.h, at: (this.#deps.now ?? Date.now)(), ...(meta === undefined ? {} : { meta }) }
+    if (this.#backendKind === 'idb') {
+      const ok = await this.#putVerified(rec)
       return ok ? { ok: true, where: 'idb', bytes: sizeOf(rec) } : { ok: false, reason: 'write-failed' }
     }
     try {
-      this.deps.local!.setItem(LOCAL_SAVE_PREFIX + id, JSON.stringify(rec))
+      this.#deps.local!.setItem(LOCAL_SAVE_PREFIX + id, JSON.stringify(rec))
       return { ok: true, where: 'local', bytes: sizeOf(rec) }
     } catch {
       return { ok: false, reason: 'write-failed' }
@@ -201,10 +202,10 @@ export class SaveStore {
   async load(id: string): Promise<{ board: Board; meta?: unknown; at: number } | undefined> {
     if (!ID_RE.test(id)) return undefined
     let rec: SaveRecord | undefined
-    if (this.db) {
-      try { rec = await this.getIdb(id) } catch { rec = undefined }
+    if (this.#db) {
+      try { rec = await this.#getIdb(id) } catch { rec = undefined }
     }
-    rec ??= this.readLocal(id)
+    rec ??= this.#readLocal(id)
     if (!rec) return undefined
     const d = await decodeV4(rec.code)
     if (!d.ok || d.board.w !== rec.w || d.board.h !== rec.h) return undefined
@@ -212,16 +213,16 @@ export class SaveStore {
   }
 
   async remove(id: string): Promise<void> {
-    if (this.db) {
+    if (this.#db) {
       try {
-        const prev = await this.getIdb(id)
-        const tx = this.db.transaction(SAVES, 'readwrite')
+        const prev = await this.#getIdb(id)
+        const tx = this.#db.transaction(SAVES, 'readwrite')
         tx.objectStore(SAVES).delete(id)
         await done(tx)
-        if (prev) this.bytes = Math.max(0, this.bytes - sizeOf(prev))
+        if (prev) this.#bytes = Math.max(0, this.#bytes - sizeOf(prev))
       } catch { /* leave it */ }
     }
-    try { this.deps.local?.removeItem(LOCAL_SAVE_PREFIX + id) } catch { /* ignore */ }
+    try { this.#deps.local?.removeItem(LOCAL_SAVE_PREFIX + id) } catch { /* ignore */ }
   }
 
   /**
@@ -231,30 +232,30 @@ export class SaveStore {
    */
   async migrate(): Promise<MigrateReport> {
     const out: MigrateReport = { moved: [], copied: [], kept: [], corrupt: [] }
-    const local = this.deps.local
-    if (!this.db || !local) return out
-    for (const key of this.localKeys()) {
+    const local = this.#deps.local
+    if (!this.#db || !local) return out
+    for (const key of this.#localKeys()) {
       const id = key.slice(LOCAL_SAVE_PREFIX.length)
-      const rec = this.readLocal(id)
+      const rec = this.#readLocal(id)
       if (!rec || !(await decodeV4(rec.code)).ok) { out.corrupt.push(key); continue }
-      const existing = await this.getIdb(id).catch(() => undefined)
+      const existing = await this.#getIdb(id).catch(() => undefined)
       // a newer IDB save wins; the older local copy is still only dropped once IDB is verified
       if (existing && existing.at >= rec.at && (await decodeV4(existing.code)).ok) {
-        this.dropLocal(key, out)
+        this.#dropLocal(key, out)
         continue
       }
-      if (await this.putVerified(rec)) this.dropLocal(key, out)
+      if (await this.#putVerified(rec)) this.#dropLocal(key, out)
       else out.kept.push(key)
     }
-    const legacy = this.deps.legacy
-    const raw = legacy ? this.safeGet(legacy.key) : null
+    const legacy = this.#deps.legacy
+    const raw = legacy ? this.#safeGet(legacy.key) : null
     if (legacy && raw !== null) {
       const state = legacy.parse(raw)
       if (!state) out.corrupt.push(legacy.key)
       else {
-        const rec: SaveRecord = { id: LEGACY_ID, code: await encodeV4(state.board), w: state.board.w, h: state.board.h, at: (this.deps.now ?? Date.now)(), meta: { v1: raw.length <= 64 * 1024 ? raw : null } }
+        const rec: SaveRecord = { id: LEGACY_ID, code: await encodeV4(state.board), w: state.board.w, h: state.board.h, at: (this.#deps.now ?? Date.now)(), meta: { v1: raw.length <= 64 * 1024 ? raw : null } }
         // copied or not, the game save stays: the first screen reads it
-        const copied = await this.putVerified(rec)
+        const copied = await this.#putVerified(rec)
         if (copied) out.copied.push(legacy.key)
         else out.kept.push(legacy.key)
       }
@@ -264,45 +265,45 @@ export class SaveStore {
 
   // —— internals ——
 
-  private dropLocal(key: string, out: MigrateReport): void {
-    try { this.deps.local!.removeItem(key); out.moved.push(key) } catch { out.kept.push(key) }
+  #dropLocal(key: string, out: MigrateReport): void {
+    try { this.#deps.local!.removeItem(key); out.moved.push(key) } catch { out.kept.push(key) }
   }
 
-  private async putVerified(rec: SaveRecord): Promise<boolean> {
-    if (!this.db) return false
+  async #putVerified(rec: SaveRecord): Promise<boolean> {
+    if (!this.#db) return false
     try {
-      const prev = await this.getIdb(rec.id)
-      const tx = this.db.transaction(SAVES, 'readwrite')
+      const prev = await this.#getIdb(rec.id)
+      const tx = this.#db.transaction(SAVES, 'readwrite')
       tx.objectStore(SAVES).put(rec)
       await done(tx)
-      const back = await this.getIdb(rec.id)
+      const back = await this.#getIdb(rec.id)
       const ok = back !== undefined && back.code === rec.code && back.w === rec.w && back.h === rec.h && back.at === rec.at
         && JSON.stringify(back.meta) === JSON.stringify(rec.meta)
-      if (ok) this.bytes += sizeOf(rec) - (prev ? sizeOf(prev) : 0)
+      if (ok) this.#bytes += sizeOf(rec) - (prev ? sizeOf(prev) : 0)
       return ok
     } catch {
       return false
     }
   }
 
-  private async getIdb(id: string): Promise<SaveRecord | undefined> {
-    const tx = this.db!.transaction(SAVES, 'readonly')
+  async #getIdb(id: string): Promise<SaveRecord | undefined> {
+    const tx = this.#db!.transaction(SAVES, 'readonly')
     const v: unknown = await req(tx.objectStore(SAVES).get(id))
     return isRecord(v) ? v : undefined
   }
 
-  private async allIdb(): Promise<SaveRecord[]> {
-    const tx = this.db!.transaction(SAVES, 'readonly')
+  async #allIdb(): Promise<SaveRecord[]> {
+    const tx = this.#db!.transaction(SAVES, 'readonly')
     const all: unknown[] = await req(tx.objectStore(SAVES).getAll())
     return all.filter(isRecord)
   }
 
-  private safeGet(key: string): string | null {
-    try { return this.deps.local?.getItem(key) ?? null } catch { return null }
+  #safeGet(key: string): string | null {
+    try { return this.#deps.local?.getItem(key) ?? null } catch { return null }
   }
 
-  private readLocal(id: string): SaveRecord | undefined {
-    const raw = this.safeGet(LOCAL_SAVE_PREFIX + id)
+  #readLocal(id: string): SaveRecord | undefined {
+    const raw = this.#safeGet(LOCAL_SAVE_PREFIX + id)
     if (raw === null) return undefined
     try {
       const v: unknown = JSON.parse(raw)
@@ -312,8 +313,8 @@ export class SaveStore {
     }
   }
 
-  private localKeys(): string[] {
-    const l = this.deps.local as (StorageLike & { length?: number; key?: (i: number) => string | null }) | undefined
+  #localKeys(): string[] {
+    const l = this.#deps.local as (StorageLike & { length?: number; key?: (i: number) => string | null }) | undefined
     const keys: string[] = []
     try {
       for (let i = 0; i < (l?.length ?? 0); i++) {
@@ -324,8 +325,8 @@ export class SaveStore {
     return keys
   }
 
-  private localWorks(): boolean {
-    const l = this.deps.local
+  #localWorks(): boolean {
+    const l = this.#deps.local
     if (!l) return false
     try {
       const probe = `${LOCAL_SAVE_PREFIX}probe`
