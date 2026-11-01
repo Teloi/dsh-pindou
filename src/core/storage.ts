@@ -116,7 +116,8 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
   } else {
     corrupt = true
   }
-  const prefsRaw = (typeof r['prefs'] === 'object' && r['prefs'] !== null ? r['prefs'] : {}) as Record<string, unknown>
+  // anything but an object just has no booleans to read (a string or number reads undefined)
+  const prefsRaw = (r['prefs'] ?? {}) as Record<string, unknown>
   const state: SavedState = {
     board,
     color: isColorIndex(r['color']) ? r['color'] : fallback.color,
@@ -124,11 +125,8 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
     mode: MODES.includes(r['mode'] as Mode) ? (r['mode'] as Mode) : fallback.mode,
     ...parseSource(r['target'], r['pattern']),
     ironed: r['ironed'] === true,
-    prefs: {
-      busyHint: typeof prefsRaw['busyHint'] === 'boolean' ? prefsRaw['busyHint'] : DEFAULT_PREFS.busyHint,
-      showGuide: typeof prefsRaw['showGuide'] === 'boolean' ? prefsRaw['showGuide'] : DEFAULT_PREFS.showGuide,
-      showCodes: typeof prefsRaw['showCodes'] === 'boolean' ? prefsRaw['showCodes'] : DEFAULT_PREFS.showCodes,
-    },
+    // each known pref: the stored boolean, else its default (unknown keys are dropped)
+    prefs: Object.fromEntries(Object.entries(DEFAULT_PREFS).map(([k, v]) => [k, typeof prefsRaw[k] === 'boolean' ? prefsRaw[k] : v])) as unknown as Prefs,
     done: Array.isArray(r['done'])
       ? [...new Set(r['done'].filter((id): id is string => typeof id === 'string' && ID_RE.test(id)))].slice(0, 64)
       : [],

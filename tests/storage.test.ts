@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_PREFS,
   BAD_SAVE_KEY, CACHE_KEY, createBoard, encode, GenerationCache, parseState, SafeStore, serializeState, setCell, STORAGE_KEY,
   defaultState, type StorageLike,
 } from '../src/core/index.ts'
+
+/** A valid save with `prefs` swapped in, read back. */
+const prefsOf = (prefs: unknown) => parseState(JSON.stringify({ ...JSON.parse(serializeState(defaultState())) as object, prefs })).state.prefs
 
 function memoryStorage(): StorageLike & { data: Map<string, string> } {
   const data = new Map<string, string>()
@@ -159,6 +163,12 @@ describe('storage', () => {
     const tampered = parseState(JSON.stringify({ size: 16, board: 'zz', color: 99, tool: 'rm -rf', prefs: { busyHint: 'yes' } }))
     expect(tampered.corrupt).toBe(true)
     expect(tampered.state).toMatchObject({ color: 4, tool: 'paint', prefs: { busyHint: true } })
+  })
+
+  it('reads each pref as a stored boolean or its default, whatever shape prefs has', () => {
+    for (const bad of [null, 'yes', 7, [], true]) expect(prefsOf(bad)).toEqual(DEFAULT_PREFS)
+    expect(prefsOf({ showCodes: true, busyHint: false, extra: true, showGuide: 1 })).toEqual({ busyHint: false, showGuide: true, showCodes: true })
+    expect(Object.keys(prefsOf({ zzz: true }))).toEqual(['busyHint', 'showGuide', 'showCodes'])
   })
 
   it('keeps completed ids and the coach flag, dropping bad ids', () => {
