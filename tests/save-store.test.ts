@@ -74,6 +74,20 @@ describe('save store: IndexedDB first', () => {
 })
 
 describe('save store: when IDB is unavailable', () => {
+  it('closes a connection that arrives after the 2 s give-up, so it cannot block later upgrades (audit A1-3)', async () => {
+    const idb = new FakeIdb()
+    idb.faults.open = 'late'
+    expect(await openDb(idb, 50)).toBeUndefined()
+    await new Promise(r => setTimeout(r, 200))
+    expect(idb.closed).toBe(1)
+    // a connection in time stays open, and steps aside when another tab upgrades
+    idb.faults = {}
+    const db = await openDb(idb, 50)
+    expect(idb.closed).toBe(1)
+    db!.onversionchange!.call(db!, new Event('versionchange') as IDBVersionChangeEvent)
+    expect(idb.closed).toBe(2)
+  })
+
   it('the localStorage probe never touches a save with the id "probe" (audit A1-2)', async () => {
     const local = fakeLocal()
     const store = await SaveStore.open({ local })

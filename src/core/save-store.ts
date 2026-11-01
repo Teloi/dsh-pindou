@@ -100,11 +100,16 @@ export async function openDb(idb: IdbLike | undefined, timeoutMs = 2000): Promis
     r.addEventListener('upgradeneeded', () => {
       if (!r.result.objectStoreNames.contains(SAVES)) r.result.createObjectStore(SAVES, { keyPath: 'id' })
     })
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<undefined>(resolve => { timer = setTimeout(() => { resolve(undefined) }, timeoutMs) })
-    const db = await Promise.race([req(r).catch(() => undefined), timeout])
-    clearTimeout(timer)
-    return db
+    // the timer is left to run out: resolving a settled race does nothing
+    let late = false
+    const timeout = new Promise<undefined>(resolve => { setTimeout(() => { late = true; resolve(undefined) }, timeoutMs) })
+    // a connection that turns up after we gave up is closed, or it would block every later version upgrade (audit A1-3);
+    // a kept one steps aside when another tab upgrades the database
+    return await Promise.race([req(r).then((d) => {
+      if (late) d.close()
+      else d.onversionchange = () => { d.close() }
+      return d
+    }).catch(() => undefined), timeout])
   } catch {
     return undefined
   }

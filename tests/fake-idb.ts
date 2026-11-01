@@ -4,8 +4,8 @@
  * completion), asynchronous like the real thing, with fault switches.
  */
 interface Faults {
-  /** `open` fails (private mode, blocked, …). */
-  open?: 'error' | 'hang' | 'throw'
+  /** `open` fails (private mode, blocked, …); `late` succeeds only after 150 ms. */
+  open?: 'error' | 'hang' | 'throw' | 'late'
   /** `put` transactions abort. */
   put?: boolean
   /** Reads return a damaged copy (to prove read-back verification). */
@@ -34,12 +34,15 @@ class Tx extends EventTarget {
 export class FakeIdb {
   readonly data = new Map<string, Map<string, unknown>>()
   faults: Faults = {}
+  /** Connections closed by the code under test. */
+  closed = 0
 
   open(_name: string, _version?: number): IDBOpenDBRequest {
     if (this.faults.open === 'throw') throw new Error('SecurityError')
     const r = new Req<unknown>()
     if (this.faults.open === 'hang') return r as unknown as IDBOpenDBRequest
-    later(() => {
+    const go = this.faults.open === 'late' ? (fn: () => void): void => { setTimeout(fn, 150) } : later
+    go(() => {
       if (this.faults.open === 'error') { r.error = new Error('InvalidStateError'); r.fire('error'); return }
       r.result = this.db()
       if (this.data.size === 0) r.fire('upgradeneeded')
@@ -52,6 +55,7 @@ export class FakeIdb {
     const data = this.data
     const faults = (): Faults => this.faults
     return {
+      close: () => { this.closed++ },
       objectStoreNames: { contains: (n: string) => data.has(n) },
       createObjectStore: (n: string) => { data.set(n, new Map()) },
       transaction: (n: string, mode: string) => {
