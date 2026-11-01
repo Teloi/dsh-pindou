@@ -189,11 +189,11 @@ export class GameStore {
     if (targetBoard && !sameShape(targetBoard, saved.board)) { target = null; targetBoard = null }
     const storage = deps.store.status
     // the works wall lives under its own key; before v0.2 there is none (an empty wall).
-    // Only the ids are checked here; the wall page validates every work (core/works.ts, in its chunk).
-    // Anything but an array (or broken JSON) is an empty wall: `filter` throws on it.
-    try {
-      this.#wall = (JSON.parse(deps.store.get(WORKS_KEY) ?? '[]') as (StoredWork | null)[]).filter(w => Number.isSafeInteger(w?.i)) as StoredWork[]
-    } catch { this.#wall = [] }
+    // Nothing is checked or dropped here: the wall page validates every entry (core/works.ts, in
+    // its chunk) and parks what it can't show (core/works.ts parkWorks, A1-6). Broken JSON or a non-array is one entry.
+    let w: unknown = deps.store.get(WORKS_KEY) ?? '[]'
+    try { w = JSON.parse(w as string) } catch { /* kept as text, parked by the wall page */ }
+    this.#wall = [w].flat() as StoredWork[]
     this.#state = {
       history: createHistory(saved.board),
       color: saved.color,
@@ -654,7 +654,7 @@ export class GameStore {
     const b = s.history.present
     if (!isClassic(b)) return
     const w: StoredWork = {
-      i: Math.max(this.#now(), (this.#wall.at(-1)?.i ?? 0) + 1), n: b.w as BoardSize, b: encode(b), s: s.target,
+      i: Math.max(this.#now(), +(this.#wall.at(-1)?.i as number) + 1 || 0), n: b.w as BoardSize, b: encode(b), s: s.target,
       ...(s.target?.startsWith('board:') && s.targetBoard && b.w < 24 ? { p: encode(s.targetBoard) } : {}),
     }
     this.setWall([...this.#wall, w].slice(-MAX_WORKS))
@@ -672,7 +672,7 @@ export class GameStore {
     const s = this.#state
     if (s.ironingSince !== null || !s.ironed) return
     // the piece leaves the wall with the ironing
-    if (s.work !== null) this.setWall(this.#wall.filter(w => w.i !== s.work))
+    if (s.work !== null) this.setWall(this.#wall.filter(w => w?.i !== s.work))
     this.#set({ ironed: false, work: null, overlay: null, celebrateAt: null })
   }
 

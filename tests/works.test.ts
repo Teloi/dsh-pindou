@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BOARD_SIZES, createBoard, encode, MAX_WORKS as STORE_MAX, setCell, WORKS_KEY as STORE_KEY } from '../src/core/index.ts'
-import { addWork, cleanWorks, MAX_WORK_CHARS, MAX_WORKS, parseWork, parseWorks, removeWork, WORK_SIZES, WORKS_KEY, type Work } from '../src/core/works.ts'
+import { addWork, cleanWorks, MAX_WORK_CHARS, MAX_WORKS, parkWorks, parseWork, parseWorks, removeWork, WORK_SIZES, WORKS_KEY, WORKS_PARK_KEY, type Work } from '../src/core/works.ts'
 
 const b12 = encode(setCell(createBoard(12), 0, 0, 3))
 const work = (i: number, extra: Partial<Work> = {}): Work => ({ i, n: 12, b: b12, s: null, ...extra })
@@ -30,13 +30,39 @@ describe('works wall (core/works.ts, in the works chunk)', () => {
     expect(parseWorks(JSON.stringify(raw)).works.map(w => w.i)).toEqual([1, 8])
   })
 
-  it('unbroken storage is not rewritten; broken JSON or a non-array is an empty wall', () => {
-    expect(cleanWorks([work(1), work(2)])).toEqual({ works: [work(1), work(2)], dropped: false })
-    expect(parseWorks(null)).toEqual({ works: [], dropped: false })
-    expect(parseWorks('{"i":1')).toEqual({ works: [], dropped: true })
-    expect(parseWorks('{"i":1}')).toEqual({ works: [], dropped: true })
-    // out of order: sorted, and written back
-    expect(cleanWorks([work(2), work(1)])).toEqual({ works: [work(1), work(2)], dropped: true })
+  it('unbroken storage is not rewritten; broken JSON or a non-array is one odd entry, kept whole for the park key', () => {
+    expect(cleanWorks([work(1), work(2)])).toEqual({ works: [work(1), work(2)], odd: [], dropped: false })
+    expect(parseWorks(null)).toEqual({ works: [], odd: [], dropped: false })
+    expect(parseWorks('{"i":1')).toEqual({ works: [], odd: ['{"i":1'], dropped: true })
+    expect(parseWorks('{"i":1}')).toEqual({ works: [], odd: [{ i: 1 }], dropped: true })
+    // out of order: sorted, and written back, nothing odd
+    expect(cleanWorks([work(2), work(1)])).toEqual({ works: [work(1), work(2)], odd: [], dropped: true })
+  })
+
+  it('odd entries (broken, another size, a repeated id, past 60) come back as they were, in stored order (review A1-6)', () => {
+    const big = { i: 3, n: 29, b: '.'.repeat(841), s: null }
+    const twin = { ...work(1), s: 'template:heart' }
+    const r = cleanWorks([work(1), null, big, 'x', twin, work(2)])
+    expect(r).toEqual({ works: [work(1), work(2)], odd: [null, big, 'x', twin], dropped: true })
+    expect(cleanWorks(Array.from({ length: 61 }, (_, k) => work(k + 1))).odd).toEqual([work(1)])
+  })
+
+  it('parkWorks appends to the park key (never WORKS_KEY), keeps a broken park key as its first entry, and says false when refused', () => {
+    expect(WORKS_PARK_KEY).not.toBe(WORKS_KEY)
+    expect(WORKS_PARK_KEY.startsWith(`${WORKS_KEY}:`)).toBe(true)
+    const data = new Map<string, string>()
+    const ls = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v) } }
+    expect(parkWorks([], ls)).toBe(true)
+    expect(data.size).toBe(0)
+    expect(parkWorks([null, 'x'], ls)).toBe(true)
+    expect(parkWorks([{ i: 1 }], ls)).toBe(true)
+    expect(JSON.parse(data.get(WORKS_PARK_KEY)!)).toEqual([null, 'x', { i: 1 }])
+    data.set(WORKS_PARK_KEY, '{oops')
+    expect(parkWorks([2], ls)).toBe(true)
+    expect(JSON.parse(data.get(WORKS_PARK_KEY)!)).toEqual(['{oops', 2])
+    expect(data.has(WORKS_KEY)).toBe(false)
+    expect(parkWorks([1], { getItem: () => null, setItem: () => { throw new Error('quota') } })).toBe(false)
+    expect(parkWorks([1], undefined)).toBe(false)
   })
 
   it('the 61st work pushes out the oldest', () => {

@@ -532,6 +532,8 @@ function seedWorks(n) {
 }
 /** Init script: the wall (raw JSON string) written once per tab, before the plugin reads it. */
 const seedInit = (json, extra = '') => `if (!sessionStorage.getItem('w')) { sessionStorage.setItem('w', '1'); localStorage.setItem('dsh-pindou:works', ${JSON.stringify(json)}); ${extra} }`
+/** Both wall keys as stored (evaluated in the page): WORKS_KEY and the A1-6 park key. */
+const wallKeys = () => ({ works: localStorage.getItem('dsh-pindou:works'), kept: localStorage.getItem('dsh-pindou:works:kept') })
 /** The home section as laid out now (evaluated in the page). */
 const worksRow = () => {
   const s = document.querySelector('.pd-v-home .pd-works')
@@ -867,8 +869,8 @@ async function worksSection() {
     const row = await c.evaluate(worksRow)
     check('W ironing puts the piece on the wall at once, 取消熨烫 takes it off, ironing again puts it back; home shows 「我的作品 · 1」', ironed === 1 && withdrawn === 0 && await wallCount(c) === 1 && row?.title === '我的作品 · 1', JSON.stringify({ ironed, withdrawn, row }))
     await c.context().close()
-    // broken entries: the wall shows only the good ones and leaves the stored list as it is (review IMPORTANT 2 / A1-6, d8d0daa:
-    // v0.3 never deletes what it can't show); unreadable JSON is an empty wall and the game still saves
+    // broken entries: the wall shows only the good ones and moves the rest out of WORKS_KEY to the park key v0.2 never reads
+    // (review A1-6, designer 21:33: v0.2 deletes them from WORKS_KEY on start); unreadable JSON is parked whole, the game still saves
     const good = seedWorks(3)
     const broken = JSON.stringify([good[0], { i: 'x' }, good[1], { i: 5, n: 16, b: 'zz', s: null }, null, good[2]])
     const b = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(broken))
@@ -876,13 +878,18 @@ async function worksSection() {
     await openPanel(b)
     await b.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
     await b.waitForTimeout(200)
-    const kept = await b.evaluate(() => localStorage.getItem('dsh-pindou:works'))
+    const moved = await b.evaluate(wallKeys)
     const brow = await b.evaluate(worksRow)
-    check('W broken entries in storage: the wall shows the 3 good ones (「我的作品 · 3」) and the stored list is left as it was', kept === broken && brow.title === '我的作品 · 3' && brow.thumbs === 3, JSON.stringify({ same: kept === broken, brow }))
+    const ids = JSON.parse(moved.works ?? 'null')?.map(w => w.i)
+    check('W broken entries in storage: the wall shows the 3 good ones (「我的作品 · 3」); WORKS_KEY now holds just those 3, the other 3 sit unchanged under dsh-pindou:works:kept',
+      brow.title === '我的作品 · 3' && brow.thumbs === 3 && JSON.stringify(ids) === JSON.stringify(good.map(w => w.i)) && moved.kept === JSON.stringify([{ i: 'x' }, { i: 5, n: 16, b: 'zz', s: null }, null]), JSON.stringify({ ids, kept: moved.kept, brow }))
     await b.context().close()
     const j = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit('{oops'))
     await startSession(j, '看看 README')
     await openPanel(j)
+    await j.waitForFunction(() => localStorage.getItem('dsh-pindou:works:kept') !== null, null, { timeout: 10000 })
+    await j.waitForTimeout(200)
+    const jk = await j.evaluate(wallKeys)
     const none = await j.locator('.pd-v-home .pd-works').count()
     await j.locator('.pd-start .pd-big').first().click()
     await j.locator('.pd-board').waitFor()
@@ -890,7 +897,7 @@ async function worksSection() {
     await j.locator('.pd-foot .pd-warm').click()
     await j.locator('.pd-overlay.pd-result').waitFor({ timeout: 8000 })
     const saved = await j.evaluate(() => ({ game: JSON.parse(localStorage.getItem('dsh-pindou:v1') ?? '{}').ironed, wall: JSON.parse(localStorage.getItem('dsh-pindou:works') ?? 'null')?.length }))
-    check('W unreadable wall JSON: no row; ironing saves the game and starts a fresh wall of 1', none === 0 && saved.game === true && saved.wall === 1, JSON.stringify({ none, saved }))
+    check('W unreadable wall JSON: parked whole (dsh-pindou:works:kept = ["{oops"], WORKS_KEY "[]"), no row; ironing saves the game and starts a fresh wall of 1', jk.works === '[]' && jk.kept === '["{oops"]' && none === 0 && saved.game === true && saved.wall === 1, JSON.stringify({ jk, none, saved }))
     await j.context().close()
   }
   // 6. walkthrough: light/dark × zh/en, 300–900 wide, home row and wall page (60 works), fade settled before each shot

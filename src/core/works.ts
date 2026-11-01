@@ -26,6 +26,12 @@ const isBoardSize = (n: unknown): n is BoardSize => WORK_SIZES.includes(n as num
 /** Same values as storage.ts WORKS_KEY / MAX_WORKS (the entry's copy; tests/works.test.ts keeps them equal). */
 export const WORKS_KEY = 'dsh-pindou:works'
 export const MAX_WORKS = 60
+/**
+ * Wall entries this version can't show, moved out of WORKS_KEY: v0.2 deletes them
+ * there on start and never reads this key. Kept as they were, never deleted, not
+ * on the wall and outside the 60 (review A1-6).
+ */
+export const WORKS_PARK_KEY = 'dsh-pindou:works:kept'
 /** One stored work, JSON-encoded, stays below this many characters (spec: under 1 KB). */
 export const MAX_WORK_CHARS = 1000
 
@@ -60,31 +66,49 @@ export function parseWork(raw: unknown): Work | null {
  * Untrusted JSON → the wall, oldest first. Broken entries (and repeated ids)
  * are dropped one by one; `dropped` says whether anything was.
  */
-export function parseWorks(json: string | null): { works: Work[]; dropped: boolean } {
-  if (json === null) return { works: [], dropped: false }
+export function parseWorks(json: string | null): { works: Work[]; odd: unknown[]; dropped: boolean } {
+  if (json === null) return { works: [], odd: [], dropped: false }
   let raw: unknown
-  try { raw = JSON.parse(json) } catch { return { works: [], dropped: true } }
+  try { raw = JSON.parse(json) } catch { return { works: [], odd: [json], dropped: true } }
   return cleanWorks(raw)
 }
 
 /** The wall as the entry holds it (or anything else) → valid works only, oldest first. */
-export function cleanWorks(raw: unknown): { works: Work[]; dropped: boolean } {
-  if (!Array.isArray(raw)) return { works: [], dropped: true }
+export function cleanWorks(raw: unknown): { works: Work[]; odd: unknown[]; dropped: boolean } {
+  if (!Array.isArray(raw)) return { works: [], odd: [raw], dropped: true }
   const seen = new Set<number>()
   const works: Work[] = []
+  // what v0.2 would drop from the wall (broken, repeated, past 60): the wall page parks it (review A1-6)
+  const odd: unknown[] = []
   for (const item of raw) {
     const w = parseWork(item)
-    if (w && !seen.has(w.i)) { seen.add(w.i); works.push(w) }
+    if (w && !seen.has(w.i)) { seen.add(w.i); works.push(w) } else odd.push(item)
   }
   works.sort((a, b) => a.i - b.i)
-  return { works: works.slice(-MAX_WORKS), dropped: works.length !== raw.length || works.length > MAX_WORKS || works.some((w, k) => w.i !== (raw[k] as { i?: unknown } | null)?.i) }
+  odd.push(...works.slice(0, -MAX_WORKS))
+  return { works: works.slice(-MAX_WORKS), odd, dropped: works.length !== raw.length || works.length > MAX_WORKS || works.some((w, k) => w.i !== (raw[k] as { i?: unknown } | null)?.i) }
+}
+
+/**
+ * Append entries to WORKS_PARK_KEY (in the same localStorage the entry's SafeStore
+ * uses). False when storage refuses: the caller then leaves them in WORKS_KEY.
+ * A park key that is not a JSON array is kept as its first entry.
+ */
+export function parkWorks(odd: readonly unknown[], ls: Pick<Storage, 'getItem' | 'setItem'> | undefined = globalThis.localStorage): boolean {
+  if (!odd.length) return true
+  try {
+    let q: unknown = ls!.getItem(WORKS_PARK_KEY) ?? '[]'
+    try { q = JSON.parse(q as string) } catch { /* kept as text */ }
+    ls!.setItem(WORKS_PARK_KEY, JSON.stringify([q, odd].flat()))
+    return true
+  } catch { return false }
 }
 
 /** Add a work (kept in id order); past 60 the oldest go. */
 export function addWork(wall: readonly Work[], w: Work): Work[] {
-  return [...wall.filter(x => x.i !== w.i), w].toSorted((a, b) => a.i - b.i).slice(-MAX_WORKS)
+  return [...wall.filter(x => x?.i !== w.i), w].toSorted((a, b) => a?.i - b?.i).slice(-MAX_WORKS)
 }
 
 export function removeWork(wall: readonly Work[], id: number): Work[] {
-  return wall.filter(x => x.i !== id)
+  return wall.filter(x => x?.i !== id)
 }
