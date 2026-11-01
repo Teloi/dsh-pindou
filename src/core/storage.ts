@@ -1,4 +1,4 @@
-import { type Board, type BoardSize, createBoard, DEFAULT_SIZE, isBoardSize } from './board.ts'
+import { type Board, type BoardSize, createBoard, DEFAULT_SIZE } from './board.ts'
 import { decode, encode } from './codec.ts'
 import { isColorIndex } from './palette.ts'
 
@@ -102,8 +102,11 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
   const r = raw as Record<string, unknown>
   let corrupt = false
   let board = fallback.board
-  if (isBoardSize(r['size']) && typeof r['board'] === 'string') {
-    const d = decode(r['board'], r['size'])
+  // v2 saves have `size` (square); v3 adds `h` for w × h boards, `size` stays the width.
+  // decode() refuses any side outside 8–208 (a `size` error), which marks the save corrupt.
+  const w = r['size']
+  if (typeof w === 'number' && typeof r['board'] === 'string') {
+    const d = decode(r['board'], w, typeof r['h'] === 'number' ? r['h'] : w)
     if (d.ok) board = d.board
     else corrupt = true
   } else {
@@ -133,8 +136,10 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
 
 export function serializeState(state: SavedState): string {
   return JSON.stringify({
-    v: 2,
-    size: state.board.size,
+    v: 3,
+    // the width keeps the v2 name, so a square save still opens in older versions
+    size: state.board.w,
+    h: state.board.h,
     board: encode(state.board),
     color: state.color,
     tool: state.tool,

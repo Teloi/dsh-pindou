@@ -6,8 +6,8 @@ import { EMPTY, PALETTE, templateIdOf, type Board } from '../core/index.ts'
 
 /** Ironed export: a cell's corner rounds only when both orthogonal neighbours along it are empty. */
 export function cornerRadii(board: Board, x: number, y: number): [boolean, boolean, boolean, boolean] {
-  const n = board.size
-  const filled = (cx: number, cy: number): boolean => cx >= 0 && cy >= 0 && cx < n && cy < n && board.cells[cy * n + cx] !== EMPTY
+  const { w, h } = board
+  const filled = (cx: number, cy: number): boolean => cx >= 0 && cy >= 0 && cx < w && cy < h && board.cells[cy * w + cx] !== EMPTY
   const up = filled(x, y - 1), down = filled(x, y + 1), left = filled(x - 1, y), right = filled(x + 1, y)
   // top-left, top-right, bottom-right, bottom-left
   return [!up && !left, !up && !right, !down && !right, !down && !left]
@@ -48,11 +48,11 @@ export function drawThumb(canvas: HTMLCanvasElement, board: Board, css = 56, dpr
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   ctx.clearRect(0, 0, px, px)
-  const cell = px / board.size
+  const cell = px / Math.max(board.w, board.h)
   for (let i = 0; i < board.cells.length; i++) {
     const c = board.cells[i]!
     if (c === EMPTY) continue
-    const x = i % board.size, y = Math.floor(i / board.size)
+    const x = i % board.w, y = Math.floor(i / board.w)
     bead(ctx, (x + 0.5) * cell, (y + 0.5) * cell, cell * 0.47, PALETTE[c]!.hex, cell >= 5)
   }
 }
@@ -64,27 +64,26 @@ export const EXPORT_CELL = 32
  * draws its pieces with a whole number of device pixels per cell `o` and no margin `m`.
  */
 export function renderExport(doc: Document, board: Board, ironed: boolean, dark: boolean, o = EXPORT_CELL, m = o): HTMLCanvasElement {
-  const n = board.size
-  const side = n * o + 2 * m
+  const { w, h } = board
   const canvas = doc.createElement('canvas')
-  canvas.width = side
-  canvas.height = side
+  canvas.width = w * o + 2 * m
+  canvas.height = h * o + 2 * m
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('canvas unavailable')
   if (!ironed) {
     ctx.fillStyle = dark ? '#1C1D20' : '#EEF0F3'
-    roundRect(ctx, o / 2, o / 2, side - o, side - o, 24)
+    roundRect(ctx, o / 2, o / 2, canvas.width - o, canvas.height - o, 24)
     ctx.fill()
     ctx.fillStyle = dark ? '#34373D' : '#D3D8DF'
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      if (board.cells[y * n + x] !== EMPTY) continue
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (board.cells[y * w + x] !== EMPTY) continue
       ctx.beginPath()
       ctx.arc(m + (x + 0.5) * o, m + (y + 0.5) * o, o * 0.11, 0, Math.PI * 2)
       ctx.fill()
     }
   }
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    const c = board.cells[y * n + x]!
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const c = board.cells[y * w + x]!
     if (c === EMPTY) continue
     const hex = PALETTE[c]!.hex
     if (ironed) {

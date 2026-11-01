@@ -252,7 +252,7 @@ function build(def: TemplateDef): Template {
   const used = board.cells.filter(c => c >= 0)
   const colors = new Set(used).size
   const beads = used.length
-  const difficulty = colors <= 2 && beads <= 120 ? 1 : colors >= 6 || board.size === 24 ? 3 : 2
+  const difficulty = colors <= 2 && beads <= 120 ? 1 : colors >= 6 || board.w === 24 ? 3 : 2
   return { ...def, board, colors, beads, difficulty }
 }
 

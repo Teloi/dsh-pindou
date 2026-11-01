@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  boardsEqual, clearBoard, countBeads, createBoard, EMPTY, getCell, isBoard, lineCells, paintLine, resizeBoard, setCell,
+  boardsEqual, clearBoard, countBeads, createBoard, EMPTY, floodFill, getCell, isBoard, isSide, lineCells, paintLine, resizeBoard, setCell,
 } from '../src/core/index.ts'
 
 describe('board', () => {
@@ -10,6 +10,49 @@ describe('board', () => {
       expect(b.cells).toHaveLength(size * size)
       expect(countBeads(b)).toBe(0)
     }
+  })
+
+  it('creates w × h boards for every side the data layer takes (8–208)', () => {
+    const b = createBoard(29, 58)
+    expect([b.w, b.h, b.cells.length]).toEqual([29, 58, 29 * 58])
+    expect(createBoard(208).cells).toHaveLength(43264)
+    expect(isSide(8) && isSide(208) && isSide(57)).toBe(true)
+    expect([7, 209, 16.5, '16', null].some(v => isSide(v))).toBe(false)
+  })
+
+  it('addresses non-square boards as cells[y * w + x]', () => {
+    let b = createBoard(10, 20)
+    b = setCell(b, 9, 19, 3)
+    expect(b.cells[19 * 10 + 9]).toBe(3)
+    expect(getCell(b, 9, 19)).toBe(3)
+    expect(setCell(b, 10, 0, 1)).toBe(b)
+    expect(setCell(b, 0, 20, 1)).toBe(b)
+    b = paintLine(b, 0, 0, 9, 0, 2)
+    expect(countBeads(b)).toBe(11)
+    const f = floodFill(createBoard(10, 20), 0, 0, 4)
+    expect(f.cells.every(c => c === 4)).toBe(true)
+    expect(clearBoard(f)).toEqual(createBoard(10, 20))
+    expect(isBoard(f)).toBe(true)
+    expect(isBoard({ w: 10, h: 20, cells: f.cells.slice(1) })).toBe(false)
+    expect(isBoard({ size: 16, cells: createBoard(16).cells })).toBe(false)
+  })
+
+  it('resizes non-square boards keeping the drawing centred per axis', () => {
+    const b = setCell(createBoard(12), 6, 6, 1)
+    const r = resizeBoard(b, 16, 24)
+    expect([r.w, r.h]).toEqual([16, 24])
+    expect(getCell(r, 8, 12)).toBe(1)
+    expect(resizeBoard(r, 12)).toEqual(b)
+    expect(resizeBoard(b, 12, 12)).toBe(b)
+  })
+
+  it('paints a 208² drag with one copy per segment', () => {
+    const b = createBoard(208)
+    const t0 = performance.now()
+    let n = b
+    for (let i = 0; i < 200; i++) n = paintLine(n, 0, i, 207, i, i % 16)
+    expect(countBeads(n)).toBe(200 * 208)
+    expect(performance.now() - t0).toBeLessThan(2000)
   })
 
   it('sets and reads cells immutably', () => {
@@ -68,7 +111,6 @@ describe('board', () => {
 
 describe('floodFill', () => {
   it('fills a 4-connected region and stops at borders', async () => {
-    const { floodFill } = await import('../src/core/board.ts')
     let b = createBoard(12)
     for (let y = 0; y < 12; y++) b = setCell(b, 5, y, 3)
     const f = floodFill(b, 0, 0, 7)

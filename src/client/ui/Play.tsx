@@ -1,7 +1,7 @@
 /** The play view: status line, board, toolbar, palette, footer and the under-board cards. */
 import { useRef, type CSSProperties, type ReactElement } from 'react'
 import {
-  type Board, BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, PALETTE, remainingByColor, templateIdOf, type Tool,
+  type Board, BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, isSquareOf, PALETTE, remainingByColor, templateIdOf, type Tool,
 } from '../../core/index.ts'
 import { IconBrush, IconCopy, IconEraser, IconFill, IconIron, IconPicker, IconRedo, IconSparkle, IconTrash, IconUndo, IconDownload } from '../icons.tsx'
 import { canCopyImage, copyPng, downloadBlob, exportBlob, exportFileName, saveRoute } from '../render.ts'
@@ -72,7 +72,7 @@ function StatusLine(): ReactElement {
           : (
             <span className="pd-r pd-seg" role="group" aria-label={t('size')}>
               {BOARD_SIZES.map(size => (
-                <button key={size} type="button" aria-pressed={board.size === size} disabled={s.ironed}
+                <button key={size} type="button" aria-pressed={isSquareOf(board, size)} disabled={s.ironed}
                   onClick={() => { store.resize(size) }}>{size}</button>
               ))}
             </span>

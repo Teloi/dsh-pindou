@@ -1,4 +1,4 @@
-import type { Board } from './board.ts'
+import { type Board, sameShape } from './board.ts'
 import { EMPTY } from './palette.ts'
 
 export interface Completion {
@@ -14,7 +14,7 @@ export interface Completion {
 }
 
 export function completion(board: Board, target: Board): Completion {
-  if (board.size !== target.size) return { matched: 0, total: 0, wrong: 0, percent: 0, done: false }
+  if (!sameShape(board, target)) return { matched: 0, total: 0, wrong: 0, percent: 0, done: false }
   let matched = 0
   let total = 0
   let wrong = 0
@@ -45,7 +45,7 @@ export function templateColors(target: Board): number[] {
 /** Remaining cells per colour, for "what's left" hints. */
 export function remainingByColor(board: Board, target: Board): Map<number, number> {
   const out = new Map<number, number>()
-  if (board.size !== target.size) return out
+  if (!sameShape(board, target)) return out
   target.cells.forEach((want, i) => {
     if (want !== EMPTY && board.cells[i] !== want) out.set(want, (out.get(want) ?? 0) + 1)
   })

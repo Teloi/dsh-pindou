@@ -120,7 +120,7 @@ export function repairGrid(raw: unknown, size: BoardSize): RepairResult {
     }
   }
   if (bad > (size * size) / 4) return { ok: false, error: 'too-damaged' }
-  const board: Board = { size, cells: Object.freeze(cells) }
+  const board: Board = { w: size, h: size, cells: Object.freeze(cells) }
   if (countBeads(board) < Math.max(3, Math.floor(size / 2))) return { ok: false, error: 'too-sparse' }
   const list = [...issues]
   return { ok: true, board, issues: list, repaired: list.some(i => i !== 'stripped-wrapper') }

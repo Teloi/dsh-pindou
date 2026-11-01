@@ -132,7 +132,8 @@ export interface PictureKit {
 }
 
 /** A board as the entry's core defines it: indices or -1 (empty), row by row. */
-export interface PictureBoard { readonly size: PictureSize, readonly cells: readonly number[] }
+/** A square picture pattern, shaped like core's Board (`w × h`, here w = h). */
+export interface PictureBoard { readonly w: PictureSize, readonly h: PictureSize, readonly cells: readonly number[] }
 
 export interface PictureProps {
   readonly kit: PictureKit
@@ -269,7 +270,7 @@ export function PicturePage(props: PictureProps): ReactElement {
     if (!pic) return
     let raf = 0
     const id = setTimeout(() => {
-      raf = requestAnimationFrame(() => { setShown({ size: opts.size, cells: quantize(pic.pixels, cropOf(pic.pixels.width, pic.pixels.height, view), opts, palette) }) })
+      raf = requestAnimationFrame(() => { setShown({ w: opts.size, h: opts.size, cells: quantize(pic.pixels, cropOf(pic.pixels.width, pic.pixels.height, view), opts, palette) }) })
     }, PREVIEW_DEBOUNCE_MS)
     return () => { clearTimeout(id); cancelAnimationFrame(raf) }
   }, [pic, view, opts, palette])
@@ -372,7 +373,7 @@ export function PicturePage(props: PictureProps): ReactElement {
           onChange={(e) => { const z = Number(e.currentTarget.value); move(0, 0, z / view.zoom) }} />
       </label>
       <div className="pd-pic-prev">
-        <canvas ref={preview} role="img" aria-label={t('preview', { n: shown?.size ?? n, beads })} aria-busy={cells === null} />
+        <canvas ref={preview} role="img" aria-label={t('preview', { n: shown?.w ?? n, beads })} aria-busy={cells === null} />
         <p>{simple ? <span className="pd-pic-err" id="pd-pic-simple">{t('tooSimple')}</span> : null}</p>
       </div>
       <div className="pd-pic-row">
@@ -402,7 +403,7 @@ export function PicturePage(props: PictureProps): ReactElement {
             // quantise again now: the debounced preview may be one change behind
             const final = quantize(pic.pixels, cropOf(pic.pixels.width, pic.pixels.height, view), opts, palette)
             // NONE is the core's EMPTY (-1), so the cells are a board as they are
-            if (beadCount(final) >= MIN_BEADS) onStart({ size: opts.size, cells: Object.freeze(final) })
+            if (beadCount(final) >= MIN_BEADS) onStart({ w: opts.size, h: opts.size, cells: Object.freeze(final) })
           }}>{t('start')}</button>
       </div>
       <p className="pd-pic-note">{t('note')}</p>

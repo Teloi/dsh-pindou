@@ -6,8 +6,8 @@
 import {
   type Board, type BoardSize, begin, canRedo, canUndo, clearBoard, commit, completion, createBoard, createHistory,
   decode, EMPTY, encode, findTemplate, floodFill, GenerationCache, type GenerateResponse, getCell, type History,
-  inBounds, isColorIndex, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
-  remainingByColor, resizeBoard, SafeStore, type SavedState, sanitizePrompt, setCell, type StatusResponse,
+  inBounds, isColorIndex, isSquareOf, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
+  remainingByColor, resizeBoard, SafeStore, sameShape, type SavedState, sanitizePrompt, setCell, type StatusResponse,
   type StorageStatus, templateIdOf, templateKey, type Tool, type TokenUsageInfo, undo,
   MAX_WORKS, type StoredWork, WORKS_KEY,
 } from '../core/index.ts'
@@ -124,11 +124,11 @@ export const DONE_DELAY_MS = 260
 export const AI_COOLDOWN_MS = 1500
 
 /** The pattern a saved source key follows: the template's, or the saved `board:` pattern. */
-export function resolveTarget(target: string | null, pattern: string | null, size: BoardSize): Board | null {
+export function resolveTarget(target: string | null, pattern: string | null, w: number, h = w): Board | null {
   const id = templateIdOf(target)
   if (id !== null) return findTemplate(id)?.board ?? null
   if (!target?.startsWith('board:') || pattern === null) return null
-  const decoded = decode(pattern, size)
+  const decoded = decode(pattern, w, h)
   return decoded.ok ? decoded.board : null
 }
 
@@ -173,9 +173,9 @@ export class GameStore {
     this.ct = deps.clearTimeout ?? (h => { clearTimeout(h as ReturnType<typeof setTimeout>) })
     this.cache = new GenerationCache(deps.store)
     const saved = deps.store.loadState()
-    let targetBoard = resolveTarget(saved.target, saved.pattern, saved.board.size)
+    let targetBoard = resolveTarget(saved.target, saved.pattern, saved.board.w, saved.board.h)
     let target = targetBoard ? saved.target : null
-    if (targetBoard && targetBoard.size !== saved.board.size) { target = null; targetBoard = null }
+    if (targetBoard && !sameShape(targetBoard, saved.board)) { target = null; targetBoard = null }
     const storage = deps.store.status
     // the works wall lives under its own key; before v0.2 there is none (an empty wall).
     // Only the ids are checked here; the wall page validates every work (core/works.ts, in its chunk).
@@ -318,7 +318,7 @@ export class GameStore {
       return
     }
     this.switchGame({
-      history: createHistory(createBoard(s.history.present.size)), target: null, targetBoard: null,
+      history: createHistory(createBoard(s.history.present.w, s.history.present.h)), target: null, targetBoard: null,
       ironed: false, work: null, complete: false, color: s.color, tool: s.tool,
     }, { mode: 'play', overlay: s.coached ? null : 'coach' })
   }
@@ -450,8 +450,8 @@ export class GameStore {
   strokeMove(x: number, y: number): void {
     const last = this.last
     if (last === null || this.locked) return
-    const cx = Math.max(0, Math.min(this.board.size - 1, x))
-    const cy = Math.max(0, Math.min(this.board.size - 1, y))
+    const cx = Math.max(0, Math.min(this.board.w - 1, x))
+    const cy = Math.max(0, Math.min(this.board.h - 1, y))
     if (cx === last.x && cy === last.y) return
     const next = paintLine(this.board, last.x, last.y, cx, cy, last.value)
     this.last = { x: cx, y: cy, value: last.value }
@@ -504,9 +504,11 @@ export class GameStore {
     this.showToast('cleared', true)
   }
 
+  /** Square UI sizes for now; the w × h size picker comes with the canvas (plan §2.3). */
   resize(size: BoardSize): void {
-    if (this.locked || size === this.board.size) return
-    const keepTarget = this.state.targetBoard?.size === size
+    if (this.locked || isSquareOf(this.board, size)) return
+    const t = this.state.targetBoard
+    const keepTarget = !!t && isSquareOf(t, size)
     this.edited()
     this.set({
       history: push(commit(this.state.history), resizeBoard(this.board, size)),
@@ -565,7 +567,7 @@ export class GameStore {
   /** A new game following `board`; the replaced game stays one undo step away. */
   private startPattern(target: string, board: Board): void {
     const s = this.state
-    const fresh = createBoard(board.size)
+    const fresh = createBoard(board.w, board.h)
     this.switchGame({
       history: createHistory(fresh), target, targetBoard: board, ironed: false, work: null, complete: false,
       color: firstColor(fresh, board, s.color), tool: 'paint',
@@ -578,7 +580,7 @@ export class GameStore {
     if (!target || this.locked) return
     const cells = this.board.cells.map((c, i) => (target.cells[i] === EMPTY ? c : target.cells[i]!))
     this.edited()
-    this.set({ history: push(commit(this.state.history), { size: this.board.size, cells: Object.freeze(cells) }) })
+    this.set({ history: push(commit(this.state.history), { ...this.board, cells: Object.freeze(cells) }) })
     this.afterChange()
   }
 
@@ -627,8 +629,8 @@ export class GameStore {
     const s = this.state
     const b = s.history.present
     const w: StoredWork = {
-      i: Math.max(this.now(), (this.wall.at(-1)?.i ?? 0) + 1), n: b.size, b: encode(b), s: s.target,
-      ...(s.target?.startsWith('board:') && s.targetBoard && b.size < 24 ? { p: encode(s.targetBoard) } : {}),
+      i: Math.max(this.now(), (this.wall.at(-1)?.i ?? 0) + 1), n: b.w as BoardSize, b: encode(b), s: s.target,
+      ...(s.target?.startsWith('board:') && s.targetBoard && b.w < 24 ? { p: encode(s.targetBoard) } : {}),
     }
     this.setWall([...this.wall, w].slice(-MAX_WORKS))
     this.set({ work: w.i })

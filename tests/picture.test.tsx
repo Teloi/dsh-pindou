@@ -421,7 +421,7 @@ describe('picture page (spec §18.2)', () => {
 
   it('I3: a new size keeps the old preview (drawing and label) until its own cells are ready; then both change together', async () => {
     const draws: Array<{ size: number, cells: number }> = []
-    const kit = { palette: PALETTE.map(c => c.hex), draw: (_c: HTMLCanvasElement, b: chunk.PictureBoard) => { draws.push({ size: b.size, cells: b.cells.length }) }, icon: null }
+    const kit = { palette: PALETTE.map(c => c.hex), draw: (_c: HTMLCanvasElement, b: chunk.PictureBoard) => { draws.push({ size: b.w, cells: b.cells.length }) }, icon: null }
     // as the panel does: the dropped file is handed over once, then cleared
     const page = (f: File | null): void => {
       root.render(<chunk.PicturePage kit={kit} lang="zh" file={f} onTaken={() => { page(null) }} onStart={() => undefined} />)
@@ -495,7 +495,7 @@ describe('picture page (spec §18.2)', () => {
     const s = store.getSnapshot()
     expect(s.mode).toBe('play')
     expect(s.target).toMatch(/^board:p-[0-9a-z]+$/)
-    expect(s.history.present.size).toBe(24)
+    expect(s.history.present.w).toBe(24)
     expect(host.querySelector('.pd-status')!.textContent).toContain('我的图纸')
     expect(host.querySelector('.pd-status')!.textContent).not.toMatch(/token/i)
     // privacy: only the pattern is saved — no picture data, nothing big

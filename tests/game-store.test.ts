@@ -134,7 +134,7 @@ describe('GameStore', () => {
     store.strokeStart(0, 0, 'erase'); store.strokeEnd()
     const t = findTemplate('heart')!
     const firstFilled = t.board.cells.findIndex(c => c !== EMPTY)
-    const x = firstFilled % t.board.size, y = Math.floor(firstFilled / t.board.size)
+    const x = firstFilled % t.board.w, y = Math.floor(firstFilled / t.board.w)
     store.strokeStart(x, y, 'erase'); store.strokeEnd()
     expect(store.getSnapshot().complete).toBe(false)
     store.setColor(t.board.cells[firstFilled]!)
@@ -202,7 +202,7 @@ describe('GameStore', () => {
 
   it('resolves saved sources strictly', () => {
     const b = setCell(createBoard(12), 0, 0, 3)
-    expect(resolveTarget('board:x1', encode(b), 12)?.size).toBe(12)
+    expect(resolveTarget('board:x1', encode(b), 12)?.w).toBe(12)
     expect(resolveTarget('board:x1', 'zz', 12)).toBeNull()
     expect(resolveTarget('board:x1', encode(b), 16)).toBeNull()
     expect(resolveTarget('board:x1', null, 12)).toBeNull()
@@ -337,7 +337,7 @@ function placeCorrect(store: GameStore, n: number): void {
     const c = target.cells[i]!
     if (c === EMPTY) continue
     store.setColor(c)
-    store.applyAt(i % target.size, Math.floor(i / target.size))
+    store.applyAt(i % target.w, Math.floor(i / target.w))
     placed++
   }
 }
@@ -640,7 +640,7 @@ describe('v1.6 §4.3 source keys', () => {
     first.store.applyAt(1, 1)
     first.advance(400)
     const saved = JSON.parse(backend.data.get(STORAGE_KEY)!)
-    expect(saved).toMatchObject({ v: 2, target: first.store.getSnapshot().target, pattern: encode(pic) })
+    expect(saved).toMatchObject({ v: 3, target: first.store.getSnapshot().target, pattern: encode(pic) })
     const again = make({ backend })
     expect(again.store.getSnapshot().target).toBe(first.store.getSnapshot().target)
     expect(again.store.getSnapshot().targetBoard?.cells).toEqual(pic.cells)

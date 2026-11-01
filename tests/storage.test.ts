@@ -29,6 +29,33 @@ describe('storage', () => {
     expect(state).toMatchObject({ color: 9, tool: 'erase', target: 'template:heart', pattern: null })
   })
 
+  it('reads v2 saves (square, `size` only) unchanged', () => {
+    const board = setCell(createBoard(12), 3, 4, 7)
+    const v2 = JSON.stringify({ v: 2, size: 12, board: encode(board), color: 7, tool: 'paint', mode: 'play', target: null, pattern: null, ironed: false })
+    const { state, corrupt } = parseState(v2)
+    expect(corrupt).toBe(false)
+    expect(state.board).toEqual(board)
+    expect(state).toMatchObject({ color: 7, mode: 'play' })
+  })
+
+  it('writes v3 with the width under `size`, so a square save still opens in v0.2 (isBoardSize(size) + size² cells)', () => {
+    const raw = JSON.parse(serializeState({ ...defaultState(), board: createBoard(24) }))
+    expect(raw).toMatchObject({ v: 3, size: 24, h: 24 })
+    expect(raw.board).toHaveLength(24 * 24)
+  })
+
+  it('round-trips w × h boards up to 208 (data layer, plan §2.3)', () => {
+    for (const [w, h] of [[29, 58], [208, 208], [8, 208]] as const) {
+      const board = setCell(createBoard(w, h), w - 1, h - 1, 2)
+      const { state, corrupt } = parseState(serializeState({ ...defaultState(), board }))
+      expect(corrupt).toBe(false)
+      expect(state.board).toEqual(board)
+    }
+    // a size the data layer refuses, or cells that don't fill w × h, is corrupt (and falls back)
+    expect(parseState(JSON.stringify({ size: 209, board: '.'.repeat(209 * 209) })).corrupt).toBe(true)
+    expect(parseState(JSON.stringify({ size: 29, h: 58, board: '.'.repeat(29 * 29) })).corrupt).toBe(true)
+  })
+
   it('recovers from corrupt or tampered data field by field', () => {
     expect(parseState('{not json').corrupt).toBe(true)
     expect(parseState('null').corrupt).toBe(true)
@@ -60,7 +87,7 @@ describe('storage', () => {
       const store = new SafeStore(backend)
       expect(store.status).toBe('unavailable')
       expect(store.saveState(defaultState())).toBe(false)
-      expect(store.loadState().board.size).toBe(16)
+      expect(store.loadState().board.w).toBe(16)
     }
   })
 
