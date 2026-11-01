@@ -87,6 +87,7 @@ export interface GameState {
  * a fresh id for every generated pattern (generating the same picture again is
  * a new game), or null for free play. Only `template:<id>` can match a
  * template card, so generated boards are reached through 继续上次 only.
+ * A snap holds exactly these keys, so it spreads straight into GameState.
  */
 export interface GameSnap {
   readonly history: History
@@ -358,10 +359,6 @@ export class GameStore {
     return { history: commit(s.history), target: s.target, targetBoard: s.targetBoard, ironed: s.ironed, work: s.work, complete: s.complete, color: s.color, tool: s.tool }
   }
 
-  static #apply(g: GameSnap): Partial<GameState> {
-    return { history: g.history, target: g.target, targetBoard: g.targetBoard, ironed: g.ironed, work: g.work, complete: g.complete, color: g.color, tool: g.tool }
-  }
-
   /** An undo toast speaks about the game on screen; leaving or swapping that game retires it. */
   #dropUndoToast(): Partial<GameState> { return this.#state.toast?.undo === true ? { toast: null } : {} }
 
@@ -382,7 +379,7 @@ export class GameStore {
     if (beads || canUndo(s.history)) this.#prevGames = [...this.#prevGames, this.#snap()].slice(-MAX_KEPT_GAMES)
     this.#nextGames = []
     this.#set({
-      ...GameStore.#apply(next), ironingSince: null, celebrateAt: null, ...extra,
+      ...next, ironingSince: null, celebrateAt: null, ...extra,
       ...(beads && !s.ironed ? { toast: { key: 'newGame' as const, undo: true, at: this.#now() } } : this.#dropUndoToast()),
     })
   }
@@ -396,7 +393,7 @@ export class GameStore {
     this.#last = null
     this.#nextGames.push(this.#snap())
     this.#set({
-      ...GameStore.#apply(prev), mode: 'play', overlay: prev.ironed ? 'result' : null, ironingSince: null, celebrateAt: null,
+      ...prev, mode: 'play', overlay: prev.ironed ? 'result' : null, ironingSince: null, celebrateAt: null,
       ...this.#dropUndoToast(),
     })
     return true
@@ -407,7 +404,7 @@ export class GameStore {
     if (!next) return false
     this.#last = null
     this.#prevGames.push(this.#snap())
-    this.#set({ ...GameStore.#apply(next), mode: 'play', overlay: next.ironed ? 'result' : null, ironingSince: null, celebrateAt: null })
+    this.#set({ ...next, mode: 'play', overlay: next.ironed ? 'result' : null, ironingSince: null, celebrateAt: null })
     return true
   }
 
@@ -430,7 +427,7 @@ export class GameStore {
   showCoach(): void { this.#set({ mode: 'play', overlay: 'coach' }, false) }
 
   showToast(key: ToastKey, undoable = false, params?: Readonly<Record<string, string>>): void {
-    this.#set({ toast: params ? { key, undo: undoable, at: this.#now(), params } : { key, undo: undoable, at: this.#now() } }, false)
+    this.#set({ toast: { key, undo: undoable, at: this.#now(), ...params && { params } } }, false)
   }
   /** Show (or with null, close and release) the manual-save preview. */
   setPreview(next: { readonly url: string; readonly name: string } | null): void {
@@ -559,7 +556,7 @@ export class GameStore {
         if (this.#state.complete && !this.locked && this.#state.overlay === null && this.#state.mode === 'play') this.#set({ overlay: 'done' }, false)
       }
       this.#cancelDone()
-      if (this.#deps.reducedMotion?.() ?? false) show()
+      if (this.#deps.reducedMotion?.()) show()
       else this.#doneHandle = this.#st(show, DONE_DELAY_MS)
     } else if (!done && this.#state.complete) {
       this.#cancelDone()
@@ -613,7 +610,7 @@ export class GameStore {
     this.#last = null
     this.#cancelDone()
     this.#set({ history: commit(this.#state.history), overlay: null })
-    if (this.#deps.reducedMotion?.() ?? false) { this.#finishIron(); return }
+    if (this.#deps.reducedMotion?.()) { this.#finishIron(); return }
     this.#set({ ironingSince: this.#now() }, false)
     this.#ironHandle = this.#st(() => { this.#finishIron() }, IRON_MS)
   }

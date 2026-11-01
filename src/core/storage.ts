@@ -136,24 +136,10 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
   return { state, corrupt }
 }
 
-export function serializeState(state: SavedState): string {
-  return JSON.stringify({
-    v: 3,
-    // the width keeps the v2 name, so a square save still opens in older versions
-    size: state.board.w,
-    h: state.board.h,
-    board: encode(state.board),
-    color: state.color,
-    tool: state.tool,
-    mode: state.mode,
-    target: state.target,
-    pattern: state.pattern,
-    ironed: state.ironed,
-    prefs: state.prefs,
-    done: state.done,
-    coached: state.coached,
-    work: state.work,
-  })
+export function serializeState({ board, ...rest }: SavedState): string {
+  // the width keeps the v2 name (`size`), so a square save still opens in older versions;
+  // the rest keeps SavedState's key order (color … work), so the string is the one written before
+  return JSON.stringify({ v: 3, size: board.w, h: board.h, board: encode(board), ...rest })
 }
 
 export type StorageStatus = 'ok' | 'unavailable' | 'recovered'
@@ -171,15 +157,12 @@ export class SafeStore {
 
   constructor(backend: StorageLike | undefined) {
     this.#backend = backend
-    if (backend === undefined) this.status = 'unavailable'
-    else {
-      try {
-        const probe = `${STORAGE_KEY}:probe`
-        backend.setItem(probe, '1')
-        backend.removeItem(probe)
-      } catch {
-        this.status = 'unavailable'
-      }
+    // no backend throws here too
+    try {
+      backend!.setItem(STORAGE_KEY + ':probe', '1')
+      backend!.removeItem(STORAGE_KEY + ':probe')
+    } catch {
+      this.status = 'unavailable'
     }
   }
 
