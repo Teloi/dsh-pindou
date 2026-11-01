@@ -598,13 +598,15 @@ async function saveSafetySection() {
   if (!(await c.locator('.pd-v-home').count())) { await c.locator('.pd-head .pd-ib').first().click().catch(() => {}) }
   const fallback = c.locator('.pd-root[role=alert]')
   await fallback.waitFor({ timeout: 8000 }).catch(() => {})
-  const crashed = { alert: await fallback.count(), text: (await fallback.textContent().catch(() => '')) ?? '' }
+  const crashed = { alert: await fallback.count(), text: (await fallback.textContent().catch(() => '')) ?? '', focus: await c.evaluate(() => { const a = document.activeElement; return a?.closest('.pd-root[role=alert]') && a.tagName === 'BUTTON' ? a.textContent : null }) }
   await outShot(c, 'v-crash-boundary')
   await c.evaluate(() => { window.pdBoom = false })
-  await fallback.locator('button').click().catch(() => {})
+  // keyboard only: focus is already on 重置 (plan 修订 20:25)
+  await c.keyboard.press('Enter')
   await c.waitForTimeout(500)
-  const back = await c.evaluate(() => ({ alert: !!document.querySelector('.pd-root[role=alert]'), root: !!document.querySelector('.pd-root'), backup: !!localStorage.getItem('dsh-pindou:v1:unreadable') }))
-  check('V a render crash shows 「出错了」 + 重置 (not a blank panel); 重置 brings the panel back', crashed.alert === 1 && /出错了/.test(crashed.text) && /重置/.test(crashed.text) && !back.alert && back.root, JSON.stringify({ crashed, back }))
+  const back = await c.evaluate(() => ({ alert: !!document.querySelector('.pd-root[role=alert]'), root: !!document.querySelector('.pd-root'), backup: !!localStorage.getItem('dsh-pindou:v1:unreadable'), toast: document.querySelector('.pd-toast')?.textContent ?? null }))
+  check('V a render crash shows 「出错了」 + 重置 (not a blank panel), focus on 重置; Enter brings the panel back', crashed.alert === 1 && /出错了/.test(crashed.text) && /重置/.test(crashed.text) && crashed.focus === '重置' && !back.alert && back.root, JSON.stringify({ crashed, back }))
+  check('V after 重置 the toast says 「出错了，已重新开始，出错前的进度已备份」 (not the unreadable-save words) and the save is backed up', /出错了，已重新开始，出错前的进度已备份/.test(back.toast ?? '') && !/存档读不了/.test(back.toast ?? '') && back.backup, JSON.stringify(back))
   await c.context().close()
   // only the forced error may be reported from that page
   const rest = pageErrors.splice(errorsBefore).filter(e => !e.includes('pd e2e boom'))

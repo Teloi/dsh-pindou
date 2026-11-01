@@ -139,6 +139,8 @@ describe('client apply', () => {
     await act(async () => { alert!.querySelector('button')!.click() })
     expect(host.querySelector('[role=alert]')).toBeNull()
     expect(host.querySelectorAll('.pd-tpl')).toHaveLength(12)
+    // the crash's own toast, not the unreadable-save words
+    expect(host.querySelector('.pd-toast')?.textContent).toContain('出错了，已重新开始，出错前的进度已备份')
     expect(localStorage.getItem(BAD_SAVE_KEY)).toBe(save)
     await act(async () => { root.unmount() })
     f.dispose()

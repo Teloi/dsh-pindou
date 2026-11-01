@@ -46,7 +46,7 @@ export type ViewMode = Mode | 'picture' | 'works' | 'big'
 
 export type Overlay = 'coach' | 'done' | 'result' | null
 /** Toast keys are i18n keys (no lookup table on the first screen). */
-export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'say'
+export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'restarted' | 'say'
 
 export interface GameState {
   readonly history: History
@@ -180,7 +180,8 @@ export class GameStore {
   }
 
   /** Read the save (a fresh game when there is none) into the state. */
-  #boot(): void {
+  /** `why`: what the start-over toast says, an unreadable save or (from reset) a crash (plan 修订 20:25). */
+  #boot(why: ToastKey = 'storageRecovered'): void {
     const deps = this.#deps
     const saved = deps.store.loadState()
     let targetBoard = resolveTarget(saved.target, saved.pattern, saved.board.w, saved.board.h)
@@ -207,7 +208,7 @@ export class GameStore {
       celebrateAt: null,
       pulseAt: null,
       overlay: saved.ironed ? 'result' : null,
-      toast: storage === 'ok' ? null : { key: storage === 'recovered' ? 'storageRecovered' : 'storageUnavailable', undo: false, at: this.#now() },
+      toast: storage === 'ok' ? null : { key: storage === 'recovered' ? why : 'storageUnavailable', undo: false, at: this.#now() },
       prefs: saved.prefs,
       done: saved.done,
       coached: saved.coached,
@@ -228,7 +229,8 @@ export class GameStore {
     this.#prevGames = []
     this.#nextGames = []
     this.#last = null
-    this.#boot()
+    // a crash, not an unreadable save: its own words; with no storage there is no backup and no such toast
+    this.#boot('restarted')
     this.#set({}, false)
   }
 

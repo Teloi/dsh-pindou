@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { BAD_SAVE_KEY, createBoard, EMPTY, encode, findTemplate, getCell, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
+import { BAD_SAVE_KEY, createBoard, EMPTY, encode, findTemplate, getCell, makeTranslate, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
 import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi } from '../src/client/game-store.ts'
 
 function mem(): StorageLike & { data: Map<string, string> } {
@@ -880,8 +880,19 @@ describe('GameStore.reset (the panel crash boundary, review I-1)', () => {
     expect(calls).toBe(1)
     expect(backend.data.get(BAD_SAVE_KEY)).toBe(saved)
     expect(backend.data.has(STORAGE_KEY)).toBe(false)
-    expect(store.getSnapshot()).toMatchObject({ mode: 'home', storage: 'recovered', toast: { key: 'storageRecovered' } })
+    expect(store.getSnapshot()).toMatchObject({ mode: 'home', storage: 'recovered', toast: { key: 'restarted' } })
+    // plan 修订 20:25: the crash's own words, not the unreadable-save toast
+    expect(makeTranslate('zh')('restarted')).toBe('出错了，已重新开始，出错前的进度已备份')
     expect(store.board).toEqual(createBoard(16))
     expect(store.canUndo).toBe(false)
+  })
+
+  it('with no storage at all nothing was backed up, so the toast stays 「浏览器存储不可用」 (never claims a backup)', () => {
+    const broken: StorageLike = { getItem: () => null, setItem: () => { throw new Error('denied') }, removeItem: () => undefined }
+    const { store } = make({ backend: broken })
+    store.startFree()
+    store.applyAt(1, 1)
+    store.reset()
+    expect(store.getSnapshot()).toMatchObject({ storage: 'unavailable', toast: { key: 'storageUnavailable' } })
   })
 })
