@@ -16,8 +16,10 @@
  * - level of detail: < 5 px/cell flat squares; 5–14 round beads with a hole; ≥ 14
  *   the pattern's colour codes too.
  * - zoom gestures (Ctrl/⌘ + wheel, trackpad pinch, two fingers) only stretch the
- *   last frame with a CSS transform; 120 ms after the last event the view snaps
- *   to a level within 15 % and is redrawn at its own scale.
+ *   last frame with a CSS transform; 120 ms after the last event the view eases
+ *   (120 ms, ease-out) to a level within 15 % around the last pointer and is
+ *   redrawn at its own scale. Keys and buttons ease one level around the cursor
+ *   cell. No easing under reduced motion.
  * - pointers (native listeners, `touch-action: none`, pointer capture): mouse and
  *   pen paint, right button erases, Alt picks, Space or the middle button pans;
  *   a finger waits 80 ms or 6 px before it paints, and a second finger within
@@ -82,6 +84,11 @@ export class BigCanvas {
   /** Running estimate of one new tile's build time (ms). */
   #tileMs = 4
   #settle: ReturnType<typeof setTimeout> | undefined
+  /** The running ease: its frame and the scale it ends on. */
+  #anim = 0
+  #to = 0
+  /** Where the last zoom gesture was (the snap's anchor). */
+  #at: [number, number] | null = null
   #gesture = false
   readonly #ptrs = new Map<number, Ptr>()
   #mode: 'none' | 'wait' | 'paint' | 'pan' | 'pinch' | 'dead' = 'none'
@@ -138,6 +145,7 @@ export class BigCanvas {
   dispose(): void {
     for (const f of this.#off) f()
     cancelAnimationFrame(this.#frame)
+    cancelAnimationFrame(this.#anim)
     clearTimeout(this.#settle)
     clearTimeout(this.#wait)
   }
@@ -160,8 +168,9 @@ export class BigCanvas {
 
   #theme(): void {
     const cs = getComputedStyle(this.host)
-    const v = (n: string, d: string): string => cs.getPropertyValue(n).trim() || d
-    this.#th = { bg: v('--pd-board', '#EEF0F3'), peg: v('--pd-peg', '#D3D8DF'), accent: v('--pd-accent', '#4176E6'), danger: v('--pd-danger', '#E5484D'), ga: Number(v('--pd-ghost-alpha', '.3')), gh: Number(v('--pd-ghost-hot', '.62')) }
+    // styles.ts sets all of these on .pd-root, light and dark, which the page always sits in
+    const v = (n: string): string => cs.getPropertyValue(n).trim()
+    this.#th = { bg: v('--pd-board'), peg: v('--pd-peg'), accent: v('--pd-accent'), danger: v('--pd-danger'), ga: Number(v('--pd-ghost-alpha')), gh: Number(v('--pd-ghost-hot')) }
   }
 
   /** Drop every cached tile and sprite (theme, guide colour, size). */
@@ -434,29 +443,44 @@ export class BigCanvas {
     return { s, ox: one(v.ox, this.#board.w * s, this.cw), oy: one(v.oy, this.#board.h * s, this.ch) }
   }
 
-  setView(v: View): void {
+  /** `easing`: a frame of the running ease, which goes on; anything else stops it. */
+  setView(v: View, easing?: boolean): void {
+    if (!easing) { cancelAnimationFrame(this.#anim); this.#to = 0 }
     const prev = this.view
     this.view = this.#clamp(v)
     if (this.view.s !== prev.s) this.onView(this.view)
     this.paint()
   }
 
-  /** Zoom to `s` keeping the cell under (px, py) in place. */
-  #zoomAt(s: number, px: number, py: number): void {
-    const v = this.view, k = this.#clamp({ ...v, s }).s / v.s
-    this.setView({ s: v.s * k, ox: px - (px - v.ox) * k, oy: py - (py - v.oy) * k })
+  /**
+   * Zoom to `s` keeping the cell under (px, py) in place: at once, or eased over 120 ms (ease-out) when `ease`
+   * is set and motion is not reduced.
+   */
+  #zoomAt(s: number, px: number, py: number, ease?: boolean): void {
+    const a = this.view, z = this.#clamp({ ...a, s }).s / a.s, t0 = performance.now()
+    const at = (k: number): View => ({ s: a.s * k, ox: px - (px - a.ox) * k, oy: py - (py - a.oy) * k })
+    if (!ease || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { this.setView(at(z)); return }
+    cancelAnimationFrame(this.#anim)
+    this.#to = a.s * z
+    const tick = (now: number): void => {
+      const t = Math.min(1, (now - t0) / SETTLE_MS)
+      this.setView(at(z ** (1 - (1 - t) ** 3)), true)
+      // #to stays: it is the scale it ended on, until any other view change clears it
+      if (t < 1) this.#anim = requestAnimationFrame(tick)
+    }
+    this.#anim = requestAnimationFrame(tick)
   }
 
-  /** One level in or out (keys, buttons), around the cursor cell when it is in view. */
+  /** One level in or out (keys, buttons), around the cursor cell when it is in view; a held key goes on from where the ease is heading. */
   step(d: 1 | -1): void {
-    const v = this.view, fit = this.#fitScale()
+    const v = this.view, at = this.#to || v.s, fit = this.#fitScale()
     const lv = [...new Set([fit, ...LEVELS])].toSorted((a, b) => a - b)
-    const s = d > 0 ? lv.find(l => l > v.s * 1.001) : lv.findLast(l => l < v.s / 1.001)
+    const s = d > 0 ? lv.find(l => l > at * 1.001) : lv.findLast(l => l < at / 1.001)
     if (s === undefined) return
     const g = this.game.get()
     let px = v.ox + (g.cx + 0.5) * v.s, py = v.oy + (g.cy + 0.5) * v.s
     if (px < 0 || py < 0 || px > this.cw || py > this.ch) { px = this.cw / 2; py = this.ch / 2 }
-    this.#zoomAt(s, px, py)
+    this.#zoomAt(s, px, py, true)
   }
 
   /** Keep cell (x, y) in view with a two-cell margin. */
@@ -488,7 +512,9 @@ export class BigCanvas {
     this.#gesture = false
     const v = this.view, fit = this.#fitScale()
     const near = [fit, ...LEVELS].find(l => Math.abs(v.s - l) / l < 0.15 && l >= Math.min(fit, 4))
-    if (near !== undefined && near !== v.s) this.#zoomAt(near, this.cw / 2, this.ch / 2)
+    // around the last pointer or pinch centre, so the cell under it stays put (review I3)
+    const [px, py] = this.#at ?? [this.cw / 2, this.ch / 2]
+    if (near !== undefined && near !== v.s) this.#zoomAt(near, px, py, true)
     else this.paint()
   }
 
@@ -512,6 +538,7 @@ export class BigCanvas {
     const v = this.view
     if (e.ctrlKey || e.metaKey) {
       const [px, py] = this.#local(e)
+      this.#at = [px, py]
       this.#gesture = true
       this.#zoomAt(v.s * Math.exp(-Math.max(-50, Math.min(50, e.deltaY * u)) / 100), px, py)
       return
@@ -594,6 +621,7 @@ export class BigCanvas {
       const [a, b] = [...this.#ptrs.values()]
       const pi = this.#pinch, k = Math.max(Math.min(this.#fitScale(), 4), Math.min(64, (pi.v.s * Math.hypot(a!.x - b!.x, a!.y - b!.y)) / pi.d)) / pi.v.s
       const mx = (a!.x + b!.x) / 2, my = (a!.y + b!.y) / 2
+      this.#at = [mx, my]
       this.setView({ s: pi.v.s * k, ox: mx - (pi.mx - pi.v.ox) * k, oy: my - (pi.my - pi.v.oy) * k })
     } else if (this.#mode === 'pan') this.setView({ s: v.s, ox: v.ox + dx, oy: v.oy + dy })
     else if (this.#mode === 'wait' && Math.hypot(x - p.sx, y - p.sy) >= 6) {

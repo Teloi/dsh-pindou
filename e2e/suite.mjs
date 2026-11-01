@@ -1341,6 +1341,60 @@ async function bigAria() {
   await p.context().close()
 }
 
+/** I3: record the canvas's view.s every frame for 700 ms; then the distinct scales it went through */
+const zoomSample = p => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; window.pdS = []; const t0 = performance.now(); const f = () => { window.pdS.push([Math.round(performance.now() - t0), c.view.s]); if (performance.now() - t0 < 700) requestAnimationFrame(f) }; requestAnimationFrame(f) })
+const zoomSteps = async (p) => { await p.waitForTimeout(800); return p.evaluate(() => window.pdS.map(x => x[1]).filter((v, i, a) => v !== a[i - 1])) }
+
+/**
+ * Review I3: the zoom snap eases (120 ms, ease-out) around the pointer, so the cell under it stays put; keys ease one
+ * level around the cursor cell; none of it eases under reduced motion. A rAF sampler records view.s every frame.
+ */
+async function bigI3() {
+  for (const reduce of [false, true]) {
+    const p = await bigPage(reduce ? { reducedMotion: 'reduce' } : {})
+    await startPreset(p, 58)
+    const tag = reduce ? ' (reduced motion: no easing)' : ''
+    // Ctrl+wheel from 24 to 29.15 px/cell with the pointer off centre, then let go: it snaps to 32
+    const w = await p.evaluate(() => {
+      const c = document.querySelector('.pd-bk-app').pd
+      c.setView({ s: 24, ox: -100, oy: -80 }); c.draw()
+      const r = c.el.getBoundingClientRect(), px = c.cw * 0.25, py = c.ch * 0.3
+      c.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 * Math.log(29.15 / 24), ctrlKey: true, clientX: r.left + px, clientY: r.top + py, bubbles: true, cancelable: true }))
+      const v = c.view
+      return { px, py, s: v.s, fx: (px - v.ox) / v.s, fy: (py - v.oy) / v.s }
+    })
+    await zoomSample(p)
+    const ws = await zoomSteps(p)
+    const w2 = await p.evaluate(([px, py]) => { const v = document.querySelector('.pd-bk-app').pd.view; return { s: v.s, fx: (px - v.ox) / v.s, fy: (py - v.oy) / v.s } }, [w.px, w.py])
+    const drift = Math.hypot(w2.fx - w.fx, w2.fy - w.fy)
+    const mid = ws.filter(v => v > w.s + 0.01 && v < 31.99)
+    check(`BIG I3 Ctrl+wheel to 29.15 then stop: snaps to 32 around the pointer (the cell under it moves < 0.02 cell)${reduce ? ', in one step' : ', easing through in-between scales'}${tag}`,
+      Math.abs(w.s - 29.15) < 0.01 && w2.s === 32 && drift < 0.02 && (reduce ? mid.length === 0 : mid.length >= 2), JSON.stringify({ w, w2, drift: +drift.toFixed(4), ws }))
+    // + on the keyboard: one level, around the cursor cell (its centre stays on the same screen pixel)
+    const host = bigHost(p)
+    await host.focus()
+    await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView({ s: 16, ox: -40, oy: -40 }); c.draw(); c.game.set({ cx: 20, cy: 14 }) })
+    await p.keyboard.press('ArrowRight')
+    await p.keyboard.press('ArrowLeft')
+    await p.waitForTimeout(100)
+    const k0 = await p.evaluate(() => { const v = document.querySelector('.pd-bk-app').pd.view; return { s: v.s, x: v.ox + 20.5 * v.s, y: v.oy + 14.5 * v.s } })
+    await zoomSample(p)
+    await p.keyboard.press('+')
+    const ks = await zoomSteps(p)
+    const k1 = await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd, v = c.view, g = c.game.get(); return { s: v.s, x: v.ox + (g.cx + 0.5) * v.s, y: v.oy + (g.cy + 0.5) * v.s, cx: g.cx, cy: g.cy } })
+    const kmid = ks.filter(v => v > 16.01 && v < 23.99)
+    check(`BIG I3 + zooms 16 → 24 around the cursor cell (its centre moves < 0.5 px)${reduce ? ', in one step' : ', easing over about 120 ms'}${tag}`,
+      k1.s === 24 && k1.cx === 20 && Math.hypot(k1.x - k0.x, k1.y - k0.y) < 0.5 && (reduce ? kmid.length === 0 : kmid.length >= 2), JSON.stringify({ k0, k1, ks }))
+    // the zoom buttons ease the same way
+    await zoomSample(p)
+    await p.locator('.pd-bk-zoom .pd-ib').nth(2).click()
+    const bs = await zoomSteps(p)
+    const b1 = await p.evaluate(() => document.querySelector('.pd-bk-app').pd.view.s)
+    check(`BIG I3 the + button zooms 24 → 32${reduce ? ' in one step' : ', easing'}${tag}`, b1 === 32 && (reduce ? bs.filter(v => v > 24.01 && v < 31.99).length === 0 : bs.filter(v => v > 24.01 && v < 31.99).length >= 2), JSON.stringify({ b1, bs }))
+    await p.context().close()
+  }
+}
+
 /** A share code over 20 KB is never truncated: 「复制分享码」 becomes 「导出图纸文件」 + the reason (designer steering 3). */
 async function bigShare() {
   const p = await bigPage()
@@ -1560,6 +1614,7 @@ async function bigI2() {
 async function bigSection() {
   const before = pageErrors.length
   await bigAria()
+  await bigI3()
   await undoParity()
   await bigShare()
   await bigStorage()
@@ -1603,6 +1658,7 @@ try {
     await h.close()
   }
   sections: {
+  if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }
   if (ONLY === 'big') { log('BIG. more sizes (v0.3)'); await bigSection(); break sections }
   if (ONLY === 'i2') { log('BIG. review I-2 e2e'); await bigI2(); break sections }
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
