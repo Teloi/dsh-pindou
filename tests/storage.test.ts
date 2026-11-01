@@ -83,6 +83,19 @@ describe('storage', () => {
     expect(backend.data.has(STORAGE_KEY)).toBe(false)
   })
 
+  it('never writes a non-square or big board to the v1 key, and stays ok (review I-2)', () => {
+    const backend = memoryStorage()
+    const store = new SafeStore(backend)
+    expect(store.saveState({ ...defaultState(), board: createBoard(16) })).toBe(true)
+    const square = backend.data.get(STORAGE_KEY)
+    for (const board of [createBoard(16, 12), createBoard(40, 30), createBoard(58), createBoard(208)]) {
+      expect(store.saveState({ ...defaultState(), board })).toBe(false)
+      expect(backend.data.get(STORAGE_KEY)).toBe(square)
+    }
+    expect(store.status).toBe('ok')
+    expect(store.saveState({ ...defaultState(), board: createBoard(24) })).toBe(true)
+  })
+
   it('recovers from corrupt or tampered data field by field', () => {
     expect(parseState('{not json').corrupt).toBe(true)
     expect(parseState('null').corrupt).toBe(true)

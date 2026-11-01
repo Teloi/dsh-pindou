@@ -227,8 +227,10 @@ export class SafeStore {
     this.remove(STORAGE_KEY)
   }
 
+  /** Only a 12/16/24 square ever goes to `dsh-pindou:v1` (review I-2: v0.2 cannot open anything else); big boards save via save-store. */
   saveState(state: SavedState): boolean {
-    return this.set(STORAGE_KEY, serializeState(state))
+    const { w, h } = state.board
+    return w === h && isBoardSize(w) && this.set(STORAGE_KEY, serializeState(state))
   }
 }
 

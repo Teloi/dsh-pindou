@@ -92,6 +92,10 @@ describe('save store: when IDB is unavailable', () => {
       expect(await store.save('big', createBoard(59, 8))).toEqual({ ok: false, reason: 'unsaved-too-big' })
       expect(local.data.has(`${LOCAL_SAVE_PREFIX}big`)).toBe(false)
       expect(UNSAVED_TOO_BIG.zh).toContain('此环境无法保存大图进度')
+      // review I-2: fallback saves never touch the v0.2 game save key
+      await store.save('wide', noisy(40, 30))
+      expect(local.data.has(`${LOCAL_SAVE_PREFIX}wide`)).toBe(true)
+      expect(local.data.has(STORAGE_KEY)).toBe(false)
     })
   }
 
