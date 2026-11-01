@@ -1364,19 +1364,77 @@ async function bigShots() {
   }
 }
 
+/**
+ * Review I-2 (fixed in 0dbcfe6): saving a non-square (40×30) or big (78×78) board never writes dsh-pindou:v1, so the
+ * v0.2-format game save there keeps its 16×16 board and still opens after a reload; with IndexedDB and without it.
+ */
+async function bigI2() {
+  for (const [label, init] of [['IDB', undefined], ['no IDB', NO_IDB]]) {
+    const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', init)
+    await startSession(p, '看看 README')
+    await openPanel(p)
+    await p.locator('.pd-start .pd-big', { hasText: /自由拼/ }).click()
+    await p.locator('.pd-board').waitFor()
+    const coach = p.locator('.pd-overlay.pd-coach button')
+    if (await coach.count()) { await coach.first().click(); await p.waitForTimeout(250) }
+    // a first-screen move: dsh-pindou:v1 holds the v0.2-format square save
+    const [dx, dy] = await domCell(p, 3, 3)
+    await p.mouse.click(dx, dy)
+    await p.waitForTimeout(900)
+    const v1 = await p.evaluate(() => localStorage.getItem('dsh-pindou:v1'))
+    const j = v1 ? JSON.parse(v1) : null
+    check(`BIG I-2 (${label}): the first screen saved a v0.2-format 16×16 game to dsh-pindou:v1`, j?.size === 16 && (j.h ?? 16) === 16 && typeof j.board === 'string', JSON.stringify(j && { v: j.v, size: j.size, h: j.h }))
+    const v1Now = () => p.evaluate(() => localStorage.getItem('dsh-pindou:v1'))
+    const paint3 = async () => { await bigZoom(p); for (const [x, y] of [[1, 1], [2, 2], [3, 3]]) { const [cx, cy] = await bigCell(p, x, y); await p.mouse.click(cx, cy) } await p.waitForTimeout(2600) }
+    await p.getByRole('button', { name: /^更多尺寸$/ }).click()
+    await p.locator('.pd-bk-sizes').waitFor({ timeout: 15000 })
+    await p.locator('.pd-bk-form input').nth(0).fill('40')
+    await p.locator('.pd-bk-form input').nth(1).fill('30')
+    await p.locator('.pd-bk-form .pd-btn', { hasText: '开始' }).click()
+    await bigHost(p).waitFor()
+    await p.waitForTimeout(300)
+    await paint3()
+    const after40 = await v1Now()
+    await p.locator('.pd-bk-top .pd-btn', { hasText: '新建' }).click()
+    await startPreset(p, 78)
+    await paint3()
+    const after78 = await v1Now()
+    const keys = await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('dsh-pindou')).toSorted())
+    // the first screen may re-save its own game (its page changes), but only ever that 16×16 square with the same beads
+    const same = (raw) => { const k = raw ? JSON.parse(raw) : null; return k?.size === 16 && (k.h ?? 16) === 16 && k.board === j.board }
+    const changed = (raw) => { const k = raw ? JSON.parse(raw) : {}; return Object.keys({ ...k, ...j }).filter(f => JSON.stringify(k[f]) !== JSON.stringify(j[f])) }
+    check(`BIG I-2 (${label}): saving a 40×30 and a 78×78 board never writes them to dsh-pindou:v1 (still the 16×16 game, same beads)`, same(after40) && same(after78), JSON.stringify({ fields40: changed(after40), fields78: changed(after78), keys }))
+    // the v0.2 key still opens: reload, nothing set aside as unreadable, the first screen comes back
+    const v1Last = await v1Now()
+    await p.reload()
+    await p.waitForTimeout(2500)
+    const notice = p.locator('button', { hasText: /^继续$/ })
+    if (await notice.count()) await notice.first().click()
+    // the host may bring the session back by itself
+    if (await p.getByRole('button', { name: HOST.zh.choose }).isVisible()) await startSession(p, '看看 README')
+    await openPanel(p)
+    await p.locator('.pd-start, .pd-board').first().waitFor({ timeout: 15000 })
+    await p.waitForTimeout(600)
+    const back = await p.evaluate(() => ({ v1: localStorage.getItem('dsh-pindou:v1'), bad: Object.keys(localStorage).filter(k => k.startsWith('dsh-pindou:v1:unreadable')) }))
+    check(`BIG I-2 (${label}): after a reload dsh-pindou:v1 still holds the 16×16 game and opens (nothing set aside as unreadable)`, same(back.v1) && same(v1Last) && back.bad.length === 0, JSON.stringify({ same: same(back.v1), bad: back.bad }))
+    await p.context().close()
+  }
+}
+
 async function bigSection() {
   const before = pageErrors.length
   await bigAria()
   await undoParity()
   await bigShare()
   await bigStorage()
+  await bigI2()
   await bigShots()
   const errs = pageErrors.splice(before)
   check('BIG no page errors on the big-board pages', errs.length === 0, errs.slice(0, 3).join(' | '))
 }
 
 // E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works,
-// E2E_ONLY=s just the README panel shots, E2E_ONLY=v just save safety, E2E_ONLY=big just the big boards (the rest of the suite is unchanged)
+// E2E_ONLY=s just the README panel shots, E2E_ONLY=v just save safety, E2E_ONLY=big just the big boards, E2E_ONLY=i2 just the I-2 check (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
 try {
   {
@@ -1410,6 +1468,7 @@ try {
   }
   sections: {
   if (ONLY === 'big') { log('BIG. more sizes (v0.3)'); await bigSection(); break sections }
+  if (ONLY === 'i2') { log('BIG. review I-2 e2e'); await bigI2(); break sections }
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
   if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
   if (ONLY === 's') { log('S. README panel screenshots'); await readmeScreens(); break sections }
