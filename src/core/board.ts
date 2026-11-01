@@ -33,7 +33,7 @@ export interface Board {
 
 /** A blank board; `h` defaults to `w` (square). */
 export function createBoard(w: number = DEFAULT_SIZE, h = w): Board {
-  return { w, h, cells: Object.freeze(Array.from({ length: w * h }, () => EMPTY)) }
+  return { w, h, cells: Object.freeze(Array(w * h).fill(EMPTY)) }
 }
 
 export function inBounds(board: Board, x: number, y: number): boolean {
@@ -95,7 +95,7 @@ export function floodFill(board: Board, x: number, y: number, value: number): Bo
   if (from === value) return board
   const cells = [...board.cells]
   const stack = [y * w + x]
-  while (stack.length > 0) {
+  while (stack.length) {
     const i = stack.pop()!
     if (cells[i] !== from) continue
     cells[i] = value

@@ -360,7 +360,7 @@ export class GameStore {
   }
 
   /** An undo toast speaks about the game on screen; leaving or swapping that game retires it. */
-  #dropUndoToast(): Partial<GameState> { return this.#state.toast?.undo === true ? { toast: null } : {} }
+  #dropUndoToast(): Partial<GameState> | false | undefined { return this.#state.toast?.undo && { toast: null } }
 
   /** An edit starts a new future: games left by undoing a switch can't be redone any more. */
   #edited(): void { this.#nextGames = [] }
@@ -420,7 +420,7 @@ export class GameStore {
 
   dismissOverlay(): void {
     const coach = this.#state.overlay === 'coach'
-    this.#set({ overlay: null, ...(coach ? { coached: true } : {}) }, coach)
+    this.#set({ overlay: null, ...coach && { coached: true } }, coach)
   }
 
   /** Menu → "show the intro again": opens the coach card on the board. */
@@ -443,7 +443,7 @@ export class GameStore {
     const pulse = color !== this.#state.color && this.#state.targetBoard !== null && !this.locked
     this.#set({
       color, tool: this.#state.tool === 'erase' || this.#state.tool === 'pick' ? 'paint' : this.#state.tool,
-      ...(pulse ? { pulseAt: this.#now() } : {}),
+      ...pulse && { pulseAt: this.#now() },
     })
   }
 
@@ -653,7 +653,7 @@ export class GameStore {
     if (!isClassic(b)) return
     const w: StoredWork = {
       i: Math.max(this.#now(), ...this.#wall.map(x => (+x?.i || 0) + 1)), n: b.w as BoardSize, b: encode(b), s: s.target,
-      ...(s.target?.startsWith('board:') && s.targetBoard && b.w < 24 ? { p: encode(s.targetBoard) } : {}),
+      ...s.target?.startsWith('board:') && s.targetBoard && b.w < 24 && { p: encode(s.targetBoard) },
     }
     this.setWall([...this.#wall, w])
     this.#set({ work: w.i })
@@ -680,7 +680,7 @@ export class GameStore {
   }
 
   // ── AI ────────────────────────────────────────────────────────────
-  setAiPrompt(prompt: string): void { this.#setAi({ prompt: prompt.slice(0, 120), ...(this.#state.ai.phase === 'error' ? { phase: 'idle', error: undefined } : {}) }) }
+  setAiPrompt(prompt: string): void { this.#setAi({ prompt: prompt.slice(0, 120), ...this.#state.ai.phase === 'error' && { phase: 'idle', error: undefined } }) }
   setAiSize(size: AiSize): void { this.#setAi({ size }) }
 
   /**
@@ -744,7 +744,7 @@ export class GameStore {
       if (error === 'not-configured') this.#notConfiguredSticky = true
       this.#setAi({
         phase: 'error', error,
-        ...(error === 'not-configured' ? { status: { configured: false, route: this.#state.ai.status?.route ?? 'none', verified: true } } : {}),
+        ...error === 'not-configured' && { status: { configured: false, route: this.#state.ai.status?.route ?? 'none', verified: true } },
       })
       return
     }
