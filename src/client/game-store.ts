@@ -46,7 +46,7 @@ export type ViewMode = Mode | 'picture' | 'works' | 'big'
 
 export type Overlay = 'coach' | 'done' | 'result' | null
 /** Toast keys are i18n keys (no lookup table on the first screen). */
-export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'restarted' | 'restart' | 'say'
+export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'unavailable' | 'recovered' | 'restarted' | 'restart' | 'held' | 'say'
 
 export interface GameState {
   readonly history: History
@@ -210,7 +210,7 @@ export class GameStore {
       celebrateAt: null,
       pulseAt: null,
       overlay: saved.ironed ? 'result' : null,
-      toast: storage === 'ok' ? null : { key: storage === 'recovered' ? 'storageRecovered' : 'storageUnavailable', undo: false, at: this.#now() },
+      toast: storage === 'ok' ? null : { key: storage, undo: false, at: this.#now() },
       prefs: saved.prefs,
       done: saved.done,
       coached: saved.coached,
@@ -232,7 +232,8 @@ export class GameStore {
     this.#nextGames = []
     this.#last = null
     this.#boot()
-    // a crash, not an unreadable save: its own words, and 「已备份」 only when the backup was really written
+    // a crash, not an unreadable save: its own words, 「已备份」 only when the backup was really written;
+    // when it was refused (storage 'held') the toast says 「这次的进度不会保存」 too (ui/App.tsx, audit S2-1)
     this.showToast(kept ? 'restarted' : 'restart')
   }
 
@@ -312,7 +313,7 @@ export class GameStore {
     this.#deps.store.saveState(this.#saved())
     const after = this.#deps.store.status
     if (after !== before && !this.#disposed) {
-      this.#set({ storage: after, toast: { key: 'storageUnavailable', undo: false, at: this.#now() } }, false)
+      this.#set({ storage: after, toast: { key: after as ToastKey, undo: false, at: this.#now() } }, false)
     }
   }
 

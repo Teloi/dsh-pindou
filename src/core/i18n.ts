@@ -101,10 +101,13 @@ const COPY = {
   previewTitle: ['右键或长按图片另存为', 'Right-click or long-press the image to save it'],
   previewClose: ['关闭', 'Close'],
   exportFailed: ['导出失败', 'Export failed'],
-  storageUnavailable: ['浏览器存储不可用，进度不会保存', 'Browser storage unavailable — progress will not be saved'],
-  storageRecovered: ['存档读不了，已备份并重新开始', 'Could not read the save — backed it up and started over'],
+  unavailable: ['浏览器存储不可用，进度不会保存', 'Browser storage unavailable — progress will not be saved'],
+  recovered: ['存档读不了，已备份并重新开始', 'Could not read the save — backed it up and started over'],
   restarted: ['出错了，已重新开始，出错前的进度已备份', 'Something went wrong — backed it up and started over'],
+  // also said at once when a save couldn't be backed up (`held`, on load or after a crash; audit S2-1), and
+  // swapped in place for the long line once lib/client.works.js brings client/notice.ts; it stays if that can't load
   restart: ['出错了，已重新开始', 'Something went wrong — started over'],
+  held: ['出错了，已重新开始', 'Something went wrong — started over'],
   crashed: ['出错了', 'Something went wrong'],
   reset: ['重置', 'Reset'],
   aiPlaceholder: ['描述你想拼的东西，比如：戴墨镜的柴犬', 'Describe what to make, e.g. a shiba wearing sunglasses'],

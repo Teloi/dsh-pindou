@@ -553,6 +553,11 @@ const worksCard = p => p.locator('.pd-start .pd-big').nth(3)
 const rowShot = async (p, name, auditOpts) => { const s = p.locator('.pd-v-home .pd-works'); await s.scrollIntoViewIfNeeded(); await outShot(p, name, { clip: await s.boundingBox() }, auditOpts) }
 const setWidth = async (p, px) => { await p.evaluate(v => { document.querySelector('.pd-root').style.width = v ? `${v}px` : '' }, px); await p.waitForTimeout(300) }
 
+/** S2-1 e2e helpers: is 「已备份」 anywhere, the toast line now, wait for an exact toast line */
+const backedUp = pg => pg.evaluate(() => /已备份/.test(document.body.innerText))
+const toastNow = pg => pg.evaluate(() => document.querySelector('.pd-toast span')?.textContent ?? null)
+const waitToast = (pg, text, timeout = 6000) => pg.waitForFunction(t => document.querySelector('.pd-toast span')?.textContent === t, text, { timeout }).then(() => true, () => false)
+
 /**
  * Save safety (designer review v0.3 phase 1, I-1): a valid but non-square v3 save in
  * `dsh-pindou:v1` (what a v0.3 build could have written) must never crash the panel.
@@ -611,6 +616,92 @@ async function saveSafetySection() {
   // only the forced error may be reported from that page
   const rest = pageErrors.splice(errorsBefore).filter(e => !e.includes('pd e2e boom'))
   check('V no page errors besides the forced one', rest.length === 0, rest.slice(0, 3).join(' | '))
+  // audit S2-1 / designer 22:05: when the backup itself is refused nothing may say 「已备份」. The quota is faked on the backup keys only.
+  // Option 2 (管家): the two long lines ride in lib/client.works.js; the toast says 「出错了，已重新开始」 at once and the long line
+  // takes its place when the chunk is here. A sampler records every text the toast shows (and which element showed it).
+  const quota = `const si = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (String(k).startsWith('dsh-pindou:v1:unreadable')) throw new DOMException('full', 'QuotaExceededError'); return si.call(this, k, v) }`
+  const sampler = `window.pdTs = []; window.pdTn = 0; setInterval(() => { const s = document.querySelector('.pd-toast span'); if (!s) return; const t = s.parentElement; t.dataset.e2e ||= String(++window.pdTn); const v = t.dataset.e2e + '|' + s.textContent; if (window.pdTs.at(-1) !== v) window.pdTs.push(v) }, 20)`
+  const SHORT = '出错了，已重新开始', HELD = '存档读不了，已重新开始。原存档已保留，但这次的进度不会保存', CRASH = '出错了，已重新开始。这次的进度不会保存'
+  // 1. delayed chunk: the short line first, then the long one in place (same toast element), never blank
+  const h = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${sampler}; ${quota}; ${init.replace("'v'", "'h'")}`)
+  let hAsked = 0
+  await h.route(WORK_CHUNK, async (route) => { hAsked++; await new Promise(r => { setTimeout(r, 1200) }); await route.continue() })
+  await startSession(h, '看看 README')
+  await openPanel(h)
+  await h.locator('.pd-toast').waitFor({ timeout: 5000 }).catch(() => {})
+  const hFirst = await toastNow(h)
+  const hLong = await waitToast(h, HELD)
+  await h.waitForTimeout(150) // the sampler's next ticks
+  const hSeen = await h.evaluate(() => window.pdTs)
+  const hKept = await h.evaluate(() => ({ v1: localStorage.getItem('dsh-pindou:v1'), bak: Object.keys(localStorage).filter(k => k.startsWith('dsh-pindou:v1:unreadable')).length }))
+  check('V S2-1 an unreadable save whose backup is refused, slow chunk: 「出错了，已重新开始」 at once, then 「存档读不了，已重新开始。原存档已保留，但这次的进度不会保存」 in its place (one toast element, never blank)',
+    hFirst === SHORT && hLong && hSeen.length === 2 && hSeen[0] === `1|${SHORT}` && hSeen[1] === `1|${HELD}` && hAsked >= 1, JSON.stringify({ hFirst, hLong, hSeen, hAsked }))
+  check('V S2-1 nothing says 「已备份」, the save stays in v1, no backup written', !(await backedUp(h)) && hKept.v1 === raw && hKept.bak === 0, JSON.stringify({ same: hKept.v1 === raw, bak: hKept.bak }))
+  await h.evaluate(() => { document.querySelector('.pd-toast')?.remove() })
+  if (await h.locator('.pd-v-home').count() === 0) await h.locator('.pd-head .pd-ib').first().click().catch(() => {})
+  await openBig(h)
+  const hLine = await h.evaluate(() => [...document.querySelectorAll('.pd-bk .pd-bk-note')].map(n => n.textContent))
+  check('V S2-1 the big setup page says 「本次进度不会保存」 for the session (designer 22:05)', hLine.includes('本次进度不会保存') && !(await backedUp(h)), JSON.stringify(hLine))
+  await bigShot(h, 'v-held-setup')
+  await h.context().close()
+  // 2. a crash whose backup is refused (chunk ok): the short line, then 「出错了，已重新开始。这次的进度不会保存」
+  const ch = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${sampler}; ${boom}; ${quota}; if (!sessionStorage.getItem('k2')) { sessionStorage.setItem('k2', '1'); localStorage.setItem('dsh-pindou:v1', JSON.stringify({ v: 2, size: 16, board: '.'.repeat(255) + '3', color: 3, tool: 'paint', mode: 'home', target: null, pattern: null, ironed: false, coached: true })) }`)
+  await startSession(ch, '看看 README')
+  await openPanel(ch)
+  if (!(await ch.locator('.pd-v-home').count())) { await ch.locator('.pd-head .pd-ib').first().click().catch(() => {}) }
+  await ch.locator('.pd-root[role=alert]').waitFor({ timeout: 8000 }).catch(() => {})
+  await ch.evaluate(() => { window.pdBoom = false })
+  await ch.locator('.pd-root[role=alert] button').click().catch(() => {})
+  const chLong = await waitToast(ch, CRASH)
+  await ch.waitForTimeout(150)
+  const chSeen = await ch.evaluate(() => window.pdTs.map(v => v.replace(/^\d+\|/, '')))
+  check('V S2-1 a crash whose backup is refused: 「出错了，已重新开始。这次的进度不会保存」 (after the short line), no 「已备份」', chLong && chSeen.every(v => v === SHORT || v === CRASH) && !(await backedUp(ch)), JSON.stringify({ chLong, chSeen }))
+  await ch.context().close()
+  // 3. the chunk can't load: the short line stays (never blank, no 「已备份」), 重置 still works, the setup page still says it
+  const errs3 = pageErrors.length
+  const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${sampler}; ${boom}; ${quota}; ${init.replace("'v'", "'f'")}`)
+  let fAsked = 0
+  await f.route(WORK_CHUNK, (route) => { fAsked++; return route.abort('internetdisconnected') })
+  await startSession(f, '看看 README')
+  await openPanel(f)
+  await f.locator('.pd-toast').waitFor({ timeout: 5000 }).catch(() => {})
+  await f.waitForTimeout(1500)
+  const fSeen = await f.evaluate(() => window.pdTs)
+  check('V S2-1 chunk fails: the toast stays exactly 「出错了，已重新开始」 (never blank), no 「已备份」 anywhere', fAsked >= 1 && fSeen.length === 1 && fSeen[0] === `1|${SHORT}` && !(await backedUp(f)), JSON.stringify({ fAsked, fSeen }))
+  // a crash on top (home thumbnails throw): 重置 never waits for the chunk
+  if (!(await f.locator('.pd-v-home').count())) { await f.locator('.pd-head .pd-ib').first().click().catch(() => {}) }
+  await f.locator('.pd-root[role=alert]').waitFor({ timeout: 8000 }).catch(() => {})
+  const fAlert = await f.locator('.pd-root[role=alert]').count()
+  await f.evaluate(() => { window.pdBoom = false; window.pdTs = [] })
+  await f.locator('.pd-root[role=alert] button').click().catch(() => {})
+  await f.locator('.pd-v-home, .pd-board').first().waitFor({ timeout: 3000 }).catch(() => {})
+  const fBack = await f.evaluate(() => ({ alert: !!document.querySelector('.pd-root[role=alert]'), view: !!document.querySelector('.pd-v-home, .pd-board'), toast: document.querySelector('.pd-toast span')?.textContent ?? null }))
+  await f.waitForTimeout(1000)
+  const fSeen2 = await f.evaluate(() => window.pdTs.map(v => v.replace(/^\d+\|/, '')))
+  check('V S2-1 chunk fails: 重置 brings the panel back at once with 「出错了，已重新开始」, which stays; no 「已备份」', fAlert === 1 && !fBack.alert && fBack.view && fBack.toast === SHORT && fSeen2.every(v => v === SHORT) && !(await backedUp(f)), JSON.stringify({ fAlert, fBack, fSeen2 }))
+  await f.evaluate(() => { document.querySelector('.pd-toast')?.remove() })
+  if (await f.locator('.pd-v-home').count() === 0) await f.locator('.pd-head .pd-ib').first().click().catch(() => {})
+  await openBig(f)
+  const fLine = await f.evaluate(() => [...document.querySelectorAll('.pd-bk .pd-bk-note')].map(n => n.textContent))
+  check('V S2-1 chunk fails: the big setup page still says 「本次进度不会保存」', fLine.includes('本次进度不会保存') && !(await backedUp(f)), JSON.stringify(fLine))
+  await bigShot(f, 'v-held-chunk-failed-setup')
+  await f.context().close()
+  const caused3 = pageErrors.splice(errs3).filter(e => !e.includes('pd e2e boom'))
+  check('V S2-1 chunk fails: the only errors are the aborted chunk loads (nothing thrown)', caused3.every(e => /client\.works\.js|ERR_INTERNET_DISCONNECTED|Failed to fetch|net::/i.test(e)), caused3.slice(0, 3).join(' | '))
+  // a crash with no storage at all: the crash words win over 「浏览器存储不可用，进度不会保存」 and say no 「已备份」 (21:35)
+  const none = `Storage.prototype.setItem = function () { throw new DOMException('denied', 'SecurityError') }`
+  const cn = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${boom}; ${none}`)
+  await startSession(cn, '看看 README')
+  await openPanel(cn)
+  await cn.locator('.pd-root[role=alert]').waitFor({ timeout: 8000 }).catch(() => {})
+  await cn.evaluate(() => { window.pdBoom = false })
+  await cn.locator('.pd-root[role=alert] button').click().catch(() => {})
+  await cn.waitForTimeout(500)
+  const cnToast = await cn.evaluate(() => [...document.querySelectorAll('.pd-toast')].map(t => t.textContent))
+  check('V S2-1 a crash with storage unavailable: one toast, exactly 「出错了，已重新开始」 (not the storage notice, no 「已备份」)', cnToast.length === 1 && cnToast[0] === '出错了，已重新开始', JSON.stringify({ cnToast }))
+  await cn.context().close()
+  const rest2 = pageErrors.splice(errorsBefore).filter(e => !e.includes('pd e2e boom'))
+  check('V S2-1 pages: no page errors besides the forced one', rest2.length === 0, rest2.slice(0, 3).join(' | '))
 }
 
 async function worksSection() {

@@ -32,7 +32,7 @@ const STRINGS = {
     zoomIn: '放大', zoomOut: '缩小', fit: '适合大小', map: '小地图', colors: '颜色', blocks: '块列表', next: '下一块',
     whole: '全图', px: '{n} px/格', at: '第 {y} 行第 {x} 列', empty: '空', want: '图纸要 {c}', wrong: '放错了，图纸要 {c}', done: '{b} 完成！按 N 去下一块', allDone: '全部完成',
     cell: '{b} 板，{at}，{v}', board: '{w}×{h} 画布。方向键移动，空格或回车放豆，Delete 擦除，Shift+方向键跳一块，N 下一块，+ − 0 缩放，M 小地图，L 块列表',
-    only: '只看本色', loading: '正在读取存档…', noStore: '浏览器存储不可用，进度不会保存', close: '关闭',
+    only: '只看本色', loading: '正在读取存档…', noStore: '浏览器存储不可用，进度不会保存', held: '本次进度不会保存', close: '关闭',
   },
   en: {
     title: 'More sizes', presets: 'Pegboards', custom: 'Custom', w: 'Width', h: 'Height', unit: 'Blocks', none: 'One block', start: 'Start',
@@ -44,7 +44,7 @@ const STRINGS = {
     zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit', map: 'Minimap', colors: 'Colours', blocks: 'Blocks', next: 'Next block',
     whole: 'Whole', px: '{n} px/cell', at: 'row {y}, column {x}', empty: 'empty', want: 'pattern wants {c}', wrong: 'Wrong bead: the pattern wants {c}', done: '{b} done! Press N for the next block', allDone: 'All done',
     cell: 'Block {b}, {at}, {v}', board: '{w}×{h} board. Arrows move, Space or Enter places, Delete erases, Shift+arrows jump a block, N next block, + − 0 zoom, M minimap, L block list',
-    only: 'This colour only', loading: 'Reading saves…', noStore: 'Browser storage unavailable — progress will not be saved', close: 'Close',
+    only: 'This colour only', loading: 'Reading saves…', noStore: 'Browser storage unavailable — progress will not be saved', held: 'Progress this session will not be saved', close: 'Close',
   },
 } as const
 type Key = keyof (typeof STRINGS)['zh']
@@ -177,9 +177,13 @@ function Setup({ t, env, st, onStart }: { readonly t: T; readonly env: Env; read
   // and one quiet line once a custom size over 58 is typed in (plan 修订 20:25)
   const s0 = st?.status()
   const local = s0?.backend === 'local'
+  // a save that could not be backed up: said here for the whole session, till a backup works (designer 22:05),
+  // in this chunk's own words, so it never waits for lib/client.notice.js
+  const held = env.store.getSnapshot().storage
   return (
     <>
       <h2>{t('title')}</h2>
+      {held === 'held' ? <Notice>{t('held')}</Notice> : null}
       {local && !s0.slow ? <Notice>{UNSAVED_TOO_BIG[env.lang]}</Notice> : null}
       {saved
         ? <button type="button" className="pd-btn pd-primary pd-bk-wide" onClick={() => { onStart(saved.start, false) }}>{t('resume')} · {saved.label}</button>

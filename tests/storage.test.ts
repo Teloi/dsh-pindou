@@ -137,11 +137,20 @@ describe('storage', () => {
     backend.data.set(STORAGE_KEY, '{broken')
     const store = new SafeStore(backend)
     store.loadState()
-    expect(store.status).toBe('recovered')
+    // not 'recovered': nothing was backed up (audit S2-1)
+    expect(store.status).toBe('held')
     expect(backend.data.get(STORAGE_KEY)).toBe('{broken')
     expect(store.saveState({ ...defaultState(), board: createBoard(16) })).toBe(false)
     expect(backend.data.get(STORAGE_KEY)).toBe('{broken')
+    expect(store.status).toBe('held')
+    // a crash reset that is refused too: still held (the toast says it as a crash, ui/App.tsx)
+    expect(store.setAside()).toBe(false)
+    expect(store.status).toBe('held')
+    // once a backup is written: recovered, and saving works again
+    backend.setItem = setItem
+    expect(store.setAside()).toBe(true)
     expect(store.status).toBe('recovered')
+    expect(store.saveState({ ...defaultState(), board: createBoard(16) })).toBe(true)
   })
 
   it('never writes a non-square or big board to the v1 key, and stays ok (review I-2)', () => {

@@ -142,7 +142,11 @@ export function serializeState({ board, ...rest }: SavedState): string {
   return JSON.stringify({ v: 3, size: board.w, h: board.h, board: encode(board), ...rest })
 }
 
-export type StorageStatus = 'ok' | 'unavailable' | 'recovered'
+/**
+ * `recovered`: an unreadable (or crashed-on) save was backed up; `held`: it could not be (it stays,
+ * this session does not save; designer 22:05, audit S2-1).
+ */
+export type StorageStatus = 'ok' | 'unavailable' | 'recovered' | 'held'
 
 /**
  * Storage that never throws: reads and writes degrade to memory when the
@@ -151,8 +155,6 @@ export type StorageStatus = 'ok' | 'unavailable' | 'recovered'
 export class SafeStore {
   readonly #memory = new Map<string, string>()
   readonly #backend: StorageLike | undefined
-  /** An unreadable save could not be backed up: it stays, and this session does not save over it (audit A1-5). */
-  #hold = false
   status: StorageStatus = 'ok'
 
   constructor(backend: StorageLike | undefined) {
@@ -208,7 +210,6 @@ export class SafeStore {
   setAside(): boolean {
     const raw = this.get(STORAGE_KEY)
     if (raw === null) return false
-    if (this.status === 'ok') this.status = 'recovered'
     // three backups, newest first (`…:unreadable`, `:2`, `:3`); each shifts down one, the oldest drops off.
     // Shifted from the old end, so a slot is reused only once its backup has a verified copy one down:
     // a refused write stops there with every backup still stored, and the original stays put (audit phase 2).
@@ -218,14 +219,17 @@ export class SafeStore {
     const olds = keys.map(k => this.get(k))
     let k = olds[0] === olds[1] ? 0 : Math.min(2, olds.indexOf(null) >>> 0)
     while (k && this.set(keys[k]!, olds[k - 1]!, true)) k--
-    if (k || !this.set(keys[0]!, raw, true)) { this.#hold = true; return false }
-    this.remove(STORAGE_KEY)
-    return true
+    const ok = !k && this.set(keys[0]!, raw, true)
+    if (ok) this.remove(STORAGE_KEY)
+    // only a backup really written says so (audit S2-1); `held`: it could not be, so the save stays and this
+    // session does not save over it (audit A1-5; with storage gone, 'unavailable' stays and nothing saves anyway)
+    if (this.status !== 'unavailable') this.status = ok ? 'recovered' : 'held'
+    return ok
   }
 
   /** Only a 12/16/24 square ever goes to `dsh-pindou:v1` (review I-2: v0.2 cannot open anything else); big boards save via save-store. */
   saveState(state: SavedState): boolean {
-    return isClassic(state.board) && !this.#hold && this.set(STORAGE_KEY, serializeState(state))
+    return isClassic(state.board) && this.status !== 'held' && this.set(STORAGE_KEY, serializeState(state))
   }
 }
 

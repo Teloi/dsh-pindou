@@ -29,6 +29,9 @@ export const WORKS_STRINGS = STRINGS
 
 const STYLE_ID = 'dsh-pindou-works-styles'
 /** Spec §18.4: the delete toast stays 5 s (paused while hovered or focused), like 清空. */
+// the two rare save-failure lines ride in this chunk (audit S2-1, option 2): the toast loads it for them (ui/App.tsx)
+export { NOTICES } from './notice.ts'
+
 export const UNDO_MS = 5000
 /** Home row: 56px thumbnails, 8px apart. */
 const THUMB = 56

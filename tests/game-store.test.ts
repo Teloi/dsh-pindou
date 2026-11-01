@@ -1,4 +1,5 @@
 import { capWall } from '../src/core/works.ts'
+import { NOTICES } from '../src/client/notice.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { BAD_SAVE_KEY, createBoard, EMPTY, encode, findTemplate, getCell, makeTranslate, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
 import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi } from '../src/client/game-store.ts'
@@ -198,7 +199,7 @@ describe('GameStore', () => {
     expect(JSON.parse(backend.data.get(STORAGE_KEY)!).board).toContain('4')
     backend.data.set(STORAGE_KEY, '{"board":"<img src=x onerror=alert(1)>"')
     const again = make({ backend })
-    expect(again.store.getSnapshot()).toMatchObject({ storage: 'recovered', toast: { key: 'storageRecovered' } })
+    expect(again.store.getSnapshot()).toMatchObject({ storage: 'recovered', toast: { key: 'recovered' } })
   })
 
   it('resolves saved sources strictly', () => {
@@ -901,7 +902,7 @@ describe('GameStore.reset (the panel crash boundary, review I-1)', () => {
     expect(store.getSnapshot()).toMatchObject({ storage: 'unavailable', toast: { key: 'restart' } })
   })
 
-  it('a refused backup write (quota) is no backup either: 「出错了，已重新开始」, and the save stays put', () => {
+  it('a refused backup write (quota): 「出错了，已重新开始。这次的进度不会保存」, and the save stays put (audit S2-1)', () => {
     const backend = mem()
     const { store } = make({ backend })
     store.startFree()
@@ -911,9 +912,24 @@ describe('GameStore.reset (the panel crash boundary, review I-1)', () => {
     const setItem = backend.setItem.bind(backend)
     backend.setItem = (k: string, v: string): void => { if (k.startsWith(BAD_SAVE_KEY)) throw new Error('QuotaExceededError'); setItem(k, v) }
     store.reset()
-    expect(store.getSnapshot().toast).toMatchObject({ key: 'restart' })
+    expect(store.getSnapshot()).toMatchObject({ storage: 'held', toast: { key: 'restart' } })
     expect(backend.data.get(STORAGE_KEY)).toBe(saved)
     expect(backend.data.has(BAD_SAVE_KEY)).toBe(false)
+    // and it is true: this session's progress is not saved over the kept save
+    store.startFree()
+    store.applyAt(2, 2)
+    store.flush()
+    expect(backend.data.get(STORAGE_KEY)).toBe(saved)
+  })
+
+  it('an unreadable save whose backup is refused: 「存档读不了，已重新开始。原存档已保留，但这次的进度不会保存」, never 「已备份」 (audit S2-1)', () => {
+    const backend = mem()
+    backend.data.set(STORAGE_KEY, '{broken')
+    const setItem = backend.setItem.bind(backend)
+    backend.setItem = (k: string, v: string): void => { if (k.startsWith(BAD_SAVE_KEY)) throw new Error('QuotaExceededError'); setItem(k, v) }
+    const { store } = make({ backend })
+    expect(store.getSnapshot()).toMatchObject({ storage: 'held', toast: { key: 'held' } })
+    expect(backend.data.get(STORAGE_KEY)).toBe('{broken')
   })
 
   it('nothing saved yet means nothing to back up: 「出错了，已重新开始」', () => {
@@ -932,5 +948,14 @@ describe('GameStore.reset (the panel crash boundary, review I-1)', () => {
     expect(en('restarted')).toBe('Something went wrong — backed it up and started over')
     expect(zh('restart')).not.toMatch(/备份/)
     expect(en('restart')).not.toMatch(/back/i)
+  })
+
+  it('the backup-refused copy, zh and en (designer 22:05), from the lazy notice chunk', () => {
+    expect(NOTICES.zh).toEqual({ held: '存档读不了，已重新开始。原存档已保留，但这次的进度不会保存', restart: '出错了，已重新开始。这次的进度不会保存' })
+    expect(NOTICES.en).toEqual({ held: 'Could not read the save — started over. It is kept, but progress will not be saved', restart: 'Something went wrong — started over. Progress will not be saved' })
+    // until the chunk is here (or when it can't load): the short line, no 「已备份」
+    const zh = makeTranslate('zh'), en = makeTranslate('en')
+    expect([zh('held'), en('held')]).toEqual([zh('restart'), en('restart')])
+    expect(JSON.stringify(NOTICES)).not.toMatch(/备份|backed/)
   })
 })

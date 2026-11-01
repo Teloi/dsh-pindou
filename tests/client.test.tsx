@@ -147,6 +147,25 @@ describe('client apply', () => {
     window.removeEventListener('error', quietError)
   })
 
+  it('audit S2-1: an unreadable save whose backup is refused, no notice chunk (old host): the short 「出错了，已重新开始」, never blank, no 「已备份」', async () => {
+    localStorage.setItem(STORAGE_KEY, '{oops')
+    const set = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, v: string) {
+      if (k.startsWith(BAD_SAVE_KEY)) throw new Error('quota')
+      set.call(this, k, v)
+    })
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    expect(host.querySelector('.pd-toast span')?.textContent).toBe('出错了，已重新开始')
+    expect(host.textContent).not.toMatch(/备份/)
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('{oops')
+    await act(async () => { root.unmount() })
+    f.dispose()
+  })
+
   it('plan 修订 20:25: with no browser storage the first screen keeps v0.2\u2019s toast (role=status, no close button, gone after 2.4 s); the dismissible bar is only on the big-board page', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied') })
