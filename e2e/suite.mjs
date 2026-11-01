@@ -1458,7 +1458,11 @@ async function bigStorage() {
     JSON.stringify({ at40, at58, at78 }))
   await startPreset(h, 78)
   const play78 = await quiet()
-  check('BIG slow IndexedDB: a 78×78 board plays with the same quiet line (not the full notice)', play78.notes.length === 1 && play78.notes[0] === SLOW, JSON.stringify(play78))
+  const under = await h.evaluate(() => { const l = document.querySelector('.pd-bk-play > p[role=status]'); return l ? { after: l.previousElementSibling?.className ?? null, card: getComputedStyle(l).backgroundColor, size: getComputedStyle(l).fontSize } : null })
+  await bigShot(h, 'big-play-idb-slow-78')
+  // designer S1: on the game page too it is one line of secondary text under the toolbar, not the gray card
+  check('BIG slow IndexedDB: a 78×78 board plays with the same quiet line as secondary text under the toolbar (no card)',
+    play78.notes.length === 0 && play78.line.length === 1 && play78.line[0] === SLOW && under?.after === 'pd-tools' && under.size === '11.5px' && /rgba\(0, 0, 0, 0\)|transparent/.test(under.card), JSON.stringify({ play78, under }))
   await h.context().close()
 
   // neither IndexedDB nor localStorage: 「浏览器存储不可用，进度不会保存」 once, dismissible, not in the way

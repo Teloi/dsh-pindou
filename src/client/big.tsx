@@ -377,7 +377,9 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
     void encodeV4(board).then(setShare)
   }
   const fileName = `bead-break-${w}x${h}.pd2.txt`
-  const canSave = !st || st.canSave(w, h)
+  const sv = st?.status()
+  // a board this page cannot save, on the localStorage fallback: IDB missing (card) or only slow (a quiet line)
+  const local = st && !st.canSave(w, h) && sv?.backend === 'local', slow = sv?.slow
   const level = view ? Math.round(view.s) : 0
 
   return (
@@ -388,7 +390,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <button type="button" className="pd-btn" aria-expanded={share !== false} onClick={openShare}>{t('share')}</button>
         <button type="button" className="pd-btn" onClick={onNew}>{t('newGame')}</button>
       </div>
-      {!canSave && st?.status().backend === 'local' ? <Notice>{(st.status().slow ? UNSAVED_SLOW : UNSAVED_TOO_BIG)[lang]}</Notice> : saveErr ? <Notice>{t('saveFailed')}</Notice> : null}
+      {local && !slow ? <Notice>{UNSAVED_TOO_BIG[lang]}</Notice> : saveErr ? <Notice>{t('saveFailed')}</Notice> : null}
       {share !== false
         ? (
           <div className="pd-bk-share">
@@ -422,6 +424,8 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <button type="button" className="pd-tool" aria-label={t('png')} title={t('png')}
           disabled={board.cells.every(c => c === EMPTY)} onClick={() => { kit.exportBoard(env, { board, target: null }) }}>{ic(7)}</button>
       </div>
+      {/* IDB only slow this time: one line of secondary text under the toolbar, no card (designer S1, plan 修订 21:35) */}
+      {local && slow ? <p className="pd-tokens" role="status">{UNSAVED_SLOW[lang]}</p> : null}
       <div className="pd-bk-cv" ref={wrapRef}>
         {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the canvas widget: focusable for the keys its label lists */}
         <div ref={hostRef} className="pd-bk-app" role="application" tabIndex={0} aria-label={t('board', { w, h })}>
