@@ -218,10 +218,13 @@ export class SafeStore {
     return state
   }
 
-  /** Keep the save for a later version (or a human) and start over (an unreadable save, a reset after a crash). */
-  setAside(): void {
+  /**
+   * Keep the save for a later version (or a human) and start over (an unreadable save, a reset after a crash).
+   * True only when a backup was really written (the crash toast may then say so).
+   */
+  setAside(): boolean {
     const raw = this.get(STORAGE_KEY)
-    if (raw === null) return
+    if (raw === null) return false
     if (this.status === 'ok') this.status = 'recovered'
     // three backups, newest first (`…:unreadable`, `:2`, `:3`); each shifts down one, the oldest drops off
     let save: string | null = raw
@@ -229,11 +232,12 @@ export class SafeStore {
       const key = BAD_SAVE_KEY + n
       const older = this.get(key)
       // a backup is written whatever its size; when even that is refused the original stays put
-      if (!this.set(key, save, true) && !n) { this.#hold = true; return }
+      if (!this.set(key, save, true) && !n) { this.#hold = true; return false }
       save = older
       if (save === null) break
     }
     this.remove(STORAGE_KEY)
+    return true
   }
 
   /** Only a 12/16/24 square ever goes to `dsh-pindou:v1` (review I-2: v0.2 cannot open anything else); big boards save via save-store. */

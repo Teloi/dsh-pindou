@@ -46,7 +46,7 @@ export type ViewMode = Mode | 'picture' | 'works' | 'big'
 
 export type Overlay = 'coach' | 'done' | 'result' | null
 /** Toast keys are i18n keys (no lookup table on the first screen). */
-export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'restarted' | 'say'
+export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'restarted' | 'restart' | 'say'
 
 export interface GameState {
   readonly history: History
@@ -181,7 +181,7 @@ export class GameStore {
 
   /** Read the save (a fresh game when there is none) into the state. */
   /** `why`: what the start-over toast says, an unreadable save or (from reset) a crash (plan 修订 20:25). */
-  #boot(why: ToastKey = 'storageRecovered'): void {
+  #boot(): void {
     const deps = this.#deps
     const saved = deps.store.loadState()
     let targetBoard = resolveTarget(saved.target, saved.pattern, saved.board.w, saved.board.h)
@@ -208,7 +208,7 @@ export class GameStore {
       celebrateAt: null,
       pulseAt: null,
       overlay: saved.ironed ? 'result' : null,
-      toast: storage === 'ok' ? null : { key: storage === 'recovered' ? why : 'storageUnavailable', undo: false, at: this.#now() },
+      toast: storage === 'ok' ? null : { key: storage === 'recovered' ? 'storageRecovered' : 'storageUnavailable', undo: false, at: this.#now() },
       prefs: saved.prefs,
       done: saved.done,
       coached: saved.coached,
@@ -225,13 +225,13 @@ export class GameStore {
 
   /** The panel crashed (index.tsx): set the save aside and start over from a fresh game. */
   reset(): void {
-    this.#deps.store.setAside()
+    const kept = this.#deps.store.setAside()
     this.#prevGames = []
     this.#nextGames = []
     this.#last = null
-    // a crash, not an unreadable save: its own words; with no storage there is no backup and no such toast
-    this.#boot('restarted')
-    this.#set({}, false)
+    this.#boot()
+    // a crash, not an unreadable save: its own words, and 「已备份」 only when the backup was really written
+    this.showToast(kept ? 'restarted' : 'restart')
   }
 
   // ── store protocol ────────────────────────────────────────────────

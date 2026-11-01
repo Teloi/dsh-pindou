@@ -887,12 +887,45 @@ describe('GameStore.reset (the panel crash boundary, review I-1)', () => {
     expect(store.canUndo).toBe(false)
   })
 
-  it('with no storage at all nothing was backed up, so the toast stays 「浏览器存储不可用」 (never claims a backup)', () => {
+  it('with no storage at all nothing was backed up: exactly 「出错了，已重新开始」, no 「已备份」 (designer 21:33)', () => {
     const broken: StorageLike = { getItem: () => null, setItem: () => { throw new Error('denied') }, removeItem: () => undefined }
     const { store } = make({ backend: broken })
     store.startFree()
     store.applyAt(1, 1)
     store.reset()
-    expect(store.getSnapshot()).toMatchObject({ storage: 'unavailable', toast: { key: 'storageUnavailable' } })
+    expect(store.getSnapshot()).toMatchObject({ storage: 'unavailable', toast: { key: 'restart' } })
+  })
+
+  it('a refused backup write (quota) is no backup either: 「出错了，已重新开始」, and the save stays put', () => {
+    const backend = mem()
+    const { store } = make({ backend })
+    store.startFree()
+    store.applyAt(1, 1)
+    store.flush()
+    const saved = backend.data.get(STORAGE_KEY)!
+    const setItem = backend.setItem.bind(backend)
+    backend.setItem = (k: string, v: string): void => { if (k.startsWith(BAD_SAVE_KEY)) throw new Error('QuotaExceededError'); setItem(k, v) }
+    store.reset()
+    expect(store.getSnapshot().toast).toMatchObject({ key: 'restart' })
+    expect(backend.data.get(STORAGE_KEY)).toBe(saved)
+    expect(backend.data.has(BAD_SAVE_KEY)).toBe(false)
+  })
+
+  it('nothing saved yet means nothing to back up: 「出错了，已重新开始」', () => {
+    const backend = mem()
+    const { store } = make({ backend })
+    store.reset()
+    expect(backend.data.has(BAD_SAVE_KEY)).toBe(false)
+    expect(store.getSnapshot().toast).toMatchObject({ key: 'restart' })
+  })
+
+  it('the two crash toasts, zh and en: 「已备份」 only in the one used after a written backup', () => {
+    const zh = makeTranslate('zh'), en = makeTranslate('en')
+    expect(zh('restart')).toBe('出错了，已重新开始')
+    expect(en('restart')).toBe('Something went wrong — started over')
+    expect(zh('restarted')).toBe('出错了，已重新开始，出错前的进度已备份')
+    expect(en('restarted')).toBe('Something went wrong — backed it up and started over')
+    expect(zh('restart')).not.toMatch(/备份/)
+    expect(en('restart')).not.toMatch(/back/i)
   })
 })

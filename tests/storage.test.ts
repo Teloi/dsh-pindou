@@ -165,6 +165,21 @@ describe('storage', () => {
     expect(tampered.state).toMatchObject({ color: 4, tool: 'paint', prefs: { busyHint: true } })
   })
 
+  it('setAside says whether a backup was really written', () => {
+    const ok = memoryStorage()
+    ok.data.set(STORAGE_KEY, serializeState(defaultState()))
+    expect(new SafeStore(ok).setAside()).toBe(true)
+    expect(new SafeStore(memoryStorage()).setAside()).toBe(false) // nothing to back up
+    const full = memoryStorage()
+    full.data.set(STORAGE_KEY, 'x')
+    const set = full.setItem.bind(full)
+    const store = new SafeStore(full)
+    full.setItem = (k: string, v: string): void => { if (k === BAD_SAVE_KEY) throw new Error('quota'); set(k, v) }
+    expect(store.setAside()).toBe(false)
+    expect(full.data.get(STORAGE_KEY)).toBe('x')
+    expect(new SafeStore(undefined).setAside()).toBe(false)
+  })
+
   it('reads each pref as a stored boolean or its default, whatever shape prefs has', () => {
     for (const bad of [null, 'yes', 7, [], true]) expect(prefsOf(bad)).toEqual(DEFAULT_PREFS)
     expect(prefsOf({ showCodes: true, busyHint: false, extra: true, showGuide: 1 })).toEqual({ busyHint: false, showGuide: true, showCodes: true })
