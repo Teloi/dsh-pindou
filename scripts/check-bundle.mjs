@@ -13,7 +13,8 @@
 // - size, gzip at the zlib default level (what CDNs and `gzip` ship), each below 90%
 //   of its budget so there is always headroom for the next change:
 //     first screen  lib/client.js            ≤ 40 KB = 40,960 B (spec §10)
-//     lazy chunks   lib/client.<name>.js     ≤ 20 KB = 20,480 B together (spec §18.6)
+//     lazy chunk    lib/client.<name>.js     ≤ 20 KB = 20,480 B each (v0.3 decision 1, 2026-10-31)
+//     lazy chunks   all together             ≤ 48 KB = 49,152 B (soft cap: fails above it, warns above 90%)
 //   and v0.2 may grow the first screen by at most 1.5 KB over v0.1 (spec §18.6):
 //     lib/client.js ≤ 33,746 + 1,536 = 35,282 B (no headroom rule; this is the hard cap)
 //
@@ -24,8 +25,14 @@ import { gzipSync } from 'node:zlib'
 
 /** Spec §10: the first-screen client bundle must stay at or below 40 KB gzip. */
 export const GZIP_BUDGET = 40 * 1024
-/** Spec §18.6: lazily loaded chunks, all together, at or below 20 KB gzip. */
+/**
+ * v0.3 decision 1 (owner, 2026-10-31 「按推荐」): each lazily loaded chunk at or below
+ * 20 KB gzip (90% headroom → 18,432 B), all of them together at or below 48 KB.
+ * Before v0.3 the 20 KB applied to all chunks together (spec §18.6).
+ */
 export const ASYNC_GZIP_BUDGET = 20 * 1024
+/** v0.3 decision 1: soft cap on all lazy chunks together (no headroom rule; a warning past 90%). */
+export const ASYNC_TOTAL_GZIP_CAP = 48 * 1024
 /** v0.1.0's lib/client.js, gzip (the spec §18.6 baseline). */
 export const V01_FIRST_SCREEN = 33746
 /** Spec §18.6: the v0.2 features add at most 1.5 KB gzip to the first screen. */
@@ -110,8 +117,12 @@ function budget(label, bytes, limit) {
 const gz = gzipSync(client).length
 budget(`${libDir}/client.js`, gz, GZIP_BUDGET)
 if (gz > V01_FIRST_SCREEN + V02_FIRST_SCREEN_GROWTH) fail.push(`${libDir}/client.js is ${gz} B gzip, ${gz - V01_FIRST_SCREEN} B over v0.1 (${V01_FIRST_SCREEN} B); spec §18.6 allows at most ${V02_FIRST_SCREEN_GROWTH} B: move code into a lazy chunk`)
-const asyncGz = chunks.reduce((sum, { code }) => sum + gzipSync(code).length, 0)
-budget(`lazy chunks (${chunks.length})`, asyncGz, ASYNC_GZIP_BUDGET)
+const chunkGz = chunks.map(({ f, code }) => ({ f, gz: gzipSync(code).length }))
+for (const { f, gz: n } of chunkGz) budget(`${libDir}/${f}`, n, ASYNC_GZIP_BUDGET)
+const asyncGz = chunkGz.reduce((sum, { gz: n }) => sum + n, 0)
+const warn = []
+if (asyncGz > ASYNC_TOTAL_GZIP_CAP) fail.push(`lazy chunks (${chunks.length}) are ${asyncGz} B gzip together, over the ${ASYNC_TOTAL_GZIP_CAP} B cap`)
+else if (asyncGz > ASYNC_TOTAL_GZIP_CAP * GZIP_HEADROOM) warn.push(`lazy chunks (${chunks.length}) are ${asyncGz} B gzip together, above ${GZIP_HEADROOM * 100}% of the ${ASYNC_TOTAL_GZIP_CAP} B cap`)
 if (!host.includes('export')) fail.push(`${libDir}/index.js must be an ES module`)
 
 if (!pkg.dsh?.bundle?.patch) fail.push('package.json dsh.bundle.patch is required (awesome-dsh-hub listing rule)')
@@ -124,6 +135,7 @@ if (fail.length > 0) {
   for (const f of fail) console.error(`✗ ${f}`)
   process.exit(1)
 }
+for (const w of warn) console.error(`! ${w}`)
 const pct = (n, of) => ((n / of) * 100).toFixed(1)
 process.stdout.write(`✓ bundle shape ok (client ${client.length} B, ${gz} B gzip = ${pct(gz, GZIP_BUDGET)}% of ${GZIP_BUDGET} B budget; `
-  + `lazy chunks ${chunks.length}, ${asyncGz} B gzip = ${pct(asyncGz, ASYNC_GZIP_BUDGET)}% of ${ASYNC_GZIP_BUDGET} B; host ${host.length} B)\n`)
+  + `lazy chunks ${chunks.length}: ${chunkGz.map(c => `${c.f} ${c.gz} B`).join(', ')}; together ${asyncGz} B gzip = ${pct(asyncGz, ASYNC_TOTAL_GZIP_CAP)}% of ${ASYNC_TOTAL_GZIP_CAP} B; host ${host.length} B)\n`)

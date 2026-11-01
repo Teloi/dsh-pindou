@@ -99,7 +99,7 @@ describe.skipIf(!canBuild)('async chunks: the real client build config', () => {
   }, 30_000)
 })
 
-/** Incompressible filler: ~10 KB gzip, so two chunks pass 90% of the 20 KB lazy budget. */
+/** Incompressible filler: ~10 KB gzip, so two of them pass 90% of the 20 KB per-chunk budget. */
 function noise(seed: number): string {
   let x = seed
   let s = ''
@@ -228,17 +228,38 @@ describe('check:bundle on lazy chunks', () => {
     expect(r.out).toContain('requires "left-pad"')
   })
 
-  it('lazy chunks have their own budget, 90% of 20 KB together', () => {
+  it('each lazy chunk has its own budget: 90% of 20 KB (v0.3 decision 1)', () => {
+    const files = {
+      'client.js': entry('require.async("./client.a.js");'),
+      'client.a.js': chunk('client.a.js', `var n="${randomBytes(26000).toString('base64')}";`),
+    }
+    expect(gzipSync(files['client.a.js']).length).toBeGreaterThan(20 * 1024 * 0.9)
+    const r = checkBundle(libWith(files))
+    expect(r.status).toBe(1)
+    expect(r.out).toMatch(/client\.a\.js is \d+ B gzip, (over|above)/)
+  })
+
+  it('two lazy chunks of ~10 KB each pass: the budget is per chunk now, not 20 KB together', () => {
     const files = {
       'client.js': entry('require.async("./client.a.js");require.async("./client.b.js");'),
       'client.a.js': chunk('client.a.js', noise(1)),
       'client.b.js': chunk('client.b.js', noise(2)),
     }
-    const total = gzipSync(files['client.a.js']).length + gzipSync(files['client.b.js']).length
-    expect(total).toBeGreaterThan(20 * 1024 * 0.9)
+    expect(gzipSync(files['client.a.js']).length + gzipSync(files['client.b.js']).length).toBeGreaterThan(20 * 1024 * 0.9)
+    const r = checkBundle(libWith(files))
+    expect(r.out).toContain('bundle shape ok')
+    expect(r.status).toBe(0)
+  })
+
+  it('all lazy chunks together fail above the 48 KB cap', () => {
+    const names = ['a', 'b', 'c', 'd', 'e']
+    const files: Record<string, string> = { 'client.js': entry(names.map(n => `require.async("./client.${n}.js");`).join('')) }
+    names.forEach((n, i) => { files[`client.${n}.js`] = chunk(`client.${n}.js`, noise(i + 1)) })
+    const total = names.reduce((sum, n) => sum + gzipSync(files[`client.${n}.js`]!).length, 0)
+    expect(total).toBeGreaterThan(48 * 1024)
     const r = checkBundle(libWith(files))
     expect(r.status).toBe(1)
-    expect(r.out).toMatch(/lazy chunks \(2\) is \d+ B gzip/)
+    expect(r.out).toMatch(/lazy chunks \(5\) are \d+ B gzip together, over the 49152 B cap/)
   })
 
   it('a factory whose require is renamed (mangled) fails: the require checks could not see it', () => {

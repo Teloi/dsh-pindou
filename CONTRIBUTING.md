@@ -17,7 +17,7 @@ pnpm run lint
 pnpm run typecheck
 pnpm test
 pnpm run build          # 输出到 lib/
-pnpm run check:bundle   # 检查 lib/ 的形状（ModuleLoader 包装、只依赖 react、异步块只经 require.async 加载）和 gzip 体积：首屏 lib/client.js ≤ 40 KB，异步块 lib/client.<名>.js 合计 ≤ 20 KB，都不超过 90%
+pnpm run check:bundle   # 检查 lib/ 的形状（ModuleLoader 包装、只依赖 react、异步块只经 require.async 加载）和 gzip 体积：首屏 lib/client.js ≤ 40 KB，异步块 lib/client.<名>.js 每个 ≤ 20 KB，都不超过 90%；异步块合计 ≤ 48 KB（软上限，超 90% 时警告）
 pnpm run check          # 以上全部
 pnpm run e2e            # 端到端：从源码启动 DSH Web + 假模型服务；截图和日志写进 $TMPDIR/pindou-e2e-out（可用 E2E_OUT 改；并行跑时每轮给自己的 TMPDIR）
 pnpm run e2e -- --update-assets   # 同上，并把 README 用的插件面板截图写进 docs/assets/screens（或 E2E_UPDATE_ASSETS=1；只跑截图这一段加 E2E_ONLY=s）
