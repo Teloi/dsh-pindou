@@ -217,6 +217,23 @@ describe('save store: migration', () => {
     expect(parseState(meta?.v1 ?? null).state).toMatchObject({ color: 9, tool: 'fill', done: ['heart'] })
   })
 
+  it('an unchanged v0.2 game save is not rewritten on every start; a changed one is (audit A1-4)', async () => {
+    const idb = new FakeIdb()
+    const local = fakeLocal()
+    local.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board: setCell(createBoard(16), 1, 1, 2) }))
+    let t = 100
+    const now = (): number => t
+    await (await SaveStore.open({ legacy, idb, local, now })).migrate()
+    expect((idb.data.get('saves')!.get(LEGACY_ID) as { at: number }).at).toBe(100)
+    t = 200
+    expect((await (await SaveStore.open({ legacy, idb, local, now })).migrate()).copied).toEqual([STORAGE_KEY])
+    expect((idb.data.get('saves')!.get(LEGACY_ID) as { at: number }).at).toBe(100)
+    local.setItem(STORAGE_KEY, serializeState({ ...defaultState(), board: setCell(createBoard(16), 2, 2, 3) }))
+    t = 300
+    await (await SaveStore.open({ legacy, idb, local, now })).migrate()
+    expect((idb.data.get('saves')!.get(LEGACY_ID) as { at: number }).at).toBe(300)
+  })
+
   it('migrates saves over 20 KB intact (and the legacy first-screen save)', async () => {
     const idb = new FakeIdb()
     const local = fakeLocal()

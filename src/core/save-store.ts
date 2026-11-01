@@ -259,8 +259,11 @@ export class SaveStore {
       if (!state) out.corrupt.push(legacy.key)
       else {
         const rec: SaveRecord = { id: LEGACY_ID, code: await encodeV4(state.board), w: state.board.w, h: state.board.h, at: (this.#deps.now ?? Date.now)(), meta: { v1: raw.length <= 64 * 1024 ? raw : null } }
+        // an unchanged game save is not rewritten (its time would move on every start, audit A1-4)
+        const old = await this.#getIdb(LEGACY_ID).catch(() => undefined)
+        const same = old !== undefined && old.code === rec.code && old.w === rec.w && old.h === rec.h && JSON.stringify(old.meta) === JSON.stringify(rec.meta)
         // copied or not, the game save stays: the first screen reads it
-        const copied = await this.#putVerified(rec)
+        const copied = same || await this.#putVerified(rec)
         if (copied) out.copied.push(legacy.key)
         else out.kept.push(legacy.key)
       }
