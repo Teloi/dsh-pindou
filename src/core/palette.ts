@@ -11,22 +11,22 @@ export interface BeadColor {
 }
 
 export const PALETTE: readonly BeadColor[] = Object.freeze([
-  { code: '0', hex: '#F6F4EE', zh: '白', en: 'White' },
-  { code: '1', hex: '#F2DFA7', zh: '奶油', en: 'Cream' },
-  { code: '2', hex: '#F7C531', zh: '黄', en: 'Yellow' },
-  { code: '3', hex: '#F08A24', zh: '橙', en: 'Orange' },
-  { code: '4', hex: '#D7333B', zh: '红', en: 'Red' },
-  { code: '5', hex: '#F39DC1', zh: '粉', en: 'Pink' },
-  { code: '6', hex: '#8A5BB5', zh: '紫', en: 'Purple' },
-  { code: '7', hex: '#2D4FA0', zh: '藏青', en: 'Navy' },
-  { code: '8', hex: '#62B6E9', zh: '天蓝', en: 'Sky' },
-  { code: '9', hex: '#24A79A', zh: '青绿', en: 'Teal' },
-  { code: 'a', hex: '#3E9C4A', zh: '绿', en: 'Green' },
-  { code: 'b', hex: '#A9D46A', zh: '草绿', en: 'Lime' },
-  { code: 'c', hex: '#87573A', zh: '棕', en: 'Brown' },
-  { code: 'd', hex: '#D7A473', zh: '浅棕', en: 'Tan' },
-  { code: 'e', hex: '#9DA1A8', zh: '灰', en: 'Gray' },
-  { code: 'f', hex: '#26272B', zh: '黑', en: 'Black' },
+  { code: '0', hex: '#f6f4ee', zh: '白', en: 'White' },
+  { code: '1', hex: '#f2dfa7', zh: '奶油', en: 'Cream' },
+  { code: '2', hex: '#f7c531', zh: '黄', en: 'Yellow' },
+  { code: '3', hex: '#f08a24', zh: '橙', en: 'Orange' },
+  { code: '4', hex: '#d7333b', zh: '红', en: 'Red' },
+  { code: '5', hex: '#f39dc1', zh: '粉', en: 'Pink' },
+  { code: '6', hex: '#8a5bb5', zh: '紫', en: 'Purple' },
+  { code: '7', hex: '#2d4fa0', zh: '藏青', en: 'Navy' },
+  { code: '8', hex: '#62b6e9', zh: '天蓝', en: 'Sky' },
+  { code: '9', hex: '#24a79a', zh: '青绿', en: 'Teal' },
+  { code: 'a', hex: '#3e9c4a', zh: '绿', en: 'Green' },
+  { code: 'b', hex: '#a9d46a', zh: '草绿', en: 'Lime' },
+  { code: 'c', hex: '#87573a', zh: '棕', en: 'Brown' },
+  { code: 'd', hex: '#d7a473', zh: '浅棕', en: 'Tan' },
+  { code: 'e', hex: '#9da1a8', zh: '灰', en: 'Gray' },
+  { code: 'f', hex: '#26272b', zh: '黑', en: 'Black' },
 ])
 
 export const COLOR_COUNT = PALETTE.length

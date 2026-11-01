@@ -71,10 +71,10 @@ export function renderExport(doc: Document, board: Board, ironed: boolean, dark:
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('canvas unavailable')
   if (!ironed) {
-    ctx.fillStyle = dark ? '#1C1D20' : '#EEF0F3'
+    ctx.fillStyle = dark ? '#1c1d20' : '#eef0f3'
     roundRect(ctx, o / 2, o / 2, canvas.width - o, canvas.height - o, 24)
     ctx.fill()
-    ctx.fillStyle = dark ? '#34373D' : '#D3D8DF'
+    ctx.fillStyle = dark ? '#34373d' : '#d3d8df'
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       if (board.cells[y * w + x] !== EMPTY) continue
       ctx.beginPath()

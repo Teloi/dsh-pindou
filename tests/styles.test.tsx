@@ -61,7 +61,7 @@ describe('contrast of the fallback palette (WCAG AA 4.5:1 for body text)', () =>
 describe('N10: target ghost dots on the dark board reach 3:1 for all 16 colours', () => {
   const dark = CSS.slice(CSS.indexOf('body[data-ds-dark-theme] .pd-root, body[data-ds-dark-theme] .pd-portal {'))
   it('the core board constant is the dark --pd-board token', () => {
-    expect(token('--pd-board', dark)).toBe(DARK_BOARD)
+    expect(token('--pd-board', dark).toLowerCase()).toBe(DARK_BOARD)
   })
   it('the shipped ring table is exactly what ghostRing() computes for the palette', () => {
     expect(GHOST_RINGS).toEqual(PALETTE.map(c => ghostRing(c.hex)))
@@ -91,7 +91,7 @@ describe('N10: target ghost dots on the dark board reach 3:1 for all 16 colours'
 
 describe('O3 (spec §18.5): target ghost dots on the light board reach 3:1 for all 16 colours', () => {
   it('the core board constant is the light --pd-board token', () => {
-    expect(token('--pd-board')).toBe(LIGHT_BOARD)
+    expect(token('--pd-board').toLowerCase()).toBe(LIGHT_BOARD)
   })
   it('the shipped light ring table is exactly what ghostRing() computes for the palette', () => {
     expect(GHOST_RINGS_LIGHT).toEqual(PALETTE.map(c => ghostRing(c.hex, LIGHT_BOARD)))
@@ -286,11 +286,12 @@ describe('build-time CSS minifier', () => {
   it('writes declarations, media features, numbers and colours in their shortest equal form', async () => {
     const { minifyCss } = await import('../scripts/minify-css.ts')
     expect(minifyCss('.a{--pd-x: var(--y, #FFFFFF);color: #ffffff80;opacity: 0.60;width:10.50px;top:1.0px;margin:.05em 0.25em}'))
-      .toBe('.a{--pd-x:var(--y,#FFF);color:#ffffff80;opacity:.6;width:10.5px;top:1.0px;margin:.05em .25em}')
+      .toBe('.a{--pd-x:var(--y,#fff);color:#ffffff80;opacity:.6;width:10.5px;top:1.0px;margin:.05em .25em}')
     expect(minifyCss("@property --pd-h { syntax: '<number>'; inherits: true; initial-value: 0.6 }"))
       .toBe("@property --pd-h{syntax:'<number>';inherits:true;initial-value:.6}")
-    expect(minifyCss('@container pd (max-width: 359px){.a :hover,.b:not(.c) .d{x:calc(1px + 0.5em)}} .pd-g2 .pd-x10{y:#abcabc}'))
+    expect(minifyCss('@container pd (max-width: 359px){.a :hover,.b:not(.c) .d{x:calc(1px + 0.5em)}} .pd-g2 .pd-x10{y:#ABCABC}'))
       .toBe('@container pd (max-width:359px){.a :hover,.b:not(.c) .d{x:calc(1px + .5em)}}.pd-g2 .pd-x10{y:#abcabc}')
+    expect(minifyCss('.a{b:#F5A524}')).toBe('.a{b:#f5a524}')
   })
   it('the shipped stylesheet keeps every rule of the source', async () => {
     const { minifyCss } = await import('../scripts/minify-css.ts')

@@ -16,7 +16,7 @@
  *   selector never does as `name: `, and a custom property's leading space is
  *   not part of its value (css-variables §2);
  * - numbers lose a leading `0` and trailing zeros after the point, and six-digit
- *   colours with doubled digits become three-digit (the same values).
+ *   colours with doubled digits become three-digit and colours go lower-case (the same values).
  */
 export function minifyCss(css: string): string {
   return css
@@ -30,6 +30,8 @@ export function minifyCss(css: string): string {
     .replace(/([^\w.-])0\.(\d)/g, '$1.$2')
     .replace(/(\.\d*[1-9])0+(?!\d)/g, '$1')
     .replace(/#([\da-f])\1([\da-f])\2([\da-f])\3(?![\da-f])/gi, '#$1$2$3')
+    // lower-case colours (the same values) compress better beside the lower-case CSS around them
+    .replace(/#[\da-f]{3,8}(?![\w-])/gi, h => h.toLowerCase())
     .trim()
 }
 

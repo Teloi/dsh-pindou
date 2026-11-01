@@ -6,11 +6,11 @@
  * tests and for recomputing the tables.
  */
 /** The dark board colour (`--pd-board` under the host dark theme; styles.test keeps them equal). */
-export const DARK_BOARD = '#1C1D20'
+export const DARK_BOARD = '#1c1d20'
 /** The light board colour (`--pd-board` under the light theme; styles.test keeps them equal). */
-export const LIGHT_BOARD = '#EEF0F3'
+export const LIGHT_BOARD = '#eef0f3'
 /** Ink a light-board ring darkens toward (the `--pd-ink` fallback in spec §18.5). */
-export const INK = '#0F1115'
+export const INK = '#0f1115'
 /** What the ghost ring aims for: 3:1 is the floor, a little headroom against rounding and antialiasing. */
 export const GHOST_RING_TARGET = 3.2
 
@@ -18,7 +18,7 @@ function rgb(hex: string): [number, number, number] {
   const v = Number.parseInt(hex.slice(1, 7), 16)
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255]
 }
-const toHex = (c: readonly number[]): string => `#${c.map(x => Math.round(x).toString(16).padStart(2, '0')).join('').toUpperCase()}`
+const toHex = (c: readonly number[]): string => `#${c.map(x => Math.round(x).toString(16).padStart(2, '0')).join('')}`
 
 export function luminance(hex: string): number {
   const [r, g, b] = rgb(hex).map((x) => { const v = x / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }) as [number, number, number]
@@ -46,7 +46,7 @@ export function mix(a: string, b: string, t: number): string {
  * than another's and the hue still reads.
  */
 export function ghostRing(hex: string, board = DARK_BOARD, target = GHOST_RING_TARGET): string {
-  const away = contrast('#FFFFFF', board) >= contrast(INK, board) ? '#FFFFFF' : INK
+  const away = contrast('#ffffff', board) >= contrast(INK, board) ? '#ffffff' : INK
   let lifted = away
   for (let i = 0; i <= 100; i++) {
     const c = mix(hex, away, i / 100)
@@ -65,12 +65,12 @@ export function ghostRing(hex: string, board = DARK_BOARD, target = GHOST_RING_T
  * (styles.test recomputes it and checks every ring against the board).
  */
 export const GHOST_RINGS: readonly string[] = Object.freeze([
-  '#6D6D6C', '#746D57', '#816A28', '#9B5E22', '#CA3139', '#8C6074', '#8558AE', '#4E6AAE',
-  '#43718F', '#217871', '#357A3F', '#5E7343', '#8E6248', '#83674E', '#696C72', '#6B6C6F',
+  '#6d6d6c', '#746d57', '#816a28', '#9b5e22', '#ca3139', '#8c6074', '#8558ae', '#4e6aae',
+  '#43718f', '#217871', '#357a3f', '#5e7343', '#8e6248', '#83674e', '#696c72', '#6b6c6f',
 ])
 
 /** The same on the light board: `ghostRing(PALETTE[i].hex, LIGHT_BOARD)`. */
 export const GHOST_RINGS_LIGHT: readonly string[] = Object.freeze([
-  '#858584', '#8F8568', '#A18227', '#C17223', '#DC5B62', '#B0748E', '#9B74C0', '#6D84BB',
-  '#4E8CB3', '#21958A', '#3E974A', '#728E4B', '#A17D68', '#A37E5B', '#82868C', '#848589',
+  '#858584', '#8f8568', '#a18227', '#c17223', '#dc5b62', '#b0748e', '#9b74c0', '#6d84bb',
+  '#4e8cb3', '#21958a', '#3e974a', '#728e4b', '#a17d68', '#a37e5b', '#82868c', '#848589',
 ])

@@ -16,10 +16,14 @@ export interface CachedGeneration {
 
 /** A small LRU of validated generations, persisted beside the game state. */
 export class GenerationCache {
-  private entries: CachedGeneration[] = []
+  #entries: CachedGeneration[] = []
+  readonly #store: SafeStore | undefined
+  readonly #limit: number
 
-  constructor(private readonly store?: SafeStore, private readonly limit = CACHE_LIMIT) {
-    this.entries = store ? GenerationCache.parse(store.get(CACHE_KEY)) : []
+  constructor(store?: SafeStore, limit = CACHE_LIMIT) {
+    this.#store = store
+    this.#limit = limit
+    this.#entries = store ? GenerationCache.parse(store.get(CACHE_KEY)) : []
   }
 
   static parse(json: string | null): CachedGeneration[] {
@@ -39,24 +43,24 @@ export class GenerationCache {
   }
 
   get(key: string): CachedGeneration | undefined {
-    const i = this.entries.findIndex(e => e.key === key)
+    const i = this.#entries.findIndex(e => e.key === key)
     if (i < 0) return undefined
-    const [hit] = this.entries.splice(i, 1)
-    this.entries.unshift(hit!)
-    this.persist()
+    const [hit] = this.#entries.splice(i, 1)
+    this.#entries.unshift(hit!)
+    this.#persist()
     return hit
   }
 
   put(entry: CachedGeneration): void {
-    this.entries = [entry, ...this.entries.filter(e => e.key !== entry.key)].slice(0, this.limit)
-    this.persist()
+    this.#entries = [entry, ...this.#entries.filter(e => e.key !== entry.key)].slice(0, this.#limit)
+    this.#persist()
   }
 
   get size(): number {
-    return this.entries.length
+    return this.#entries.length
   }
 
-  private persist(): void {
-    this.store?.set(CACHE_KEY, JSON.stringify(this.entries))
+  #persist(): void {
+    this.#store?.set(CACHE_KEY, JSON.stringify(this.#entries))
   }
 }

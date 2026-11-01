@@ -163,10 +163,12 @@ export type StorageStatus = 'ok' | 'unavailable' | 'recovered'
  * browser refuses (private mode, quota, disabled cookies, sandboxing).
  */
 export class SafeStore {
-  private memory = new Map<string, string>()
+  readonly #memory = new Map<string, string>()
+  readonly #backend: StorageLike | undefined
   status: StorageStatus = 'ok'
 
-  constructor(private readonly backend: StorageLike | undefined) {
+  constructor(backend: StorageLike | undefined) {
+    this.#backend = backend
     if (backend === undefined) this.status = 'unavailable'
     else {
       try {
@@ -180,10 +182,10 @@ export class SafeStore {
   }
 
   get(key: string): string | null {
-    if (this.status !== 'unavailable' && this.backend) {
-      try { return this.backend.getItem(key) } catch { this.status = 'unavailable' }
+    if (this.status !== 'unavailable' && this.#backend) {
+      try { return this.#backend.getItem(key) } catch { this.status = 'unavailable' }
     }
-    return this.memory.get(key) ?? null
+    return this.#memory.get(key) ?? null
   }
 
   /**
@@ -192,10 +194,10 @@ export class SafeStore {
    */
   set(key: string, value: string, side = false): boolean {
     if (value.length > MAX_STORED_CHARS) return false
-    this.memory.set(key, value)
-    if (this.status === 'unavailable' || !this.backend) return false
+    this.#memory.set(key, value)
+    if (this.status === 'unavailable' || !this.#backend) return false
     try {
-      this.backend.setItem(key, value)
+      this.#backend.setItem(key, value)
       return true
     } catch {
       if (!side) this.status = 'unavailable'
@@ -204,8 +206,8 @@ export class SafeStore {
   }
 
   remove(key: string): void {
-    this.memory.delete(key)
-    try { this.backend?.removeItem(key) } catch { /* ignore */ }
+    this.#memory.delete(key)
+    try { this.#backend?.removeItem(key) } catch { /* ignore */ }
   }
 
   loadState(): SavedState {
