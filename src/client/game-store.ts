@@ -6,7 +6,7 @@
 import {
   type Board, type BoardSize, begin, canRedo, canUndo, clearBoard, commit, completion, createBoard, createHistory,
   decode, EMPTY, encode, findTemplate, floodFill, GenerationCache, type GenerateResponse, getCell, type History,
-  inBounds, isColorIndex, isSquareOf, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
+  inBounds, isBoardSize, isColorIndex, isSquareOf, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
   remainingByColor, resizeBoard, SafeStore, sameShape, type SavedState, sanitizePrompt, setCell, type StatusResponse,
   type StorageStatus, templateIdOf, templateKey, type Tool, type TokenUsageInfo, undo,
   MAX_WORKS, type StoredWork, WORKS_KEY,
@@ -636,7 +636,7 @@ export class GameStore {
    */
   setWall(next: StoredWork[]): void {
     this.#wall = next
-    this.#deps.store.set(WORKS_KEY, JSON.stringify(next), true)
+    this.#deps.store.set(WORKS_KEY, JSON.stringify(next.filter(w => isBoardSize(w.n))), true)
     this.#set({}, false)
   }
 
@@ -644,10 +644,12 @@ export class GameStore {
    * The ironed piece goes on the wall, the oldest leaves past 60. Its id is the
    * ironing time, kept past the newest id. A `board:` source up to 16×16 keeps
    * its pattern too (still under 1 KB), so 再拼一次 can follow it again.
+   * Only 12/16/24 squares go on this wall: v0.2 reads WORKS_KEY too (audit A1-6).
    */
   #collect(): void {
     const s = this.#state
     const b = s.history.present
+    if (b.w !== b.h || !isBoardSize(b.w)) return
     const w: StoredWork = {
       i: Math.max(this.#now(), (this.#wall.at(-1)?.i ?? 0) + 1), n: b.w as BoardSize, b: encode(b), s: s.target,
       ...(s.target?.startsWith('board:') && s.targetBoard && b.w < 24 ? { p: encode(s.targetBoard) } : {}),

@@ -716,6 +716,23 @@ const wallOf = (backend: { data: Map<string, string> }): Array<{ i: number }> =>
 
 describe('GameStore works wall (spec §18.4)', () => {
 
+  it('a non-square or non-12/16/24 piece never goes into the v0.2 works key (audit A1-6)', () => {
+    const backend = mem()
+    const { store } = make({ backend, reduced: true })
+    store.startPicture(setCell(createBoard(16, 12), 0, 0, 3))
+    store.applyAt(0, 0)
+    store.iron()
+    expect(store.getSnapshot().ironed).toBe(true)
+    expect(store.works()).toEqual([])
+    expect(backend.data.get(WORKS_KEY) ?? '[]').toBe('[]')
+    const b2 = mem(), other = make({ backend: b2, reduced: true }).store
+    ironOne(other)
+    expect(wallOf(b2)).toHaveLength(1)
+    other.setWall([...other.works(), { i: 9, n: 40 as never, b: 'x', s: null }])
+    expect(wallOf(b2).map(w => w.i)).not.toContain(9)
+    expect(wallOf(b2)).toHaveLength(1)
+  })
+
   it('ironing puts the piece on the wall at once (its own key), un-ironing takes it off', () => {
     const backend = mem()
     const { store } = make({ backend, reduced: true })
