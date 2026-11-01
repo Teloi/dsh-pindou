@@ -1243,7 +1243,7 @@ async function undoParity() {
     return ok
   }
   const both = async (fn) => { await fn(dom, domCell); await fn(cv, bigCell) }
-  const tool = n => both(async (p) => { await p.locator('.pd-tools .pd-tool').nth(n).click() })
+  const tool = n => both(async (p) => { await p.locator('.pd-tools .pd-tool:not(.pd-bk-more)').nth(n).click() })
   const color = n => both(async (p) => { await p.locator('.pd-palette .pd-sw').nth(n).click() })
   const click = (x, y) => both(async (p, at) => { const [cx, cy] = await at(p, x, y); await p.mouse.click(cx, cy) })
   const drag = (x0, y0, x1, y1) => both(async (p, at) => {
@@ -1252,7 +1252,7 @@ async function undoParity() {
     await p.mouse.move(bx, by, { steps: 4 * Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1) })
     await p.mouse.up()
   })
-  const btn = n => both(async (p) => { const b = p.locator('.pd-tools .pd-tool').nth(n); if (await b.isEnabled()) await b.click() })
+  const btn = n => both(async (p) => { const b = p.locator('.pd-tools .pd-tool:not(.pd-bk-more)').nth(n); if (await b.isEnabled()) await b.click() })
   await same('start')
   await tool(0); await color(3); await click(2, 2); await same('single cell')
   await color(5); await drag(1, 5, 12, 5); await same('drag stroke')
