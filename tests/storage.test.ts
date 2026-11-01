@@ -165,6 +165,28 @@ describe('storage', () => {
     expect(tampered.state).toMatchObject({ color: 4, tool: 'paint', prefs: { busyHint: true } })
   })
 
+  it.each([':2', ':3', ''])('a refused %s write never loses a backup: the rotation stops, the save stays (audit phase 2)', (bad) => {
+    const backend = memoryStorage()
+    const set = backend.setItem.bind(backend)
+    const store = new SafeStore(backend)
+    backend.data.set(BAD_SAVE_KEY, 'backup A')
+    backend.data.set(BAD_SAVE_KEY + ':2', 'backup B')
+    backend.data.set(STORAGE_KEY, 'save C')
+    backend.setItem = (k: string, v: string): void => { if (k === BAD_SAVE_KEY + bad) throw new Error('QuotaExceededError'); set(k, v) }
+    expect(store.setAside()).toBe(false)
+    const kept = new Set(['', ':2', ':3'].map(n => backend.data.get(BAD_SAVE_KEY + n)))
+    expect(kept.has('backup A') && kept.has('backup B')).toBe(true)
+    expect(backend.data.get(STORAGE_KEY)).toBe('save C')
+    expect(store.saveState(defaultState())).toBe(false) // held: this session does not save over it
+    // once writes work again a later rotation completes, newest first
+    backend.setItem = set
+    const next = new SafeStore(backend)
+    expect(next.setAside()).toBe(true)
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe('save C')
+    expect(backend.data.get(BAD_SAVE_KEY + ':2')).toBe('backup A')
+    expect(backend.data.get(BAD_SAVE_KEY + ':3')).toBe('backup B')
+  })
+
   it('setAside says whether a backup was really written', () => {
     const ok = memoryStorage()
     ok.data.set(STORAGE_KEY, serializeState(defaultState()))

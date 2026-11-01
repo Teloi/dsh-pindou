@@ -209,16 +209,16 @@ export class SafeStore {
     const raw = this.get(STORAGE_KEY)
     if (raw === null) return false
     if (this.status === 'ok') this.status = 'recovered'
-    // three backups, newest first (`…:unreadable`, `:2`, `:3`); each shifts down one, the oldest drops off
-    let save: string | null = raw
-    for (const n of ['', ':2', ':3']) {
-      const key = BAD_SAVE_KEY + n
-      const older = this.get(key)
-      // a backup is written whatever its size; when even that is refused the original stays put
-      if (!this.set(key, save, true) && !n) { this.#hold = true; return false }
-      save = older
-      if (save === null) break
-    }
+    // three backups, newest first (`…:unreadable`, `:2`, `:3`); each shifts down one, the oldest drops off.
+    // Shifted from the old end, so a slot is reused only once its backup has a verified copy one down:
+    // a refused write stops there with every backup still stored, and the original stays put (audit phase 2).
+    // How many shift: up to the first empty slot; none when the newest already has its copy one down
+    // (a rotation that stopped at its last write). A backup is written whatever its size.
+    const keys = ['', ':2', ':3'].map(n => BAD_SAVE_KEY + n)
+    const olds = keys.map(k => this.get(k))
+    let k = olds[0] === olds[1] ? 0 : Math.min(2, olds.indexOf(null) >>> 0)
+    while (k && this.set(keys[k]!, olds[k - 1]!, true)) k--
+    if (k || !this.set(keys[0]!, raw, true)) { this.#hold = true; return false }
     this.remove(STORAGE_KEY)
     return true
   }
