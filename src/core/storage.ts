@@ -223,7 +223,15 @@ export class SafeStore {
     const raw = this.get(STORAGE_KEY)
     if (raw === null) return
     if (this.status === 'ok') this.status = 'recovered'
-    this.set(BAD_SAVE_KEY, raw, true)
+    // three backups, newest first (`…:unreadable`, `:2`, `:3`); each shifts down one, the oldest drops off
+    let save: string | null = raw
+    for (const n of ['', ':2', ':3']) {
+      const key = BAD_SAVE_KEY + n
+      const older = this.get(key)
+      this.set(key, save, true)
+      save = older
+      if (save === null) break
+    }
     this.remove(STORAGE_KEY)
   }
 

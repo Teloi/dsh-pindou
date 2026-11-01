@@ -83,6 +83,20 @@ describe('storage', () => {
     expect(backend.data.has(STORAGE_KEY)).toBe(false)
   })
 
+  it('keeps at most three backups, newest first, dropping the oldest', () => {
+    const backend = memoryStorage()
+    const store = new SafeStore(backend)
+    backend.data.set(STORAGE_KEY, 'save 1')
+    store.setAside()
+    expect([...backend.data.keys()]).toEqual([BAD_SAVE_KEY])
+    for (const n of [2, 3, 4, 5]) {
+      backend.data.set(STORAGE_KEY, `save ${n}`)
+      store.setAside()
+    }
+    expect(['', ':2', ':3'].map(n => backend.data.get(BAD_SAVE_KEY + n))).toEqual(['save 5', 'save 4', 'save 3'])
+    expect(backend.data.size).toBe(3)
+  })
+
   it('never writes a non-square or big board to the v1 key, and stays ok (review I-2)', () => {
     const backend = memoryStorage()
     const store = new SafeStore(backend)
