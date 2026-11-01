@@ -1,6 +1,6 @@
 /**
  * The big page's saves and share codes (plan §4.3), split out of lib/client.big.js into
- * lib/client.bigstore.js: the save store (IndexedDB, localStorage fallback) and the pd2 codec
+ * lib/client.big-store.js: the save store (IndexedDB, localStorage fallback) and the pd2 codec
  * it writes. big.tsx fetches it as the page opens, alongside the setup page (which shows at
  * once); a board only waits for it to save, never to draw. If it can't load, the page works
  * without saves and says so (big.tsx).

@@ -63,11 +63,13 @@ export const UI_MAX = 116
 type T = (k: Key, p?: Record<string, string | number>) => string
 const tr = (lang: 'zh' | 'en'): T => (k, p) => STRINGS[lang][k].replaceAll(/\{(\w+)\}/g, (_, n: string) => String(p?.[n] ?? ''))
 
-/** lib/client.bigstore.js (saves and share codes); fetched once, again after a failure. */
+/** lib/client.big-store.js (saves and share codes); fetched once, again after a failure. */
 type Lib = typeof import('./big-store.ts')
 let lib: Lib | undefined
 let libP: Promise<Lib> | undefined
 const loadLib = (): Promise<Lib> => (libP ??= import('./big-store.ts').then((m) => { lib = m; return m }, (e: unknown) => { libP = undefined; throw e }))
+// preloaded once the big chunk is idle (the setup asks for it on mount anyway; until it lands it shows its skeleton)
+;(globalThis.requestIdleCallback ?? ((f: () => void) => setTimeout(f, 50)))(() => { loadLib().catch(() => {}) })
 let store: Promise<SaveStore> | undefined
 /** One save store per session, opened on first use; null when its chunk can't load (no saves this time). */
 const openStore = (): Promise<SaveStore | null> => (store ??= loadLib().then(m => m.openStore())).catch(() => { store = undefined; return null })
