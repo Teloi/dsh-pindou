@@ -42,7 +42,7 @@ export const BIG_CSS = `
 .pd-bk-app canvas{display:block}
 .pd-bk-zoom{position:absolute;left:6px;bottom:6px;display:flex;gap:2px;padding:2px;border-radius:var(--pd-radius-ctl);box-shadow:0 1px 3px rgba(0,0,0,.15)}
 .pd-bk-zoom,.pd-bk-mm{background:color-mix(in srgb,var(--pd-surface-raised) 88%,transparent)}
-.pd-bk-zoom .pd-ib{width:32px;height:32px;font-size:16px;color:var(--pd-text)}
+.pd-bk-zoom .pd-ib{font-size:16px;color:var(--pd-text)}
 .pd-bk-mini{position:absolute;right:6px;bottom:6px;width:96px;height:96px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.25);background:var(--pd-surface-raised);touch-action:none}
 @container pd (min-width: 561px){.pd-bk-mini{width:120px;height:120px}}
 .pd-bk-mini.pd-off{display:none}

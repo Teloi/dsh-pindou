@@ -1584,6 +1584,33 @@ async function bigI4() {
   }
 }
 
+/**
+ * Review suggestions S4, S5, S7 (v03-p2 findings): touch zoom buttons take the 36 px touch hit (not a fixed
+ * 32), a tap on a too-small board zooms straight to 32 (a level, so a pinch afterwards keeps it), and the status
+ * bar says 「列 x 行 y」 instead of 「y:x」.
+ */
+async function bigSuggest() {
+  const p = await bigPage({ hasTouch: true })
+  const cdp = await p.context().newCDPSession(p)
+  // a touch screen: (pointer: coarse), as on a phone or tablet
+  await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'pointer', value: 'coarse' }, { name: 'any-pointer', value: 'coarse' }] })
+  await setWidth(p, 560)
+  await startPreset(p, 58)
+  const z = await p.evaluate(() => ({ coarse: matchMedia('(pointer: coarse)').matches, btn: [...document.querySelectorAll('.pd-bk-zoom .pd-ib')].map(b => Math.round(b.getBoundingClientRect().width)) }))
+  await bigShot(p, 'big-s7-touch-zoom-36')
+  check('BIG S7 touch: the zoom buttons are 36 px (the touch hit), not 32', z.coarse && z.btn.length >= 3 && z.btn.every(w => w === 36), JSON.stringify(z))
+  const s0 = await p.evaluate(() => document.querySelector('.pd-bk-app').pd.view.s)
+  const [cx, cy] = await bigCell(p, 20, 20)
+  await p.touchscreen.tap(cx, cy)
+  await p.waitForTimeout(500)
+  const s1 = await p.evaluate(() => document.querySelector('.pd-bk-app').pd.view.s)
+  check('BIG S4 touch: a tap on a too-small board zooms straight to 32 px/cell (a level, nothing to snap later)', s0 < 24 && s1 === 32, JSON.stringify({ s0, s1 }))
+  const st = await p.evaluate(() => document.querySelector('.pd-bk-st').textContent)
+  await bigShot(p, 'big-s5-status-col-row')
+  check('BIG S5 the status bar says 「列 x 行 y」 (no bare y:x)', /列 \d+ 行 \d+/.test(st) && !/\d+:\d+/.test(st), st)
+  await p.context().close()
+}
+
 /** A share code over 20 KB is never truncated: 「复制分享码」 becomes 「导出图纸文件」 + the reason (designer steering 3). */
 async function bigShare() {
   const p = await bigPage()
@@ -1869,6 +1896,7 @@ async function bigSection() {
   await bigAria()
   await bigI3()
   await bigI4()
+  await bigSuggest()
   await bigTileGap()
   await bigStoreChunk()
   await undoParity()
@@ -1915,6 +1943,7 @@ try {
   }
   sections: {
   if (ONLY === 'i4') { log('BIG. review I4 narrow panel e2e'); await bigI4(); break sections }
+  if (ONLY === 'sg') { log('BIG. review S4 S5 S7'); await bigSuggest(); break sections }
   if (ONLY === 'sc') { log('BIG. store chunk delayed / failed'); await bigStoreChunk(); break sections }
   if (ONLY === 'tg') { log('BIG. tile gaps mid-zoom'); await bigTileGap(); break sections }
   if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }

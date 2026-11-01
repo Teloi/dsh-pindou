@@ -591,7 +591,7 @@ export class BigCanvas {
     // too small to hit: the first press zooms in on the spot instead (plan §3.2)
     if (this.view.s < (touch ? 24 : 10)) {
       this.#mode = 'dead'
-      this.#zoomAt(touch ? 28 : 16, x, y)
+      this.#zoomAt(touch ? 32 : 16, x, y)
       return
     }
     this.#setCursor(i)

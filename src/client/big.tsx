@@ -31,7 +31,7 @@ const STRINGS = {
     zoomIn: '放大', zoomOut: '缩小', fit: '适合大小', map: '小地图', colors: '颜色', blocks: '块列表', next: '下一块',
     whole: '全图', px: '{n} px/格', at: '第 {y} 行第 {x} 列', empty: '空', want: '图纸要 {c}', wrong: '放错了，图纸要 {c}', done: '{b} 完成！按 N 去下一块', allDone: '全部完成',
     cell: '{b} 板，{at}，{v}', board: '{w}×{h} 画布。方向键移动，空格或回车放豆，Delete 擦除，Shift+方向键跳一块，N 下一块，+ − 0 缩放，M 小地图，L 块列表',
-    libFail: '这部分没加载出来，请稍后再试', only: '只看本色', loading: '正在读取存档…', noStore: '浏览器存储不可用，进度不会保存', held: '本次进度不会保存', close: '关闭', more: '更多', wide: '拖宽侧栏体验更好',
+    libFail: '这部分没加载出来，请稍后再试', only: '只看本色', loading: '正在读取存档…', noStore: '浏览器存储不可用，进度不会保存', held: '本次进度不会保存', close: '关闭', pos: '列 {x} 行 {y}', more: '更多', wide: '拖宽侧栏体验更好',
   },
   en: {
     title: 'More sizes', presets: 'Pegboards', custom: 'Custom', w: 'Width', h: 'Height', unit: 'Blocks', none: 'One block', start: 'Start',
@@ -43,7 +43,7 @@ const STRINGS = {
     zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit', map: 'Minimap', colors: 'Colours', blocks: 'Blocks', next: 'Next block',
     whole: 'Whole', px: '{n} px/cell', at: 'row {y}, column {x}', empty: 'empty', want: 'pattern wants {c}', wrong: 'Wrong bead: the pattern wants {c}', done: '{b} done! Press N for the next block', allDone: 'All done',
     cell: 'Block {b}, {at}, {v}', board: '{w}×{h} board. Arrows move, Space or Enter places, Delete erases, Shift+arrows jump a block, N next block, + − 0 zoom, M minimap, L block list',
-    libFail: 'This part didn’t load. Try again later.', only: 'This colour only', loading: 'Reading saves…', noStore: 'Browser storage unavailable — progress will not be saved', held: 'Progress this session will not be saved', close: 'Close', more: 'More', wide: 'Drag the sidebar wider for a better view',
+    libFail: 'This part didn’t load. Try again later.', only: 'This colour only', loading: 'Reading saves…', noStore: 'Browser storage unavailable — progress will not be saved', held: 'Progress this session will not be saved', close: 'Close', pos: 'col {x} row {y}', more: 'More', wide: 'Drag the sidebar wider for a better view',
   },
 } as const
 type Key = keyof (typeof STRINGS)['zh']
@@ -469,7 +469,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <span>{t('whole')} {stats.pct}%</span>
         <button type="button" className="pd-btn" onClick={() => { nextBlock(1) }}>{t('next')}</button>
         <span className="pd-spacer" />
-        <span>{s.cy + 1}:{s.cx + 1}</span>
+        <span>{t('pos', { x: s.cx + 1, y: s.cy + 1 })}</span>
         {level ? <span>{t('px', { n: level })}</span> : null}
         {target
           ? <button type="button" className="pd-btn" aria-pressed={s.only} onClick={() => { game.set({ only: !s.only }) }}>{t('only')}</button>
