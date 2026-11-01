@@ -630,13 +630,14 @@ export class GameStore {
   works = (): readonly StoredWork[] => this.#wall
 
   /**
-   * Replace the wall (the wall page deletes, restores and cleans through this).
+   * Replace the wall (the wall page deletes and restores through this; entries it
+   * can't show stay as stored). Only #collect makes new works, so only 12/16/24 squares get in (A1-6).
    * Written right away under its own key; a refused write (quota) leaves the wall
    * in memory for this session and never touches the game's save (SafeStore.set `side`).
    */
   setWall(next: StoredWork[]): void {
     this.#wall = next
-    this.#deps.store.set(WORKS_KEY, JSON.stringify(next.filter(w => isBoardSize(w.n))), true)
+    this.#deps.store.set(WORKS_KEY, JSON.stringify(next), true)
     this.#set({}, false)
   }
 

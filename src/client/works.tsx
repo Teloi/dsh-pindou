@@ -43,13 +43,12 @@ export interface WorksProps {
 }
 
 /**
- * The valid works, oldest first. A wall with broken entries is written back
- * cleaned (only the broken ones go), once, from an effect.
+ * The works this wall can show, oldest first. Entries it can't show (another
+ * version's sizes, a damaged one) are skipped but never written away: deleting
+ * and restoring edit the wall as stored (review A1-6).
  */
-function useWorks({ env, wall }: WorksProps): readonly Work[] {
-  const clean = useMemo(() => cleanWorks(wall), [wall])
-  useEffect(() => { if (clean.dropped) env.store.setWall(clean.works) }, [clean, env])
-  return clean.works
+function useWorks({ wall }: WorksProps): readonly Work[] {
+  return useMemo(() => cleanWorks(wall).works, [wall])
 }
 
 /**
@@ -319,7 +318,7 @@ export function WorksPage(props: WorksProps): ReactElement {
     env.store.hideToast()
     const i = order.indexOf(w)
     const next = order[i + 1] ?? order[i - 1]
-    env.store.setWall(removeWork(wall, w.i))
+    env.store.setWall(removeWork(env.store.works() as Work[], w.i))
     setOpen(null)
     setActive(next?.i ?? null)
     refocus.current = next?.i ?? null

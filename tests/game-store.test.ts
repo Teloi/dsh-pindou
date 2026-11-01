@@ -725,12 +725,23 @@ describe('GameStore works wall (spec §18.4)', () => {
     expect(store.getSnapshot().ironed).toBe(true)
     expect(store.works()).toEqual([])
     expect(backend.data.get(WORKS_KEY) ?? '[]').toBe('[]')
-    const b2 = mem(), other = make({ backend: b2, reduced: true }).store
-    ironOne(other)
-    expect(wallOf(b2)).toHaveLength(1)
-    other.setWall([...other.works(), { i: 9, n: 40 as never, b: 'x', s: null }])
-    expect(wallOf(b2).map(w => w.i)).not.toContain(9)
-    expect(wallOf(b2)).toHaveLength(1)
+    // every way to a game ends on a 12/16/24 square or not on the wall at all
+    for (const [w, h] of [[29, 29], [12, 16], [40, 30], [58, 58]] as const) {
+      store.startPicture(setCell(createBoard(w, h), 0, 0, 3))
+      if (store.board.w === w && store.board.h === h) { store.applyAt(1, 0); store.iron() }
+    }
+    const kept = JSON.parse(backend.data.get(WORKS_KEY) ?? '[]') as Array<{ n: number; b: string }>
+    expect(kept.every(k => [12, 16, 24].includes(k.n) && k.b.length === k.n * k.n)).toBe(true)
+  })
+
+  it('entries already stored that this version can’t show stay as stored when the wall is written (review A1-6: v0.2 dropped them silently)', () => {
+    const odd = [{ i: 7, n: 29, b: '.'.repeat(841), s: null }, { i: 8, n: 16, b: '.'.repeat(192), s: null }]
+    const backend = mem()
+    backend.data.set(WORKS_KEY, JSON.stringify(odd))
+    const { store } = make({ backend, reduced: true })
+    ironOne(store)
+    expect(wallOf(backend).map(w => w.i)).toEqual([7, 8, store.works().at(-1)!.i])
+    expect(JSON.parse(backend.data.get(WORKS_KEY)!).slice(0, 2)).toEqual(odd)
   })
 
   it('ironing puts the piece on the wall at once (its own key), un-ironing takes it off', () => {

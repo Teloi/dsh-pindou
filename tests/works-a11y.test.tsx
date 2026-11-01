@@ -107,3 +107,26 @@ describe('b4 suggestion: Ctrl+Z / ⌘Z on the wall undoes a delete, like 撤销'
     expect(e.store.works()).toHaveLength(4)
   })
 })
+
+describe('review A1-6: entries the wall can’t show are kept, never written away', () => {
+  it('opening the wall, deleting and undoing leave another version’s entries as stored', async () => {
+    const odd = [{ i: 7, n: 29 as never, b: '.'.repeat(841), s: null }, { i: 8, n: 16 as const, b: '.'.repeat(192), s: null }]
+    const writes: string[] = []
+    const e = { ...env(), store: new GameStore({ store: new SafeStore({ getItem: () => null, setItem: (k: string, v: string) => { if (k === 'dsh-pindou:works') writes.push(v) }, removeItem: () => undefined }), saveDelayMs: 0 }) }
+    e.store.setWall([...odd, ...wall])
+    writes.length = 0
+    const Live = (): ReturnType<typeof chunk.WorksPage> => { useSyncExternalStore(e.store.subscribe, e.store.getSnapshot); return <chunk.WorksPage env={e} kit={kit} wall={e.store.works()} /> }
+    await act(async () => { root.render(<Live />) })
+    expect(host.querySelectorAll('.pd-wc')).toHaveLength(4)
+    expect(writes).toEqual([])
+    const first = host.querySelector<HTMLElement>('.pd-wc')!
+    first.focus()
+    await act(async () => { key(first, 'Delete') })
+    expect(e.store.works().slice(0, 2)).toEqual(odd)
+    expect(JSON.parse(writes.at(-1)!).slice(0, 2)).toEqual(odd)
+    await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })) })
+    expect(e.store.works()).toHaveLength(6)
+    // restoring keeps id order, so they sit after the 12s now, unchanged
+    expect(JSON.parse(writes.at(-1)!).filter((w: { i: number }) => w.i > 4)).toEqual(odd)
+  })
+})
