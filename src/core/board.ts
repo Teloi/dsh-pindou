@@ -16,6 +16,9 @@ export function isBoardSize(value: unknown): value is BoardSize {
   return BOARD_SIZES.includes(value as BoardSize)
 }
 
+/** A 12/16/24 square: the only boards v0.2 can open (`dsh-pindou:v1`, the works wall). */
+export const isClassic = (b: { readonly w: number; readonly h: number }): boolean => b.w === b.h && isBoardSize(b.w)
+
 /** A width or height the data layer accepts. */
 export function isSide(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= MIN_SIDE && (value as number) <= MAX_SIDE

@@ -1,4 +1,4 @@
-import { type Board, type BoardSize, createBoard, DEFAULT_SIZE, isBoardSize } from './board.ts'
+import { type Board, type BoardSize, createBoard, DEFAULT_SIZE, isBoardSize, isClassic } from './board.ts'
 import { decode, encode } from './codec.ts'
 import { isColorIndex } from './palette.ts'
 
@@ -240,8 +240,7 @@ export class SafeStore {
 
   /** Only a 12/16/24 square ever goes to `dsh-pindou:v1` (review I-2: v0.2 cannot open anything else); big boards save via save-store. */
   saveState(state: SavedState): boolean {
-    const { w, h } = state.board
-    return w === h && isBoardSize(w) && !this.#hold && this.set(STORAGE_KEY, serializeState(state))
+    return isClassic(state.board) && !this.#hold && this.set(STORAGE_KEY, serializeState(state))
   }
 }
 

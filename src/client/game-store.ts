@@ -6,7 +6,7 @@
 import {
   type Board, type BoardSize, begin, canRedo, canUndo, clearBoard, commit, completion, createBoard, createHistory,
   decode, EMPTY, encode, findTemplate, floodFill, GenerationCache, type GenerateResponse, getCell, type History,
-  inBounds, isBoardSize, isColorIndex, isSquareOf, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
+  inBounds, isClassic, isColorIndex, isSquareOf, type Mode, paintLine, type Prefs, preview, promptKey, push, redo,
   remainingByColor, resizeBoard, SafeStore, sameShape, type SavedState, sanitizePrompt, setCell, type StatusResponse,
   type StorageStatus, templateIdOf, templateKey, type Tool, type TokenUsageInfo, undo,
   MAX_WORKS, type StoredWork, WORKS_KEY,
@@ -650,7 +650,7 @@ export class GameStore {
   #collect(): void {
     const s = this.#state
     const b = s.history.present
-    if (b.w !== b.h || !isBoardSize(b.w)) return
+    if (!isClassic(b)) return
     const w: StoredWork = {
       i: Math.max(this.#now(), (this.#wall.at(-1)?.i ?? 0) + 1), n: b.w as BoardSize, b: encode(b), s: s.target,
       ...(s.target?.startsWith('board:') && s.targetBoard && b.w < 24 ? { p: encode(s.targetBoard) } : {}),
