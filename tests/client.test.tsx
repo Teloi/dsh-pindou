@@ -147,6 +147,26 @@ describe('client apply', () => {
     window.removeEventListener('error', quietError)
   })
 
+  it('plan 修订 20:25: with no browser storage the first screen keeps v0.2\u2019s toast (role=status, no close button, gone after 2.4 s); the dismissible bar is only on the big-board page', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied') })
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    const toast = host.querySelector('.pd-toast')
+    expect(toast?.getAttribute('role')).toBe('status')
+    expect(toast?.textContent).toContain('浏览器存储不可用，进度不会保存')
+    expect(toast?.querySelector('button')).toBeNull()
+    expect(host.querySelector('.pd-bk-bar')).toBeNull()
+    await act(async () => { vi.advanceTimersByTime(2500) })
+    expect(host.querySelector('.pd-toast')).toBeNull()
+    await act(async () => { root.unmount() })
+    f.dispose()
+    vi.useRealTimers()
+  })
+
   for (const desktop of [false, true]) {
     it(`entry button announces ⌘⌥K only in the desktop shell (${desktop ? 'desktop' : 'web'})`, async () => {
       if (desktop) vi.stubGlobal('dshDesktop', {})
