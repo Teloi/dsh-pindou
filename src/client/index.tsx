@@ -81,6 +81,8 @@ export function apply(ctx: ClientContext): void {
   const picture = lazy(() => import('./picture.tsx'), hostLoadsChunks())
   // the works wall (lib/client.works.js): loaded once per session, kept (spec §18.4/§18.6)
   const works = lazy(() => import('./works.tsx'), hostLoadsChunks())
+  // big boards on a Canvas (lib/client.big.js, plan §4.4): the 「更多尺寸」 page
+  const big = lazy(() => import('./big.tsx'), hostLoadsChunks())
   const lang = (): 'zh' | 'en' => langOf(ctx.locale.getSnapshot().active)
   const tFor = (l: 'zh' | 'en'): Translate => (l === 'zh' ? tZh : tEn)
   const tZh = makeTranslate('zh')
@@ -106,7 +108,7 @@ export function apply(ctx: ClientContext): void {
   function Body(): ReactElement {
     const l = useLang()
     return (
-      <EnvContext.Provider value={{ store, lang: l, t: tFor(l), reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works }}>
+      <EnvContext.Provider value={{ store, lang: l, t: tFor(l), reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works, big }}>
         <App />
       </EnvContext.Provider>
     )

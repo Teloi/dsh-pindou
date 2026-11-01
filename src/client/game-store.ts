@@ -42,7 +42,7 @@ export const PICTURE_PREFIX = 'p-'
 export const isPictureSource = (target: string | null): boolean => target?.startsWith(`board:${PICTURE_PREFIX}`) ?? false
 
 /** What the panel shows; `picture` (spec §18.2) and `works` (§18.4) are pages of home and are saved as `home`. */
-export type ViewMode = Mode | 'picture' | 'works'
+export type ViewMode = Mode | 'picture' | 'works' | 'big'
 
 export type Overlay = 'coach' | 'done' | 'result' | null
 export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'say'

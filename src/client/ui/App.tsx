@@ -8,6 +8,7 @@ import type { GameState, ToastKey } from '../game-store.ts'
 import { focusBoard, useFocusGuard, useFocusReturn } from '../focus.ts'
 import { IconBack, IconMore } from '../icons.tsx'
 import { AiView } from './Ai.tsx'
+import { BigView } from './Big.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 import { HomeView } from './Home.tsx'
 import { useLazy } from './LazyView.tsx'
@@ -117,7 +118,7 @@ function ToastView({ toast }: { toast: NonNullable<GameState['toast']> }): React
             const root = e.currentTarget.closest('.pd-root')
             store.undoToast()
             setTimeout(() => { focusBoard(root) }, 0)
-          }}>{t('toastUndo')}</button>
+          }}>{t('undo')}</button>
         )
         : null}
     </div>
@@ -290,7 +291,7 @@ export function App(): ReactElement {
       </header>
       {menu ? <Menu onClose={() => { setMenu(false) }} /> : null}
       <div className="pd-scroll" ref={scroller}>
-        {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : s.mode === 'picture' ? <PictureView file={dropped} onTaken={taken} /> : s.mode === 'works' ? <WorksView /> : <PlayView />}
+        {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : s.mode === 'picture' ? <PictureView file={dropped} onTaken={taken} /> : s.mode === 'works' ? <WorksView /> : s.mode === 'big' ? <BigView /> : <PlayView />}
       </div>
       <Preview />
       <Toast />

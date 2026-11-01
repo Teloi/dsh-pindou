@@ -7,8 +7,8 @@ describe('templates', () => {
     expect(TEMPLATES.length).toBeLessThanOrEqual(12)
     expect(new Set(TEMPLATES.map(t => t.id)).size).toBe(TEMPLATES.length)
     for (const def of TEMPLATE_DEFS) {
-      expect(def.rows, def.id).toHaveLength(16)
-      for (const row of def.rows) expect(row, def.id).toMatch(/^[.0-9a-f]{16}$/)
+      expect(def.cells, def.id).toHaveLength(256)
+      expect(def.cells, def.id).toMatch(/^[.0-9a-f]{256}$/)
       expect(def.zh.length).toBeGreaterThan(0)
       expect(def.en.length).toBeGreaterThan(0)
     }

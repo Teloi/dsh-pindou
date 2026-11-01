@@ -50,7 +50,6 @@ const COPY = {
   tplMeta: ['{n} 色', '{n} col'],
   tplSr: ['，{size}×{size}，难度 {diff}/3', ', {size}×{size}, difficulty {diff}/3'],
   tplSrDone: ['，已完成', ', done'],
-  playFree: ['自由拼', 'Free play'],
   playBeads: ['{n} 颗', '{n} beads'],
   playEmpty: ['点按或拖动放豆子', 'Tap or drag to place beads'],
   playWrong: ['{n} 颗放错', '{n} misplaced'],
@@ -75,6 +74,7 @@ const COPY = {
   redo: ['重做', 'Redo'],
   clear: ['清空', 'Clear'],
   size: ['尺寸', 'Size'],
+  moreSizes: ['更多尺寸', 'More sizes'],
   coachTitle: ['30 秒上手', '30-second intro'],
   coachBody: ['选一个颜色，在豆板上点按或拖动放豆；右键或橡皮拿掉。拼完点「熨烫」让豆子融在一起。', 'Pick a color, then tap or drag on the board to place beads; right-click or the eraser removes them. When done, Iron to fuse the beads.'],
   coachOk: ['开始拼', 'Start'],
@@ -91,7 +91,6 @@ const COPY = {
   fillBoard: ['一键铺满', 'Fill board'],
   toastCleared: ['已清空', 'Board cleared'],
   toastNewGame: ['已开始新的一局', 'Started a new board'],
-  toastUndo: ['撤销', 'Undo'],
   // a toast whose words come from a lazy chunk (they ship with it, not on the first screen)
   say: ['{s}', '{s}'],
   toastLocked: ['已熨烫，撤销后可继续修改', 'Ironed — undo to keep editing'],
