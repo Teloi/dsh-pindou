@@ -880,6 +880,19 @@ async function worksSection() {
     const brow = await b.evaluate(worksRow)
     check('W broken entries in storage: the wall shows the 3 good ones (「我的作品 · 3」) and the stored list is left as it was', kept === broken && brow.title === '我的作品 · 3' && brow.thumbs === 3, JSON.stringify({ same: kept === broken, brow }))
     await b.context().close()
+    // the caps (designer 22:05): unreadable entries are outside the 60; past 80 in all the earliest unreadable go, never a readable work
+    const oddW = Array.from({ length: 25 }, (_, k) => ({ i: 7 + k, n: 52, b: 'x', s: null }))
+    const capSeed = [...oddW, ...seedWorks(65)]
+    const cp = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(JSON.stringify(capSeed)))
+    await startSession(cp, '看看 README')
+    await openPanel(cp)
+    await cp.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+    await cp.waitForTimeout(300)
+    const capped = await cp.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:works') ?? '[]'))
+    const crow = await cp.evaluate(worksRow)
+    const capOk = capped.length === 80 && JSON.stringify(capped.slice(0, 20)) === JSON.stringify(oddW.slice(5)) && JSON.stringify(capped.slice(20)) === JSON.stringify(capSeed.slice(30)) && crow.title === '我的作品 · 60'
+    check('W caps: 65 readable + 25 unreadable → the 60 newest readable and the 20 latest unreadable stay (80 in all), 「我的作品 · 60」', capOk, JSON.stringify({ n: capped.length, odd: capped.filter(w => w.n === 52).length, title: crow.title }))
+    await cp.context().close()
     const j = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit('{oops'))
     await startSession(j, '看看 README')
     await openPanel(j)

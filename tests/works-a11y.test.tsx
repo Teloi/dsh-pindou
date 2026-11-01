@@ -130,3 +130,24 @@ describe('review A1-6: entries the wall can’t show are kept, never written awa
     expect(JSON.parse(writes.at(-1)!).filter((w: { i: number }) => w.i > 4)).toEqual(odd)
   })
 })
+
+describe('designer 22:05: the caps (60 readable, 80 in all) are kept when the wall shows', () => {
+  it('the home row trims the stored wall: the oldest readable past 60, the earliest unreadable past 80', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+    const e = env()
+    const b = encode(setCell(createBoard(12), 0, 0, 3))
+    const odd = Array.from({ length: 25 }, (_, k) => ({ i: 500 + k, n: 52 as never, b: 'x', s: null }))
+    const good = Array.from({ length: 65 }, (_, k) => ({ i: k + 1, n: 12 as const, b, s: null }))
+    e.store.setWall([...odd, ...good])
+    const Live = (): ReturnType<typeof chunk.WorksRow> => { useSyncExternalStore(e.store.subscribe, e.store.getSnapshot); return <chunk.WorksRow env={e} kit={kit} wall={e.store.works()} fade={false} /> }
+    await act(async () => { root.render(<Live />) })
+    const stored = e.store.works()
+    expect(stored).toHaveLength(80)
+    expect(stored.slice(0, 20)).toEqual(odd.slice(5))
+    expect(stored.slice(20).map(w => w.i)).toEqual(good.slice(5).map(w => w.i))
+    // within the caps nothing is written again
+    const again = e.store.works()
+    await act(async () => { root.render(<Live />) })
+    expect(e.store.works()).toBe(again)
+  })
+})

@@ -1,3 +1,4 @@
+import { capWall } from '../src/core/works.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { BAD_SAVE_KEY, createBoard, EMPTY, encode, findTemplate, getCell, makeTranslate, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
 import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi } from '../src/client/game-store.ts'
@@ -759,13 +760,16 @@ describe('GameStore works wall (spec §18.4)', () => {
     expect(store.getSnapshot().work).toBeNull()
   })
 
-  it('the 61st piece pushes the oldest off; ids stay unique when ironed in the same millisecond', () => {
+  it('the 61st piece stays until the wall chunk trims it; ids stay unique when ironed in the same millisecond', () => {
     const { store } = make({ reduced: true })
     for (let k = 0; k < 61; k++) ironOne(store, k)
     const ids = store.works().map(w => w.i)
-    expect(ids).toHaveLength(60)
-    expect(new Set(ids).size).toBe(60)
-    expect(ids[0]).toBe(1_000_001)
+    // the entry can't tell a readable entry, so it never trims (designer 22:05); capWall does, when shown
+    expect(ids).toHaveLength(61)
+    expect(new Set(ids).size).toBe(61)
+    const capped = capWall(store.works()).map(w => w.i)
+    expect(capped).toHaveLength(60)
+    expect(capped[0]).toBe(1_000_001)
   })
 
   it('withdraws by id after a reload: the reloaded game still knows its piece', () => {
@@ -823,7 +827,7 @@ describe('GameStore works wall (spec §18.4)', () => {
     expect(make({ backend: broken }).store.works()).toEqual([])
   })
 
-  it('corrupt wall storage: broken JSON or a non-array is an empty wall; entries without an id are left out', () => {
+  it('corrupt wall storage: broken JSON or a non-array is an empty wall; odd entries stay as stored', () => {
     for (const bad of ['{', '"x"', '{"i":1}', 'null', '7']) {
       const backend = mem()
       backend.data.set(WORKS_KEY, bad)
@@ -832,10 +836,11 @@ describe('GameStore works wall (spec §18.4)', () => {
     const backend = mem()
     backend.data.set(WORKS_KEY, JSON.stringify([{ i: 5, n: 12, b: 'x', s: null }, null, { i: 'x' }, { n: 12 }]))
     const { store } = make({ backend, reduced: true })
-    expect(store.works().map(w => w.i)).toEqual([5])
+    expect(store.works()).toEqual([{ i: 5, n: 12, b: 'x', s: null }, null, { i: 'x' }, { n: 12 }])
     // a new piece goes after the newest id; validation of each entry is the wall page's (core/works.ts)
     ironOne(store)
-    expect(store.works().map(w => w.i)).toEqual([5, 1_000_000])
+    expect(store.works().map(w => w?.i)).toEqual([5, undefined, 'x', undefined, 1_000_000])
+    expect(wallOf(backend)).toHaveLength(5)
   })
 
   it('leaving mid-iron still collects the piece (once), for the game it belongs to', () => {
