@@ -9,7 +9,7 @@ export const BIG_CSS = `
 .pd-bk-play{display:flex;flex-direction:column;min-width:0}
 .pd-bk-top,.pd-bk-st,.pd-bk-share{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12.5px;color:var(--pd-text-2);font-variant-numeric:tabular-nums}
 .pd-bk-top strong{color:var(--pd-text)}
-.pd-bk-top .pd-spacer,.pd-bk-st .pd-spacer{flex:1}
+.pd-bk .pd-spacer{flex:1}
 .pd-bk-st{margin-top:6px}
 .pd-bk-st .pd-btn,.pd-bk-share .pd-btn{min-height:28px;padding:0 9px;font-size:12px}
 .pd-bk-share{margin-top:6px;padding:8px;border-radius:var(--pd-radius-ctl);background:var(--pd-surface)}
@@ -38,12 +38,13 @@ export const BIG_CSS = `
 .pd-bk-app{position:absolute;inset:0;touch-action:none;user-select:none;outline:none}
 .pd-bk-app:focus-visible{box-shadow:inset 0 0 0 2px var(--pd-accent)}
 .pd-bk-app canvas{display:block}
-.pd-bk-zoom{position:absolute;left:6px;bottom:6px;display:flex;gap:2px;padding:2px;border-radius:var(--pd-radius-ctl);background:color-mix(in srgb,var(--pd-surface-raised) 88%,transparent);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.pd-bk-zoom{position:absolute;left:6px;bottom:6px;display:flex;gap:2px;padding:2px;border-radius:var(--pd-radius-ctl);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.pd-bk-zoom,.pd-bk-mm{background:color-mix(in srgb,var(--pd-surface-raised) 88%,transparent)}
 .pd-bk-zoom .pd-ib{width:32px;height:32px;font-size:16px;color:var(--pd-text)}
 .pd-bk-mini{position:absolute;right:6px;bottom:6px;width:96px;height:96px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.25);background:var(--pd-surface-raised);touch-action:none}
 @container pd (min-width: 561px){.pd-bk-mini{width:120px;height:120px}}
 .pd-bk-mini.pd-off{display:none}
-.pd-bk-mm{position:absolute;right:6px;top:6px;width:32px;height:32px;background:color-mix(in srgb,var(--pd-surface-raised) 88%,transparent)}
+.pd-bk-mm{position:absolute;right:6px;top:6px;width:32px;height:32px}
 /* below 360 the minimap starts folded into its button (plan §3.4) */
 .pd-bk-blocks{margin-top:var(--pd-gap);font-size:12.5px;color:var(--pd-text-2)}
 .pd-bk-blocks summary{cursor:pointer;min-height:28px;display:flex;align-items:center}

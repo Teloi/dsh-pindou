@@ -80,21 +80,8 @@ function useStore(): SaveStore | null {
   return s
 }
 
-const I = ({ d }: { readonly d: string }): ReactElement => (
-  <svg className="pd-i" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    {d.split('|').map(p => <path key={p} d={p} />)}
-  </svg>
-)
-const TOOLS: ReadonlyArray<[BigTool, string, Key, string]> = [
-  ['paint', 'B', 'paint', 'M13.5 3.5 16.5 6.5 9 14l-3.5.5.5-3.5z|M11.5 5.5l3 3'],
-  ['erase', 'E', 'erase', 'M8 16h8|M3.8 11.8 11 4.6a1.4 1.4 0 0 1 2 0l2.4 2.4a1.4 1.4 0 0 1 0 2L9 15.4H6.6L3.8 12.6a.6.6 0 0 1 0-.8z|M7.5 8.2l4.3 4.3'],
-  ['pick', 'I', 'pick', 'M12.5 4.5l3 3|M14.2 3.2a1.8 1.8 0 0 1 2.6 2.6l-1.6 1.6-2.6-2.6z|M12.4 6.2 5 13.6V16h2.4l7.4-7.4'],
-  ['fill', 'G', 'fill', 'M4 9.5 9.5 4l6 6-5.5 5.5a1.4 1.4 0 0 1-2 0L4 11.5a1.4 1.4 0 0 1 0-2z|M4 10.5h11.5|M16.5 13.5s1.2 1.6 1.2 2.4a1.2 1.2 0 0 1-2.4 0c0-.8 1.2-2.4 1.2-2.4z'],
-]
-const UNDO = 'M7.5 5 4 8.5 7.5 12|M4.5 8.5h7a4 4 0 0 1 0 8H9'
-const REDO = 'M12.5 5 16 8.5 12.5 12|M15.5 8.5h-7a4 4 0 0 0 0 8H11'
-const TRASH = 'M4 6h12|M8 6V4.5h4V6|M5.5 6l.8 9.6a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9L14.5 6'
-const DOWNLOAD = 'M10 3.5v9M6 9l4 4 4-4|M4 16.5h12'
+// tool order: paint, erase, pick, fill (kit.icons follows it, then undo, redo, clear, png)
+const TOOLS: ReadonlyArray<[BigTool, string, Key]> = [['paint', 'B', 'paint'], ['erase', 'E', 'erase'], ['pick', 'I', 'pick'], ['fill', 'G', 'fill']]
 
 const isTyping = (el: EventTarget | null): boolean => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))
 
@@ -234,6 +221,7 @@ interface PlayProps { readonly env: Env; readonly kit: BigKit; readonly t: T; re
 function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
   const s = useSyncExternalStore(game.subscribe, game.get)
   const board = s.history.present
+  const ic = (n: number): ReactElement => { const C = kit.icons[n]!; return <C /> }
   const target = s.target
   const { w, h } = board
   const lang = env.lang
@@ -407,23 +395,23 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         )
         : null}
       <div className="pd-tools" role="toolbar" aria-label={t('tools')}>
-        {TOOLS.map(([tool, key, label, d]) => (
+        {TOOLS.map(([tool, key, label], n) => (
           <button key={tool} type="button" className="pd-tool" aria-pressed={s.tool === tool} aria-label={t(label)} aria-keyshortcuts={key} title={`${t(label)} (${key})`}
             onClick={() => { game.set({ tool }) }}>
-            <I d={d} />
+            {ic(n)}
             {tool === 'paint' ? <span className="pd-cur-swatch" style={{ '--pd-c': pal[s.color]!.hex } as CSSProperties} /> : null}
           </button>
         ))}
         <span className="pd-sep" aria-hidden />
         <button type="button" className="pd-tool" aria-label={t('undo')} title={`${t('undo')} (⌘Z)`}
-          disabled={!game.canUndo} onClick={() => { game.undo() }}><I d={UNDO} /></button>
+          disabled={!game.canUndo} onClick={() => { game.undo() }}>{ic(4)}</button>
         <button type="button" className="pd-tool" aria-label={t('redo')} title={`${t('redo')} (⇧⌘Z)`}
-          disabled={!game.canRedo} onClick={() => { game.redo() }}><I d={REDO} /></button>
+          disabled={!game.canRedo} onClick={() => { game.redo() }}>{ic(5)}</button>
         <span className="pd-sep" aria-hidden />
         <button type="button" className="pd-tool" aria-label={t('clear')} title={t('clear')}
-          disabled={board.cells.every(c => c === EMPTY)} onClick={clear}><I d={TRASH} /></button>
+          disabled={board.cells.every(c => c === EMPTY)} onClick={clear}>{ic(6)}</button>
         <button type="button" className="pd-tool" aria-label={t('png')} title={t('png')}
-          disabled={board.cells.every(c => c === EMPTY)} onClick={() => { kit.exportBoard(env, { board, target: null }) }}><I d={DOWNLOAD} /></button>
+          disabled={board.cells.every(c => c === EMPTY)} onClick={() => { kit.exportBoard(env, { board, target: null }) }}>{ic(7)}</button>
       </div>
       <div className="pd-bk-cv" ref={wrapRef}>
         {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the canvas widget: focusable for the keys its label lists */}
