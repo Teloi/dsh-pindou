@@ -97,6 +97,30 @@ describe('storage', () => {
     expect(backend.data.size).toBe(3)
   })
 
+  it('a corrupt save bigger than 64 KB is still backed up before it goes (audit A1-5)', () => {
+    const backend = memoryStorage()
+    const huge = 'x'.repeat(70 * 1024)
+    backend.data.set(STORAGE_KEY, huge)
+    const store = new SafeStore(backend)
+    store.loadState()
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe(huge)
+    expect(backend.data.has(STORAGE_KEY)).toBe(false)
+  })
+
+  it('when the backup is refused, the original save stays and this session never saves over it (audit A1-5)', () => {
+    const backend = memoryStorage()
+    const setItem = backend.setItem
+    backend.setItem = (k, v) => { if (k.startsWith(BAD_SAVE_KEY)) throw new Error('QuotaExceededError'); setItem(k, v) }
+    backend.data.set(STORAGE_KEY, '{broken')
+    const store = new SafeStore(backend)
+    store.loadState()
+    expect(store.status).toBe('recovered')
+    expect(backend.data.get(STORAGE_KEY)).toBe('{broken')
+    expect(store.saveState({ ...defaultState(), board: createBoard(16) })).toBe(false)
+    expect(backend.data.get(STORAGE_KEY)).toBe('{broken')
+    expect(store.status).toBe('recovered')
+  })
+
   it('never writes a non-square or big board to the v1 key, and stays ok (review I-2)', () => {
     const backend = memoryStorage()
     const store = new SafeStore(backend)

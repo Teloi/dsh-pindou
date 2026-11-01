@@ -167,6 +167,8 @@ export type StorageStatus = 'ok' | 'unavailable' | 'recovered'
 export class SafeStore {
   readonly #memory = new Map<string, string>()
   readonly #backend: StorageLike | undefined
+  /** An unreadable save could not be backed up: it stays, and this session does not save over it (audit A1-5). */
+  #hold = false
   status: StorageStatus = 'ok'
 
   constructor(backend: StorageLike | undefined) {
@@ -195,7 +197,7 @@ export class SafeStore {
    * works wall): its refusal (quota) must never stop the game from saving.
    */
   set(key: string, value: string, side = false): boolean {
-    if (value.length > MAX_STORED_CHARS) return false
+    if (value.length > MAX_STORED_CHARS && !side) return false
     this.#memory.set(key, value)
     if (this.status === 'unavailable' || !this.#backend) return false
     try {
@@ -228,7 +230,8 @@ export class SafeStore {
     for (const n of ['', ':2', ':3']) {
       const key = BAD_SAVE_KEY + n
       const older = this.get(key)
-      this.set(key, save, true)
+      // a backup is written whatever its size; when even that is refused the original stays put
+      if (!this.set(key, save, true) && !n) { this.#hold = true; return }
       save = older
       if (save === null) break
     }
@@ -238,7 +241,7 @@ export class SafeStore {
   /** Only a 12/16/24 square ever goes to `dsh-pindou:v1` (review I-2: v0.2 cannot open anything else); big boards save via save-store. */
   saveState(state: SavedState): boolean {
     const { w, h } = state.board
-    return w === h && isBoardSize(w) && this.set(STORAGE_KEY, serializeState(state))
+    return w === h && isBoardSize(w) && !this.#hold && this.set(STORAGE_KEY, serializeState(state))
   }
 }
 
