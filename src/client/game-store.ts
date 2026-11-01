@@ -45,6 +45,7 @@ export const isPictureSource = (target: string | null): boolean => target?.start
 export type ViewMode = Mode | 'picture' | 'works' | 'big'
 
 export type Overlay = 'coach' | 'done' | 'result' | null
+/** Toast keys are i18n keys (no lookup table on the first screen). */
 export type ToastKey = 'cleared' | 'newGame' | 'locked' | 'exported' | 'exportFailed' | 'copied' | 'copyFailed' | 'storageUnavailable' | 'storageRecovered' | 'say'
 
 export interface GameState {

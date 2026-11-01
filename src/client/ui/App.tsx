@@ -3,8 +3,8 @@
  * so the inner header carries only ‹ Back and ⋯ (spec §3.1/§14.3).
  */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from 'react'
-import { COLOR_COUNT, type MessageKey } from '../../core/index.ts'
-import type { GameState, ToastKey } from '../game-store.ts'
+import { COLOR_COUNT } from '../../core/index.ts'
+import type { GameState } from '../game-store.ts'
 import { focusBoard, useFocusGuard, useFocusReturn } from '../focus.ts'
 import { IconBack, IconMore } from '../icons.tsx'
 import { AiView } from './Ai.tsx'
@@ -16,11 +16,6 @@ import { PictureView } from './Picture.tsx'
 import { PlayView } from './Play.tsx'
 import { WorksView } from './Works.tsx'
 
-const TOAST_TEXT: Record<ToastKey, MessageKey> = {
-  cleared: 'toastCleared', newGame: 'toastNewGame', locked: 'toastLocked', exported: 'toastExported', exportFailed: 'toastExportFailed',
-  copied: 'toastCopied', copyFailed: 'toastCopyFailed',
-  storageUnavailable: 'storageUnavailable', storageRecovered: 'storageRecovered', say: 'say',
-}
 const TOAST_MS = 2400
 const TOAST_UNDO_MS = 5000
 
@@ -111,7 +106,7 @@ function ToastView({ toast }: { toast: NonNullable<GameState['toast']> }): React
       onPointerEnter={hold(true)} onPointerLeave={hold(false)}
       onFocus={hold(true)} onBlur={hold(false)}>
       {/* the whole text stays in the DOM (read out by role=status) and in the tooltip when it is cut */}
-      <span title={t(TOAST_TEXT[toast.key], toast.params)}>{t(TOAST_TEXT[toast.key], toast.params)}</span>
+      <span title={t(toast.key, toast.params)}>{t(toast.key, toast.params)}</span>
       {toast.undo
         ? (
           <button type="button" onClick={(e) => {

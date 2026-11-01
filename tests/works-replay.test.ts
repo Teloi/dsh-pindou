@@ -18,7 +18,7 @@ const tpl = TEMPLATES[0]!
 const work = (s: string | null) => ({ i: 1, n: tpl.board.w as BoardSize, b: '', s })
 const said = (store: GameStore, lang: 'zh' | 'en' = 'zh'): string | null => {
   const t = store.getSnapshot().toast
-  return t ? translate(lang, t.key === 'say' ? 'say' : 'toastNewGame', t.params) : null
+  return t ? translate(lang, t.key === 'say' ? 'say' : 'newGame', t.params) : null
 }
 const beads = (store: GameStore): number => store.getSnapshot().history.present.cells.filter(c => c !== EMPTY).length
 
