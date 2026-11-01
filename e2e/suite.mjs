@@ -1060,31 +1060,323 @@ async function readmeScreens() {
 }
 
 // ── BIG. 更多尺寸: the canvas board in its lazy chunk (plan v0.3 §2–§4) ──
+const PHASE2_SHOTS = process.env.E2E_BIG_SHOTS ? resolve(process.env.E2E_BIG_SHOTS) : null
 const bigHost = p => p.locator('.pd-bk-app')
-const bigState = p => p.evaluate(() => { const g = document.querySelector('.pd-bk-app').pd.game; const s = g.get(); return { cells: [...s.history.present.cells], canUndo: g.canUndo, canRedo: g.canRedo, cx: s.cx, cy: s.cy, tool: s.tool, color: s.color } })
+const bigState = p => p.evaluate(() => { const g = document.querySelector('.pd-bk-app').pd.game; const s = g.get(); return { cells: [...s.history.present.cells], w: s.history.present.w, canUndo: g.canUndo, canRedo: g.canRedo, cx: s.cx, cy: s.cy, tool: s.tool, color: s.color } })
+async function bigShot(p, name, clip = true) {
+  const box = clip ? await p.locator('.pd-root').boundingBox() : null
+  await outShot(p, name, box ? { clip: box } : undefined)
+  if (PHASE2_SHOTS) { mkdirSync(PHASE2_SHOTS, { recursive: true }); copyFileSync(join(OUT, `${name}.png`), join(PHASE2_SHOTS, `${name}.png`)) }
+}
 async function openBig(p) {
   await p.locator('.pd-start .pd-big', { hasText: /自由拼|Free play/ }).click()
   await p.locator('.pd-board').waitFor()
+  const coach = p.locator('.pd-overlay.pd-coach button')
+  if (await coach.count()) { await coach.first().click(); await p.waitForTimeout(250) }
   await p.getByRole('button', { name: /^(更多尺寸|More sizes)$/ }).click()
   await p.locator('.pd-bk').waitFor({ timeout: 15000 })
+  await p.locator('.pd-bk-sizes, .pd-bk-load').first().waitFor({ timeout: 15000 })
   await p.waitForTimeout(300)
 }
-async function bigSection() {
-  const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
-  await startSession(p, '看看 README')
+async function bigPage(opts = {}, lang = 'zh', init) {
+  const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light', ...opts }, lang, init)
+  await startSession(p, lang === 'zh' ? '看看 README' : 'Read the README', lang)
   await openPanel(p)
   await openBig(p)
-  await outShot(p, 'big-setup')
-  await p.locator('.pd-bk-sizes .pd-btn', { hasText: '58×58' }).click()
+  return p
+}
+async function startPreset(p, n) {
+  await p.locator('.pd-bk-sizes .pd-btn', { hasText: `${n}×${n}` }).click()
   await bigHost(p).waitFor()
-  await p.waitForTimeout(500)
-  await outShot(p, 'big-58')
-  log(JSON.stringify((await bigState(p)).cells.length))
+  await p.waitForTimeout(400)
+}
+/** Zoom the canvas so a 16 × 16 corner is on screen at 16 px/cell (mice paint from 10 up). */
+const bigZoom = p => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView({ s: 16, ox: 0, oy: 0 }); c.draw() })
+const bigCell = (p, x, y) => p.evaluate(([cx, cy]) => { const c = document.querySelector('.pd-bk-app').pd; const r = c.el.getBoundingClientRect(), { s, ox, oy } = c.view; return [r.left + ox + (cx + 0.5) * s, r.top + oy + (cy + 0.5) * s] }, [x, y])
+const domCell = (p, x, y) => p.evaluate(([cx, cy]) => { const r = document.querySelectorAll('.pd-board .pd-cell')[cy * 16 + cx].getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] }, [x, y])
+
+/**
+ * Undo parity (designer steering 1): the same moves on the first screen's 16 × 16 (DOM, history.ts) and on a
+ * 58 × 58 canvas (diff-history.ts), compared after every step on the 16 × 16 corner: cells, 撤销 and 重做.
+ */
+async function undoParity() {
+  const dom = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+  await startSession(dom, '看看 README')
+  await openPanel(dom)
+  await dom.locator('.pd-start .pd-big', { hasText: /自由拼/ }).click()
+  await dom.locator('.pd-board').waitFor()
+  const coach = dom.locator('.pd-overlay.pd-coach button')
+  if (await coach.count()) { await coach.first().click(); await dom.waitForTimeout(250) }
+  const cv = await bigPage()
+  await startPreset(cv, 58)
+  await bigZoom(cv)
+  const pcVar = cssVar('--pd-c')
+  const readDom = () => dom.evaluate((v) => {
+    const pal = [...document.querySelectorAll('.pd-palette .pd-sw')].map(e => e.style.getPropertyValue(v).trim().toLowerCase())
+    const cells = [...document.querySelectorAll('.pd-board .pd-cell')].map((c) => { const b = c.querySelector('.pd-bead:not(.pd-out)'); return b ? pal.indexOf(b.style.getPropertyValue(v).trim().toLowerCase()) : -1 })
+    const tools = document.querySelectorAll('.pd-tools .pd-tool')
+    return { cells, undo: !tools[4].disabled, redo: !tools[5].disabled }
+  }, pcVar)
+  const readCv = () => cv.evaluate(() => {
+    const g = document.querySelector('.pd-bk-app').pd.game, b = g.get().history.present
+    const cells = []
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const v = b.cells[y * b.w + x]; cells.push(v === 255 || v < 0 || v === undefined ? -1 : v) }
+    const tools = document.querySelectorAll('.pd-bk-play .pd-tools .pd-tool')
+    return { cells, undo: !tools[4].disabled, redo: !tools[5].disabled, empty: g.get().history.present.cells.filter(c => c !== b.cells[0]).length }
+  })
+  // big-board EMPTY is not -1: normalise with the corner's own reading of an untouched cell
+  const emptyCv = await cv.evaluate(() => document.querySelector('.pd-bk-app').pd.game.get().history.present.cells[57 * 58 + 57])
+  const norm = c => c.map(v => (v === emptyCv ? -1 : v))
+  const steps = []
+  const same = async (label) => {
+    await dom.waitForTimeout(60)
+    const a = await readDom(), b = await readCv()
+    const ok = a.cells.length === 256 && JSON.stringify(a.cells) === JSON.stringify(norm(b.cells)) && a.undo === b.undo && a.redo === b.redo
+    steps.push({ label, ok, dom: { undo: a.undo, redo: a.redo, beads: a.cells.filter(v => v >= 0).length }, cv: { undo: b.undo, redo: b.redo, beads: norm(b.cells).filter(v => v >= 0).length } })
+    return ok
+  }
+  const both = async (fn) => { await fn(dom, domCell); await fn(cv, bigCell) }
+  const tool = n => both(async (p) => { await p.locator('.pd-tools .pd-tool').nth(n).click() })
+  const color = n => both(async (p) => { await p.locator('.pd-palette .pd-sw').nth(n).click() })
+  const click = (x, y) => both(async (p, at) => { const [cx, cy] = await at(p, x, y); await p.mouse.click(cx, cy) })
+  const drag = (x0, y0, x1, y1) => both(async (p, at) => {
+    const [ax, ay] = await at(p, x0, y0), [bx, by] = await at(p, x1, y1)
+    await p.mouse.move(ax, ay); await p.mouse.down()
+    await p.mouse.move(bx, by, { steps: 4 * Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1) })
+    await p.mouse.up()
+  })
+  const btn = n => both(async (p) => { const b = p.locator('.pd-tools .pd-tool').nth(n); if (await b.isEnabled()) await b.click() })
+  await same('start')
+  await tool(0); await color(3); await click(2, 2); await same('single cell')
+  await color(5); await drag(1, 5, 12, 5); await same('drag stroke')
+  await tool(3); await color(9); await click(6, 5); await same('fill the stroke (recolour)')
+  await color(1); await click(0, 15); await same('fill empty space')
+  await tool(0); await color(2); await click(4, 9); await same('one more bead')
+  await btn(6); await same('clear')
+  // undo everything, step by step; then redo everything
+  let undos = 0
+  for (let k = 0; k < 10 && (await readDom()).undo; k++) { await btn(4); undos++; await same(`undo ${undos}`) }
+  let redos = 0
+  for (let k = 0; k < 10 && (await readDom()).redo; k++) { await btn(5); redos++; await same(`redo ${redos}`) }
+  // new paint after an undo drops redo
+  await btn(4); await btn(4); await same('undo 2 for the branch')
+  await tool(0); await color(7); await click(14, 14); const branch = await same('new paint after undo')
+  const afterBranch = await readDom()
+  // over 100 steps: 105 single beads, then undo until it stops (both keep 100)
+  for (let k = 0; k < 105; k++) { await color(k % 2 ? 11 : 12); await click(k % 16, 1 + ((k / 16) | 0) % 14); if (k % 15 === 14) await same(`bead ${k + 1}`) }
+  await same('105 beads')
+  let deep = 0
+  for (let k = 0; k < 110 && (await readDom()).undo; k++) { await btn(4); deep++; if (deep % 10 === 0 || deep > 95) await same(`deep undo ${deep}`) }
+  const cvLeft = (await readCv()).undo
+  await same('after deep undo')
+  const wrong = steps.filter(s => !s.ok)
+  check('BIG undo parity 16 (DOM) vs 58 (canvas): single cell, drag stroke, fill, clear, undo all, redo all — board and 撤销/重做 equal at every step', wrong.length === 0 && undos === 6 && redos === 6, JSON.stringify({ undos, redos, wrong: wrong.slice(0, 3) }))
+  check('BIG undo parity: new paint after undo clears redo on both', branch && !afterBranch.redo, JSON.stringify(steps.find(s => s.label === 'new paint after undo')))
+  check('BIG undo parity: more than 100 steps — both keep exactly 100 undo steps', deep === 100 && !cvLeft, JSON.stringify({ deep, cvLeft }))
+  if (SELFCHECK) writeFileSync(join(SELFCHECK, 'big-undo-parity.json'), `${JSON.stringify(steps, null, 2)}\n`)
+  writeFileSync(join(OUT, 'big-undo-parity.json'), `${JSON.stringify(steps, null, 2)}\n`)
+  await dom.context().close()
+  await cv.context().close()
+}
+
+/** The canvas widget for keys and screen readers (plan §3.6). */
+async function bigAria() {
+  const p = await bigPage()
+  await startPreset(p, 58)
+  const host = bigHost(p)
+  const a = await host.evaluate(el => ({ role: el.getAttribute('role'), label: el.getAttribute('aria-label'), tab: el.tabIndex }))
+  check('BIG canvas is role=application, focusable, labelled with its size and keys', a.role === 'application' && a.tab === 0 && /58×58/.test(a.label) && /方向键/.test(a.label), JSON.stringify(a))
+  await host.focus()
+  const s0 = await bigState(p)
+  const live = () => p.locator('.pd-bk-play [aria-live=polite]').textContent()
+  await p.keyboard.press('ArrowRight')
+  await p.waitForTimeout(100)
+  const s1 = await bigState(p), l1 = await live()
+  check('BIG arrows move the cursor and the live region reads block, row, column and the cell', s1.cx === s0.cx + 1 && s1.cy === s0.cy && /第 \d+ 行第 \d+ 列/.test(l1) && /空/.test(l1), JSON.stringify({ s0: [s0.cx, s0.cy], s1: [s1.cx, s1.cy], l1 }))
+  await p.keyboard.press('Space')
+  await p.waitForTimeout(100)
+  const s2 = await bigState(p), i = s1.cy * 58 + s1.cx
+  check('BIG Space places a bead at the cursor (one undo step)', s2.cells[i] === s2.color && s2.canUndo, JSON.stringify({ v: s2.cells[i], color: s2.color }))
+  await p.keyboard.press('Delete')
+  await p.waitForTimeout(100)
+  const s3 = await bigState(p)
+  check('BIG Delete erases it', s3.cells[i] !== s2.color)
+  await p.keyboard.press('Shift+ArrowRight')
+  await p.waitForTimeout(100)
+  const s4 = await bigState(p), l4 = await live()
+  check('BIG Shift+arrow jumps a block (29 cells) and says the new block', s4.cx === Math.min(57, s3.cx + 29) && /板/.test(l4), JSON.stringify({ cx: s4.cx, l4 }))
+  const z0 = await host.evaluate(el => el.pd.view.s)
+  await p.keyboard.press('+')
+  await p.waitForTimeout(250)
+  const z1 = await host.evaluate(el => el.pd.view.s)
+  await p.keyboard.press('0')
+  await p.waitForTimeout(250)
+  const z2 = await host.evaluate(el => el.pd.view.s)
+  check('BIG + zooms in, 0 fits again', z1 > z0 && z2 === z0, JSON.stringify({ z0, z1, z2 }))
+  await p.keyboard.press('Control+z')
+  await p.waitForTimeout(100)
+  const s5 = await bigState(p)
+  check('BIG Ctrl+Z undoes (the erase comes back)', s5.cells[i] === s2.color)
+  await p.keyboard.press('n')
+  await p.waitForTimeout(150)
+  const s6 = await bigState(p)
+  check('BIG N goes to the next unfinished block', s6.cx % 29 === 0 && s6.cy % 29 === 0 && (s6.cx !== s5.cx || s6.cy !== s5.cy), JSON.stringify({ from: [s5.cx, s5.cy], to: [s6.cx, s6.cy] }))
+  const pressed = await p.locator('.pd-bk-play .pd-tools .pd-tool').first().getAttribute('aria-pressed')
+  await p.keyboard.press('e')
+  const erasePressed = await p.locator('.pd-bk-play .pd-tools .pd-tool').nth(1).getAttribute('aria-pressed')
+  check('BIG tools are toggle buttons with key shortcuts (E selects the eraser)', pressed === 'true' && erasePressed === 'true')
   await p.context().close()
 }
 
+/** A share code over 20 KB is never truncated: 「复制分享码」 becomes 「导出图纸文件」 + the reason (designer steering 3). */
+async function bigShare() {
+  const p = await bigPage()
+  await startPreset(p, 58)
+  // the UI opens at most 116 (where codes stay < 10 KB); a 208² board with 35 % noise (≈ 21.5 KB) is set on the game directly
+  const seed = 7
+  await p.evaluate((n) => {
+    let s = n
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const g = document.querySelector('.pd-bk-app').pd.game
+    const e = g.get().history.present.cells[0]
+    const cells = Object.freeze(Array.from({ length: 208 * 208 }, () => (r() < 0.35 ? Math.floor(r() * 16) : e)))
+    g.set({ history: { past: [], present: { w: 208, h: 208, cells }, future: [] } })
+  }, seed)
+  await p.waitForTimeout(500)
+  await p.locator('.pd-bk-top .pd-btn', { hasText: '分享' }).click()
+  const exportBtn = p.locator('.pd-bk-share .pd-btn', { hasText: '导出图纸文件' })
+  await exportBtn.waitFor({ timeout: 10000 })
+  const ui = await p.evaluate(() => ({ text: document.querySelector('.pd-bk-share').textContent, copy: [...document.querySelectorAll('.pd-bk-share .pd-btn')].some(b => b.textContent.includes('复制分享码')) }))
+  check('BIG share > 20 KB: 「导出图纸文件」 replaces 「复制分享码」, with 「图案太大，分享码放不下，请改用文件分享」', !ui.copy && ui.text.includes('图案太大，分享码放不下，请改用文件分享'), JSON.stringify(ui))
+  await bigShot(p, 'big-share-too-big-zh')
+  const [dl] = await Promise.all([p.waitForEvent('download'), exportBtn.click()])
+  const file = join(OUT, dl.suggestedFilename())
+  await dl.saveAs(file)
+  const code = readFileSync(file, 'utf8')
+  const { decodeV4 } = await import(pathToFileURL(join(REPO, 'src/core/codec-v4.ts')).href)
+  const d = await decodeV4(code)
+  const want = await p.evaluate(() => [...document.querySelector('.pd-bk-app').pd.game.get().history.present.cells])
+  check('BIG the exported pattern file is the whole code (> 20 KB, decodes to the same 208² board: never truncated)', code.length > 20 * 1024 && code.startsWith('pd2:208x208:') && d.ok && d.board.w === 208 && JSON.stringify([...d.board.cells]) === JSON.stringify(want), JSON.stringify({ name: dl.suggestedFilename(), len: code.length, ok: d.ok }))
+  await p.context().close()
+  // English: the same swap with the English line
+  const e = await bigPage({}, 'en')
+  await startPreset(e, 58)
+  await e.evaluate(() => {
+    let s = 7
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const g = document.querySelector('.pd-bk-app').pd.game
+    const em = g.get().history.present.cells[0]
+    g.set({ history: { past: [], present: { w: 208, h: 208, cells: Object.freeze(Array.from({ length: 208 * 208 }, () => (r() < 0.35 ? Math.floor(r() * 16) : em))) }, future: [] } })
+  })
+  await e.waitForTimeout(400)
+  await e.locator('.pd-bk-top .pd-btn', { hasText: 'Share' }).click()
+  await e.locator('.pd-bk-share .pd-btn', { hasText: 'Export pattern file' }).waitFor({ timeout: 10000 })
+  const en = await e.evaluate(() => document.querySelector('.pd-bk-share').textContent)
+  check('BIG share > 20 KB (English): Export pattern file + the reason, no copy button', en.includes('too big for a share code') && !en.includes('Copy share code'), en)
+  await bigShot(e, 'big-share-too-big-en')
+  // a small board keeps 「复制分享码」
+  await e.context().close()
+}
+
+const NO_IDB = 'Object.defineProperty(window, "indexedDB", { configurable: true, get() { return undefined } });'
+const HANG_IDB = 'try { IDBFactory.prototype.open = function () { window.pdIdbAsked = (window.pdIdbAsked || 0) + 1; return new EventTarget() } } catch {}'
+const NO_LOCAL = 'Storage.prototype.setItem = function () { throw new DOMException("blocked", "SecurityError") };'
+
+/** Storage per plan §4.3 + suggestions 1–2. */
+async function bigStorage() {
+  // IndexedDB missing: boards ≤ 58 save to dsh-pindou:save:*; bigger ones say they cannot be saved
+  const p = await bigPage({}, 'zh', NO_IDB)
+  const note = await p.locator('.pd-bk-note').first().textContent().catch(() => '')
+  await bigShot(p, 'big-idb-unavailable-setup')
+  await p.locator('.pd-bk-form input').nth(0).fill('40')
+  await p.locator('.pd-bk-form input').nth(1).fill('30')
+  await p.locator('.pd-bk-form .pd-btn', { hasText: '开始' }).click()
+  await bigHost(p).waitFor()
+  await p.waitForTimeout(300)
+  await bigZoom(p)
+  for (const [x, y] of [[1, 1], [2, 2], [3, 3]]) { const [cx, cy] = await bigCell(p, x, y); await p.mouse.click(cx, cy) }
+  await p.waitForTimeout(2600)
+  const saved = await p.evaluate(() => ({ big: localStorage.getItem('dsh-pindou:save:big'), keys: Object.keys(localStorage).filter(k => k.startsWith('dsh-pindou')) }))
+  const rec = saved.big ? JSON.parse(saved.big) : null
+  check('BIG IDB unavailable: a 40×30 board saves to dsh-pindou:save:big (pd2)', rec?.w === 40 && rec?.h === 30 && rec.code.startsWith('pd2:40x30:'), JSON.stringify({ keys: saved.keys, rec: rec && { w: rec.w, h: rec.h } }))
+  check('BIG IDB unavailable: the setup says big boards cannot be saved here', /此环境无法保存大图进度/.test(note ?? ''), note)
+  await bigShot(p, 'big-idb-unavailable-40x30')
+  // back to setup: 继续上次 offers the local save
+  await p.locator('.pd-bk-top .pd-btn', { hasText: '新建' }).click()
+  const resume = await p.locator('.pd-bk-wide').textContent({ timeout: 5000 }).catch(() => '')
+  check('BIG IDB unavailable: 继续上次 · 40×30 comes back from localStorage', /40×30/.test(resume ?? ''), resume)
+  await startPreset(p, 78)
+  const tooBig = await p.locator('.pd-bk-note').first().textContent().catch(() => '')
+  check('BIG IDB unavailable: a 78×78 board plays but says it will not be saved', /此环境无法保存大图进度/.test(tooBig ?? ''), tooBig)
+  await p.context().close()
+
+  // IndexedDB hangs: a still skeleton + 「正在读取存档…」 after 300 ms, the setup by 2 s, nothing else
+  const h = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', HANG_IDB)
+  await startSession(h, '看看 README')
+  await openPanel(h)
+  await h.locator('.pd-start .pd-big', { hasText: /自由拼/ }).click()
+  await h.locator('.pd-board').waitFor()
+  const hc = h.locator('.pd-overlay.pd-coach button')
+  if (await hc.count()) { await hc.first().click(); await h.waitForTimeout(250) }
+  await h.getByRole('button', { name: /^更多尺寸$/ }).click()
+  await h.locator('.pd-bk').waitFor({ timeout: 15000 })
+  const early = await h.evaluate(() => ({ load: !!document.querySelector('.pd-bk-load'), sizes: !!document.querySelector('.pd-bk-sizes') }))
+  await h.waitForTimeout(700)
+  const mid = await h.evaluate(() => ({ load: document.querySelector('.pd-bk-load')?.textContent ?? null, skel: !!document.querySelector('.pd-bk-skel'), asked: window.pdIdbAsked ?? 0 }))
+  await bigShot(h, 'big-loading-skeleton')
+  await h.locator('.pd-bk-sizes').waitFor({ timeout: 4000 })
+  const late = await h.evaluate(() => ({ load: !!document.querySelector('.pd-bk-load'), notes: [...document.querySelectorAll('.pd-bk-note')].map(n => n.textContent) }))
+  check('BIG slow IndexedDB: nothing for the first 300 ms, then a still skeleton + 「正在读取存档…」, then the setup after the 2 s fallback', !early.sizes && mid.load === '正在读取存档…' && mid.skel && !late.load && mid.asked > 0, JSON.stringify({ early, mid, late }))
+  await h.context().close()
+
+  // neither IndexedDB nor localStorage: 「浏览器存储不可用，进度不会保存」 once, dismissible, not in the way
+  const n = await bigPage({}, 'zh', NO_IDB + NO_LOCAL)
+  const bar = n.locator('.pd-bk-bar')
+  const barText = await bar.textContent({ timeout: 5000 }).catch(() => '')
+  const sizesOk = await n.locator('.pd-bk-sizes .pd-btn').first().isEnabled()
+  await bigShot(n, 'big-storage-unavailable')
+  await bar.getByRole('button', { name: '关闭' }).click()
+  await startPreset(n, 58)
+  const after = await n.evaluate(() => ({ bar: !!document.querySelector('.pd-bk-bar'), notes: [...document.querySelectorAll('.pd-bk-note')].map(x => x.textContent) }))
+  check('BIG no storage at all: 「浏览器存储不可用，进度不会保存」 at the top, dismissible, the page still works and the notice stays closed', /浏览器存储不可用，进度不会保存/.test(barText ?? '') && sizesOk && !after.bar && after.notes.length === 0, JSON.stringify({ barText, after }))
+  await n.context().close()
+}
+
+/** Phase-2 screenshots: 300 and 560 px, light and dark, Chinese and English. */
+async function bigShots() {
+  for (const [lang, scheme] of [['zh', 'light'], ['zh', 'dark'], ['en', 'light'], ['en', 'dark']]) {
+    const p = await bigPage({ colorScheme: scheme }, lang)
+    for (const w of [300, 560]) {
+      await setWidth(p, w)
+      await bigShot(p, `big-setup-${w}-${scheme}-${lang}`)
+    }
+    await startPreset(p, 58)
+    await p.evaluate(() => {
+      const g = document.querySelector('.pd-bk-app').pd.game
+      for (let y = 10; y < 48; y++) for (let x = 10; x < 48; x++) if ((x - 29) ** 2 + (y - 29) ** 2 < 300) g.applyAt(x, y, 'paint')
+    })
+    for (const w of [300, 560]) {
+      await setWidth(p, w)
+      await p.waitForTimeout(500)
+      await bigShot(p, `big-58-${w}-${scheme}-${lang}`)
+    }
+    await p.context().close()
+  }
+}
+
+async function bigSection() {
+  const before = pageErrors.length
+  await bigAria()
+  await undoParity()
+  await bigShare()
+  await bigStorage()
+  await bigShots()
+  const errs = pageErrors.splice(before)
+  check('BIG no page errors on the big-board pages', errs.length === 0, errs.slice(0, 3).join(' | '))
+}
+
 // E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works,
-// E2E_ONLY=s just the README panel shots, E2E_ONLY=v just save safety (the rest of the suite is unchanged)
+// E2E_ONLY=s just the README panel shots, E2E_ONLY=v just save safety, E2E_ONLY=big just the big boards (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
 try {
   {
@@ -1124,6 +1416,8 @@ try {
   if (ONLY === 'v') { log('V. save safety (review I-1)'); await saveSafetySection(); break sections }
   log('V. save safety (review I-1)')
   await saveSafetySection()
+  log('BIG. more sizes (v0.3)')
+  await bigSection()
   // ── T1. picture to pattern (spec §18.2) + lazy modules (spec §18.6), in the real product ──
   log('T1. picture to pattern')
   {
