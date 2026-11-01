@@ -27,7 +27,6 @@ const TOKENS = `
   --pd-text-2:        var(--dsw-alias-label-secondary, #61666B);
   --pd-text-3:        #6B6F76;          /* 4.5:1 on white; the host tertiary (#81858C) is 3.6:1 */
   --pd-hover:         var(--dsw-alias-interactive-bg-hover, rgba(38,49,72,.06));
-  --pd-active:        var(--dsw-alias-interactive-bg-active, rgba(38,49,72,.10));
   --pd-accent:        var(--dsw-alias-state-business-primary, #4176E6);
   --pd-accent-soft:   var(--dsw-alias-state-business-tertiary, #E4EDFD);
   --pd-link:          #4868B2;          /* text links: the host link blue (#4176E6) is 4.2:1 on white */
@@ -37,7 +36,6 @@ const TOKENS = `
   --pd-toast-label:   var(--dsw-alias-toast-label, #FFFFFF);
   --pd-danger:        var(--dsw-alias-state-error-primary, #E5484D);
   --pd-success:       var(--dsw-alias-state-success-primary, #2BA24C);
-  --pd-shadow-pop:    var(--dsw-elevation-soft, 0 4px 14px rgba(0,0,0,.08));
   --pd-warm:          #F5A524;          /* 熨烫热光 */
 
   /* —— 豆板 —— */
@@ -49,7 +47,6 @@ const TOKENS = `
   --pd-cursor:        var(--pd-accent);
 
   /* —— 尺寸 —— */
-  --pd-panel-min: 300px;            /* 宿主右栏最小宽度；面板宽度由宿主决定 */
   --pd-board-max: 480px;            /* 豆板最大边长，宽面板时居中 */
   --pd-pad: 16px; --pd-gap: 12px;
   --pd-header-h: 44px; --pd-status-h: 36px; --pd-toolbar-h: 36px; --pd-footer-h: 40px;
@@ -71,13 +68,9 @@ const TOKENS = `
   --pd-t-fast: 100ms; --pd-t: 200ms; --pd-t-slow: 300ms;
   --pd-t-place: 120ms; --pd-t-erase: 90ms;
   --pd-t-iron-cell: 420ms; --pd-t-iron-total: 1200ms;
-  --pd-t-celebrate: 1400ms; --pd-t-hint: 8000ms;
 
-  /* —— 16 色豆（编码 0-9a-f，主题无关） —— */
-  --pd-bead-0:#F6F4EE; --pd-bead-1:#F2DFA7; --pd-bead-2:#F7C531; --pd-bead-3:#F08A24;
-  --pd-bead-4:#D7333B; --pd-bead-5:#F39DC1; --pd-bead-6:#8A5BB5; --pd-bead-7:#2D4FA0;
-  --pd-bead-8:#62B6E9; --pd-bead-9:#24A79A; --pd-bead-a:#3E9C4A; --pd-bead-b:#A9D46A;
-  --pd-bead-c:#87573A; --pd-bead-d:#D7A473; --pd-bead-e:#9DA1A8; --pd-bead-f:#26272B;
+  /* —— 豆色：只有忙碌胶囊的橙豆走 CSS；其余 15 色由 PALETTE 以内联 --pd-c 给出（v0.3 去掉未用的变量，腾首屏字节） —— */
+  --pd-bead-3: #F08A24;
 }
 body[data-ds-dark-theme] .pd-root, body[data-ds-dark-theme] .pd-portal {
   --pd-text-3:     var(--dsw-alias-label-tertiary, #81858C);
