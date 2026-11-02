@@ -38,10 +38,17 @@ const EDGE = 48
 const SETTLE_MS = 120
 /** Work per frame for new tiles: a zoom sweep keeps its frame rate, detail fills in over the next frames. */
 const TILE_BUDGET_MS = 10
+/** Bead sprite sets (one per tile size × lod) kept; each costs a palette's worth of gradient draws to make. */
+const SPRITE_KEEP = 4
 
 export interface View { readonly s: number; readonly ox: number; readonly oy: number }
 interface Theme { bg: string; peg: string; accent: string; danger: string; ga: number; gh: number }
-interface Sprites { bead: HTMLCanvasElement[]; ghost: HTMLCanvasElement[]; hot: HTMLCanvasElement[]; peg: HTMLCanvasElement | null }
+/**
+ * One tile size's bead sprites, made on first use per colour and kind (bead, ghost, hot): a palette's worth up
+ * front cost ≈ 10 ms at 4× CPU throttle per tile size and landed in one frame (perf, b71a0e0 regression); one at a
+ * time it is part of the measured tile cost, so the frame budget covers it.
+ */
+interface Sprites { k: [Array<HTMLCanvasElement | undefined>, Array<HTMLCanvasElement | undefined>, Array<HTMLCanvasElement | undefined>]; make: (kind: 0 | 1 | 2, i: number) => HTMLCanvasElement; peg: HTMLCanvasElement | null }
 interface Ptr { x: number; y: number; sx: number; sy: number; t: string; at: number }
 
 const canvas = (w: number, h: number): HTMLCanvasElement => {
@@ -63,6 +70,12 @@ const light = (hex: string): boolean => {
 }
 /** Level of detail for `s` CSS px per cell. */
 const lodOf = (s: number): number => (s < 5 ? 0 : s < 14 ? 1 : 2)
+
+/** Quiet time after the last input or frame before the idle build-ahead goes on (designer: input first). */
+export const QUIET_MS = 300
+
+/** How long the idle build-ahead still waits at `now` when the last input or frame was at `last`. */
+export const aheadWait = (now: number, last: number): number => Math.max(0, QUIET_MS - (now - last))
 
 /** Tiles built ahead for the next zoom level at most, per idle spell (designer recheck P2). */
 export const PREBUILD_MAX = 48
@@ -104,8 +117,10 @@ export const tileCells = (b: number): number => Math.max(1, (TILE / b) | 0)
  * `T` cells a side) and their places, the one nearest the box's middle first (designer recheck P1: on a cold
  * cache the detail fills in from the middle outwards, where the eye is).
  */
-export function tilesOf(v: View, cw: number, ch: number, w: number, h: number, dpr: number): { b: number; lod: number; T: number; at: Array<[number, number]> } {
-  const b = tileB(v.s * dpr)
+export function tilesOf(v: View, cw: number, ch: number, w: number, h: number, dpr: number, bAt?: number): { b: number; lod: number; T: number; at: Array<[number, number]> } {
+  // bAt: a frame in motion draws the tiles of the scale it settles on (or last settled on), resampled, instead of
+  // building a new tile size for every fractional frame (WIP perf: b71a0e0 made every eased frame a cache miss)
+  const b = bAt ?? tileB(v.s * dpr)
   const T = tileCells(b), span = T * v.s
   const at: Array<[number, number]> = []
   for (let ty = Math.max(0, Math.floor(-v.oy / span)); ty <= Math.min(Math.ceil(h / T) - 1, Math.floor((ch - v.oy) / span)); ty++) {
@@ -113,7 +128,7 @@ export function tilesOf(v: View, cw: number, ch: number, w: number, h: number, d
   }
   const mx = (cw / 2 - v.ox) / span, my = (ch / 2 - v.oy) / span
   const d = ([x, y]: [number, number]): number => (x + 0.5 - mx) ** 2 + (y + 0.5 - my) ** 2
-  return { b, lod: lodOf(v.s), T, at: at.toSorted((p, q) => d(p) - d(q)) }
+  return { b, lod: bAt === undefined ? lodOf(v.s) : lodOf(b / dpr), T, at: at.toSorted((p, q) => d(p) - d(q)) }
 }
 
 /**
@@ -157,11 +172,18 @@ export class BigCanvas {
   #frame = 0
   /** Stops the idle build-ahead in progress (P2). */
   #idleStop: (() => void) | null = null
+  /** When the last input event or frame request came (performance.now()); the build-ahead waits QUIET_MS after it. */
+  #input = 0
+  /** The next frame is the first since the cache was dropped (open, resize, theme): base layer only, at once. */
+  #cold = true
   /** Running estimate of one new tile's build time (ms). */
   #tileMs = 4
   #settle: ReturnType<typeof setTimeout> | undefined
   /** The running ease: its frame and the scale it ends on. */
   #anim = 0
+  /** Device px per cell of the last settled view: the tile size frames in motion borrow. */
+  #bRest = 0
+  /** Sprite sets in use order; only the newest SPRITE_KEEP stay. */
   #to = 0
   /** Where the last zoom gesture was (the snap's anchor). */
   #at: [number, number] | null = null
@@ -191,7 +213,9 @@ export class BigCanvas {
     this.#cap = (globalThis.matchMedia?.('(pointer: coarse)').matches || devicePixelRatio >= 3 ? 24 : 48) << 20
     this.#theme()
     this.#reset()
-    const on = <K extends keyof HTMLElementEventMap>(t: EventTarget, type: K, fn: (e: HTMLElementEventMap[K]) => void, o: AddEventListenerOptions = { passive: false }): void => {
+    const on = <K extends keyof HTMLElementEventMap>(t: EventTarget, type: K, fn0: (e: HTMLElementEventMap[K]) => void, o: AddEventListenerOptions = { passive: false }): void => {
+      // any input stops the idle build-ahead at once; it goes on QUIET_MS after the last one
+      const fn = (e: HTMLElementEventMap[K]): void => { this.#input = performance.now(); this.#idleStop?.(); fn0(e) }
       t.addEventListener(type, fn as EventListener, o)
       this.#off.push(() => { t.removeEventListener(type, fn as EventListener, o) })
     }
@@ -261,6 +285,7 @@ export class BigCanvas {
     this.#sprites.clear()
     this.#layers.clear()
     this.#bytes = 0
+    this.#cold = true
     this.#reset()
   }
 
@@ -376,20 +401,17 @@ export class BigCanvas {
       x.arc(b / 2, b / 2, Math.max(0.5, b * 0.11), 0, Math.PI * 2)
       x.fill()
     }
-    sp = {
-      bead: this.pal.map(h => one(h, 0, '')),
-      ghost: this.pal.map((h, i) => one(h, 1, i.toString(16))),
-      hot: this.pal.map((h, i) => one(h, 2, i.toString(16))),
-      peg,
-    }
+    sp = { k: [[], [], []], make: (kind, i) => one(this.pal[i]!, kind, kind ? i.toString(16) : ''), peg }
     this.#sprites.set(key, sp)
+    for (const k2 of this.#sprites.keys()) { if (this.#sprites.size <= SPRITE_KEEP) break; this.#sprites.delete(k2) }
     return sp
   }
 
   #cell(c: CanvasRenderingContext2D, i: number, x: number, y: number, b: number, sp: Sprites): void {
     const g = this.game.get(), v = this.#board.cells[i]!, t = g.target ? g.target.cells[i]! : EMPTY
+    const one = (kind: 0 | 1 | 2, j: number): HTMLCanvasElement => sp.k[kind][j] ??= sp.make(kind, j)
     if (v !== EMPTY) {
-      c.drawImage(sp.bead[v]!, x, y)
+      c.drawImage(one(0, v), x, y)
       // a wrong bead gets a dashed red frame, not only a colour (plan §3.6)
       if (g.target && t !== v) {
         c.strokeStyle = this.#th.danger
@@ -398,7 +420,7 @@ export class BigCanvas {
         c.strokeRect(x + c.lineWidth, y + c.lineWidth, b - 2 * c.lineWidth, b - 2 * c.lineWidth)
         c.setLineDash([])
       }
-    } else if (t !== EMPTY) c.drawImage((t === g.color ? sp.hot : sp.ghost)[t]!, x, y)
+    } else if (t !== EMPTY) c.drawImage(one(t === g.color ? 2 : 1, t), x, y)
     else if (sp.peg) c.drawImage(sp.peg, x, y)
   }
 
@@ -414,6 +436,7 @@ export class BigCanvas {
 
   /** Ask for a frame (coalesced); once the view is whole, the next zoom levels' tiles are built while idle. */
   paint(): void {
+    this.#input = performance.now()
     this.#idleStop?.()
     if (this.#gesture) { this.#stretch(); return }
     cancelAnimationFrame(this.#frame)
@@ -429,18 +452,26 @@ export class BigCanvas {
       this.#tiles.delete(k2)
       this.#bytes -= old.width * old.height * 4
     }
+    // a tile size with no tile left stops being patched on every edit
+    const live = new Set<string>()
+    for (const k2 of this.#tiles.keys()) live.add(k2.slice(0, k2.indexOf('/', k2.indexOf('/') + 1)))
+    for (const l of this.#layers.keys()) if (!live.has(l)) this.#layers.delete(l)
   }
 
   /**
    * Build the next zoom levels' tiles ahead, in idle time only (designer recheck P2): requestIdleCallback, one
    * tile per spell and more while it has room for them; without it one tile per 50 ms. At most PREBUILD_MAX, never past the
-   * memory cap (nothing shown is dropped for them); any paint stops it.
+   * memory cap (nothing shown is dropped for them). Any input or paint stops it at once, and it only goes on QUIET_MS
+   * after the last one (designer: a held key or a stroke never waits on a tile built ahead).
    */
   #ahead(): void {
     const plan = prebuildPlan(this.view, this.cw, this.ch, this.#board.w, this.#board.h, this.#dpr)
     const ric = (globalThis as { requestIdleCallback?: typeof requestIdleCallback }).requestIdleCallback
-    let k = 0, h: unknown
+    let k = 0, hI = 0, hT: ReturnType<typeof setTimeout> | undefined
+    const later = (): void => { if (ric) hI = ric(step); else hT = setTimeout(step, 50) }
     const step = (dl?: IdleDeadline): void => {
+      const wait = aheadWait(performance.now(), this.#input)
+      if (wait > 0) { hT = setTimeout(later, wait); return }
       let built = 0
       while (k < plan.length && this.#bytes + TILE * TILE * 4 <= this.#cap) {
         // one tile per idle spell at least: Chrome may hand out spells with no time left at all while the page
@@ -453,11 +484,11 @@ export class BigCanvas {
         built++
         if (!dl) break
       }
-      if (k < plan.length && this.#bytes + TILE * TILE * 4 <= this.#cap) h = ric ? ric(step) : setTimeout(step, 50)
+      if (k < plan.length && this.#bytes + TILE * TILE * 4 <= this.#cap) later()
       else this.#idleStop = null
     }
-    h = ric ? ric(step) : setTimeout(step, 50)
-    this.#idleStop = () => { if (ric) cancelIdleCallback(h as number); else clearTimeout(h as ReturnType<typeof setTimeout>); this.#idleStop = null }
+    later()
+    this.#idleStop = () => { if (ric && hI) cancelIdleCallback(hI); clearTimeout(hT); this.#idleStop = null }
   }
 
   /** Draw the view now; true when tiles are still missing (drawn from the base layer). */
@@ -465,7 +496,21 @@ export class BigCanvas {
     const ctx = this.#ctx, dpr = this.#dpr, { w, h } = this.#board
     const { s, ox, oy } = this.view
     const k0 = s * dpr
-    const { b, lod, T, at } = tilesOf(this.view, this.cw, this.ch, w, h, dpr)
+    // in motion (an ease, a gesture, or any view off whole device px per cell, which a settled view never is since
+    // snapScale): the settling scale's tiles (ease), else the last settled ones, resampled nearest-neighbour, so no
+    // tile size is built per fractional frame (the b71a0e0 regression: every eased frame a new size, its sprites and
+    // tiles built and thrown away); settled: native tiles, 1:1 (strict per-pixel judgement unchanged)
+    const moving = this.#gesture || (this.#to > 0 && Math.abs(this.#to - s) > 1e-6) || Math.abs(k0 - Math.round(k0)) > 1e-6
+    // a frame in motion builds nothing (a held key retargets every 33 ms: tiles built for a target it never lands on
+    // were wasted work and garbage, 200 ms frames at 208²); it draws the target's tiles when the build-ahead made
+    // them, else the last settled ones, and the base layer for the rest
+    const bTo = this.#to ? tileB(this.#to * dpr) : 0, lodTo = bTo ? lodOf(bTo / dpr) : 0
+    const bAt = moving ? (bTo && this.#layers.has(`${bTo}/${lodTo}`) ? bTo : this.#bRest || bTo || undefined) : undefined
+    const { b, lod, T, at } = tilesOf(this.view, this.cw, this.ch, w, h, dpr, bAt)
+    if (!moving) this.#bRest = b
+    // a cold open: the first frame is the 1 px/cell base layer only, at once (designer: colour within 100 ms)
+    const cold = this.#cold
+    this.#cold = false
     this.#shown = this.view
     this.el.style.transform = ''
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -483,7 +528,7 @@ export class BigCanvas {
     for (const [tx, ty] of at) {
       const key = `${b}/${lod}/${tx}/${ty}`
       let t = this.#tiles.get(key)
-      if (t) { this.#tiles.delete(key); this.#tiles.set(key, t) } else if (!built || performance.now() - t0 + this.#tileMs < TILE_BUDGET_MS) {
+      if (t) { this.#tiles.delete(key); this.#tiles.set(key, t) } else if (!cold && !moving && (!built || performance.now() - t0 + this.#tileMs < TILE_BUDGET_MS)) {
         built++
         const tb = performance.now()
         t = this.#tile(b, lod, T, tx, ty)

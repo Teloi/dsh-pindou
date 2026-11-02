@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LEVELS, PREBUILD_MAX, prebuildPlan, pxShown, snapScale, tileB, tileCells, tilesOf } from '../src/client/big-canvas.ts'
+import { aheadWait, LEVELS, PREBUILD_MAX, prebuildPlan, pxShown, QUIET_MS, snapScale, tileB, tileCells, tilesOf } from '../src/client/big-canvas.ts'
 
 /** A 208 × 208 board on a 480 × 520 box at 2× (the designer's cold-cache case). */
 const W = 208, CW = 480, CH = 520, DPR = 2
@@ -112,3 +112,35 @@ describe('px/cell in the status bar (designer: whole numbers at any dpr)', () =>
     for (const dpr of [1.1, 1.25, 1.5, 1.75]) for (const l of LEVELS) expect(Number.isInteger(pxShown(snapScale(l, dpr)))).toBe(true)
   })
 })
+
+describe('frames in motion borrow a settled tile size (perf: b71a0e0 regression)', () => {
+  const v = { s: 11.3, ox: 0, oy: 0 }
+  it('builds at the view\'s own rounded size when settled, at the borrowed size when given', () => {
+    expect(tilesOf(v, 528, 520, 58, 58, 2).b).toBe(23)
+    const t = tilesOf(v, 528, 520, 58, 58, 2, 32)
+    expect(t.b).toBe(32)
+    expect(t.T).toBe(8)
+  })
+  it('takes the lod of the borrowed size, not of the moving scale (no extra layer across a lod boundary)', () => {
+    // 13.5 css px is lod 1 by itself; a borrowed 32 device px at dpr 2 is 16 css px: lod 2, the settled level's
+    expect(tilesOf({ s: 13.5, ox: 0, oy: 0 }, 528, 520, 58, 58, 2).lod).toBe(1)
+    expect(tilesOf({ s: 13.5, ox: 0, oy: 0 }, 528, 520, 58, 58, 2, 32).lod).toBe(2)
+    expect(tilesOf({ s: 4.4, ox: 0, oy: 0 }, 528, 520, 58, 58, 2, 16).lod).toBe(1)
+  })
+  it('covers the same cells with the borrowed tiles (every visible cell in some tile)', () => {
+    const t = tilesOf(v, 528, 520, 58, 58, 2, 32), seen = new Set<string>()
+    for (const [tx, ty] of t.at) for (let y = ty * t.T; y < Math.min(58, (ty + 1) * t.T); y++) for (let x = tx * t.T; x < Math.min(58, (tx + 1) * t.T); x++) seen.add(`${x},${y}`)
+    for (let y = 0; y < 58 && y * v.s < 520; y++) for (let x = 0; x < 58 && x * v.s < 528; x++) expect(seen.has(`${x},${y}`)).toBe(true)
+  })
+})
+
+describe('build-ahead waits for quiet (designer: input first)', () => {
+  it('waits QUIET_MS after the last input or frame, then not at all', () => {
+    expect(QUIET_MS).toBe(300)
+    expect(aheadWait(1000, 1000)).toBe(300)
+    expect(aheadWait(1100, 1000)).toBe(200)
+    expect(aheadWait(1300, 1000)).toBe(0)
+    expect(aheadWait(5000, 1000)).toBe(0)
+  })
+})
+
