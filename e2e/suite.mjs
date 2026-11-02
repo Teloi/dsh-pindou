@@ -1669,6 +1669,23 @@ async function bigI4() {
 }
 
 /**
+ * Recheck R4: the 「拖宽侧栏体验更好」 hint follows the toolbar's container query (panel ≤ 340 px), so a 360 px sidebar
+ * never shows it and a 340 px one does (fresh profile each, the hint being once ever).
+ */
+async function bigHintWidth() {
+  const res = {}
+  for (const px of [360, 341, 340]) {
+    const p = await bigPage()
+    await setWidth(p, px)
+    await startPreset(p, 58)
+    res[px] = (await narrowLook(p)).hint.some(h => h.startsWith('拖宽侧栏体验更好'))
+    if (px === 360) await bigShot(p, 'big-r4-360-no-hint')
+    await p.context().close()
+  }
+  check('BIG recheck R4 the wider-sidebar hint: none at 360 or 341 px, shown at 340 px (the container query\'s width)', !res[360] && !res[341] && res[340], JSON.stringify(res))
+}
+
+/**
  * Review suggestions S4, S5, S7 (v03-p2 findings): touch zoom buttons take the 36 px touch hit (not a fixed
  * 32), a tap on a too-small board zooms straight to 32 (a level, so a pinch afterwards keeps it), and the status
  * bar says 「列 x 行 y」 instead of 「y:x」.
@@ -2025,6 +2042,7 @@ async function bigSection() {
   await bigAria()
   await bigI3()
   await bigI4()
+  await bigHintWidth()
   await bigSuggest()
   await bigTileGap()
   await bigStoreChunk()
@@ -2074,6 +2092,7 @@ try {
   sections: {
   if (ONLY === 'i4') { log('BIG. review I4 narrow panel e2e'); await bigI4(); break sections }
   if (ONLY === 'sg') { log('BIG. review S4 S5 S7'); await bigSuggest(); break sections }
+  if (ONLY === 'rc') { log('BIG. designer recheck R2–R7 + the shortcut list chunk'); await keysChunk(); await bigI4(); await bigHintWidth(); break sections }
   if (ONLY === 'sc') { log('BIG. store chunk delayed / failed'); await bigStoreChunk(); break sections }
   if (ONLY === 'tg') { log('BIG. tile gaps mid-zoom'); await bigTileGap(); break sections }
   if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }

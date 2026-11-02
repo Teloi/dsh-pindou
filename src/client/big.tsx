@@ -283,9 +283,10 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         c.resize(wrap.clientWidth, ch)
       }
     }
-    if (wrap.clientWidth < 360) {
-      setMini(false)
-      // a big board in a narrow panel: once, ever, a quiet line suggests a wider sidebar (review I4)
+    if (wrap.clientWidth < 360) setMini(false)
+    // a big board in a narrow panel: once, ever, a quiet line suggests a wider sidebar (review I4); narrow is the
+    // panel's own width ≤ 340, the container query that folds the toolbar (recheck R4: a 360 sidebar is not)
+    if ((wrap.closest('.pd-root')?.clientWidth ?? 0) <= 340) {
       try { const ls = localStorage; if (Math.max(game.board.w, game.board.h) >= 58 && !ls.getItem(HINT_KEY)) { ls.setItem(HINT_KEY, '1'); setHint(true) } } catch { /* storage blocked */ }
     }
     measure()
