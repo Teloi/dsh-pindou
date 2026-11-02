@@ -1615,6 +1615,9 @@ async function bigI4() {
     // 「更多」 opens clear and export below; Escape folds them again
     await p.locator('.pd-bk-more').click()
     const open = await p.evaluate(() => ({ exp: document.querySelector('.pd-bk-more').getAttribute('aria-expanded'), shown: [...document.querySelectorAll('.pd-bk-x .pd-tool')].map(e => [e.getAttribute('aria-label'), e.getBoundingClientRect().width > 0]) }))
+    // recheck R3: each item shows its name next to the icon, inside the panel
+    const labels = await p.evaluate(() => [...document.querySelectorAll('.pd-bk-x .pd-tool')].map((e) => { const l = e.querySelector('.pd-bk-l'), r = (l ?? e).getBoundingClientRect(), root = document.querySelector('.pd-root').getBoundingClientRect(); return [l?.textContent ?? null, r.width > 0, r.left >= root.left && e.getBoundingClientRect().right <= root.right] }))
+    check(`BIG recheck R3 300 px${tag}: the open 「更多」 menu reads 清空 and 导出 PNG beside the icons, inside the panel`, labels.map(x => x.join()).join('|') === '清空,true,true|导出 PNG,true,true', JSON.stringify(labels))
     if (!touch) await bigShot(p, 'big-i4-300-more')
     await p.keyboard.press('Escape')
     const shut = await p.evaluate(() => ({ exp: document.querySelector('.pd-bk-more').getAttribute('aria-expanded'), shown: [...document.querySelectorAll('.pd-bk-x .pd-tool')].some(e => e.getBoundingClientRect().width > 0) }))
@@ -1659,6 +1662,8 @@ async function bigI4() {
     await setWidth(p, 560)
     const w = await narrowLook(p)
     check(`BIG I4 560 px${tag}: clear and export in the toolbar, no 「更多」, one row, no overflow`, w.rows === 1 && !w.more && w.inline.every(Boolean) && w.over === 0, JSON.stringify(w))
+    const wl = await p.evaluate(() => [...document.querySelectorAll('.pd-bk-x .pd-bk-l')].some(l => l.getBoundingClientRect().width > 0))
+    check(`BIG recheck R3 560 px${tag}: the toolbar's clear and export stay icon-only (the labels are the menu's)`, !wl, String(wl))
     await p.context().close()
   }
 }

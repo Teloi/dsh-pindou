@@ -444,12 +444,12 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <span className="pd-sep" aria-hidden />
         {/* a narrow panel keeps one row: clear and export fold under 「更多」 (review I4, plan §3.1 fig. 3) */}
         <button ref={moreRef} type="button" className="pd-tool pd-bk-more" aria-label={t('more')} title={t('more')} aria-expanded={more} aria-controls={`${uid}-x`} onClick={() => { setMore(!more) }}>⋯</button>
-        {/* the open menu handles its own Escape */}
+        {/* the open menu: icon + text (recheck R3); it handles its own Escape */}
         <span id={`${uid}-x`} className={more ? 'pd-bk-x pd-on' : 'pd-bk-x'} onKeyDown={(e) => { if (e.key === 'Escape' && more) { e.stopPropagation(); fold() } }}>
           <button type="button" className="pd-tool" aria-label={t('clear')} title={t('clear')}
-            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { fold(); clear() }}>{ic(6)}</button>
+            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { fold(); clear() }}>{ic(6)}<span className="pd-bk-l" aria-hidden>{t('clear')}</span></button>
           <button type="button" className="pd-tool" aria-label={t('png')} title={t('png')}
-            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { fold(); kit.exportBoard(env, { board, target: null }) }}>{ic(7)}</button>
+            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { fold(); kit.exportBoard(env, { board, target: null }) }}>{ic(7)}<span className="pd-bk-l" aria-hidden>{t('png')}</span></button>
         </span>
       </div>
       {hint ? <p className="pd-tokens pd-bk-bar" role="status"><span>{t('wide')}</span><button type="button" className="pd-ib" aria-label={t('close')} onClick={() => { setHint(false) }}>×</button></p> : null}

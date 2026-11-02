@@ -54,12 +54,16 @@ export const BIG_CSS = `
 .pd-bk-play .pd-tools{position:relative}
 .pd-bk-play .pd-bk-more{display:none}
 .pd-bk-x{display:contents}
+/* the open menu's text labels show only there (recheck R3) */
+.pd-bk-l{display:none}
 @container pd (max-width: 340px){
   .pd-bk-play .pd-tools{flex-wrap:nowrap}
   .pd-bk-play .pd-palette{--pd-swatch:28px}
   .pd-bk-play .pd-bk-more{display:grid}
   .pd-bk-x{display:none}
-  .pd-bk-x.pd-on{display:flex;position:absolute;right:0;top:100%;z-index:5;padding:2px;border-radius:var(--pd-radius-ctl);background:var(--pd-surface-raised);box-shadow:0 2px 8px rgba(0,0,0,.18)}
+  .pd-bk-x.pd-on{display:flex;flex-direction:column;position:absolute;right:0;top:100%;z-index:5;padding:2px;border-radius:var(--pd-radius-ctl);background:var(--pd-surface-raised);box-shadow:0 2px 8px rgba(0,0,0,.18)}
+  .pd-bk-play .pd-bk-x.pd-on .pd-tool{flex:none;width:auto;max-width:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 8px;white-space:nowrap}
+  .pd-bk-x.pd-on .pd-bk-l{display:inline;font-size:13px;color:var(--pd-text)}
 }
 /* below 360 the minimap starts folded into its button (plan §3.4) */
 .pd-bk-blocks{margin-top:var(--pd-gap);font-size:12.5px;color:var(--pd-text-2)}
