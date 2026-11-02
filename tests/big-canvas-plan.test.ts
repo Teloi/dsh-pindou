@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LEVELS, PREBUILD_MAX, prebuildPlan, snapScale, tileB, tileCells, tilesOf } from '../src/client/big-canvas.ts'
+import { LEVELS, PREBUILD_MAX, prebuildPlan, pxShown, snapScale, tileB, tileCells, tilesOf } from '../src/client/big-canvas.ts'
 
 /** A 208 × 208 board on a 480 × 520 box at 2× (the designer's cold-cache case). */
 const W = 208, CW = 480, CH = 520, DPR = 2
@@ -100,5 +100,15 @@ describe('big canvas tiles (designer recheck P1/P2)', () => {
     }
     // a whole scale is kept as it is (no drift from repeated snapping)
     for (const s of lv) expect(snapScale(s, dpr)).toBe(s)
+  })
+})
+
+describe('px/cell in the status bar (designer: whole numbers at any dpr)', () => {
+  it.each([[8.181818, 8], [19.0909, 19], [11.8181, 12], [2.5, 3], [16, 16], [64, 64], [8.6, 9]])('shows %f px as %i', (s, n) => {
+    expect(pxShown(s)).toBe(n)
+    expect(Number.isInteger(pxShown(s))).toBe(true)
+  })
+  it('shows a whole number for every snapped level at fractional dprs', () => {
+    for (const dpr of [1.1, 1.25, 1.5, 1.75]) for (const l of LEVELS) expect(Number.isInteger(pxShown(snapScale(l, dpr)))).toBe(true)
   })
 })

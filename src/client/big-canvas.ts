@@ -90,6 +90,13 @@ export function snapScale(s: number, dpr: number, down = false): number {
 }
 
 /** Cells a side of a tile built at `b` device px per cell (at most TILE device px a side, one cell at least). */
+/**
+ * The status bar's 「px/格」 number (and the screen-reader text, the same span): the cell's CSS px rounded to a whole
+ * number at every dpr, no 「约」 (designer). The cell is drawn at whole device px, which at a fractional dpr is a
+ * fractional CSS size (8.18 at a 1.1× fit); the bar shows 8.
+ */
+export const pxShown = (s: number): number => Math.round(s)
+
 export const tileCells = (b: number): number => Math.max(1, (TILE / b) | 0)
 
 /**

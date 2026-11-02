@@ -14,7 +14,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { blank, EMPTY } from '../core/big-board.ts'
 import type { Board } from '../core/board.ts'
 import type { SaveStore } from '../core/save-store.ts'
-import { BigCanvas, type View } from './big-canvas.ts'
+import { BigCanvas, pxShown, type View } from './big-canvas.ts'
 import { BigGame, type BigTool } from './big-game.ts'
 import { BIG_CSS } from './big-styles.ts'
 import type { Env } from './ui/context.tsx'
@@ -407,8 +407,8 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
   const sv = st?.status()
   // a board this page cannot save, on the localStorage fallback: IDB missing (card) or only slow (a quiet line)
   const local = st && !st.canSave(w, h) && sv?.backend === 'local', slow = sv?.slow
-  // the cell as drawn: whole device px since the view settles on them, so e.g. 2.5 at a 2× fit, not a rounded 3
-  const level = view ? Math.round(view.s * 10) / 10 : 0
+  // the cell's CSS px, rounded to a whole number at every dpr (designer: no decimals, no 「约」); read aloud the same
+  const level = view ? pxShown(view.s) : 0
 
   return (
     <div className="pd-bk-play" onKeyDown={onKey}>
@@ -481,7 +481,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <button type="button" className="pd-btn" onClick={() => { nextBlock(1) }}>{t('next')}</button>
         <span className="pd-spacer" />
         <span>{t('pos', { x: s.cx + 1, y: s.cy + 1 })}</span>
-        {level ? <span className="pd-bk-px">{t('px', { n: level })}</span> : null}
+        {level ? <span className="pd-bk-px" aria-label={t('px', { n: level })}>{t('px', { n: level })}</span> : null}
         {target
           ? <button type="button" className="pd-btn" aria-pressed={s.only} onClick={() => { game.set({ only: !s.only }) }}>{t('only')}</button>
           : null}

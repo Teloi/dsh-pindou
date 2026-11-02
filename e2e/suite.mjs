@@ -1409,13 +1409,13 @@ async function bigTileGap() {
  * frame is the settled view (no jump after it) and 「px/格」 shows the cell as drawn. Frames inside a gesture or an
  * ease may be fractional.
  */
-/** 「px/格」 reads the drawn cell size (one decimal when fractional) */
-const pxOk = v => v.px.startsWith(`${Math.round(v.s * 10) / 10} `)
+/** 「px/格」 reads the cell's CSS px rounded to a whole number (designer), no 「约」, and the screen-reader text is the same */
+const pxOk = v => v.px.startsWith(`${Math.round(v.s)} `) && !v.px.includes('约') && v.aria === v.px
 async function snapAt(dsf) {
   const p = await bigPage({ deviceScaleFactor: dsf })
   await startPreset(p, 58)
   const whole = s => Math.abs(s * dsf - Math.round(s * dsf)) < 1e-5
-  const shown = () => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; return { s: c.view.s, ox: c.view.ox, oy: c.view.oy, px: document.querySelector('.pd-bk-px')?.textContent ?? '', cw: c.cw, el: c.el.width, css: parseFloat(c.el.style.width) } })
+  const shown = () => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; return { s: c.view.s, ox: c.view.ox, oy: c.view.oy, px: document.querySelector('.pd-bk-px')?.textContent ?? '', aria: document.querySelector('.pd-bk-px')?.getAttribute('aria-label') ?? '', cw: c.cw, el: c.el.width, css: parseFloat(c.el.style.width) } })
   await p.keyboard.press('Escape')
   await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView(c.fitView()); c.draw() })
   await p.waitForTimeout(150)
@@ -1454,7 +1454,7 @@ async function snapAt(dsf) {
   check(`BIG snap @${dsf}×: the fit, every level and a Ctrl+wheel stopped between levels settle on whole device px per cell (fit ${fit.s * dsf}, levels ${levels.map(v => +(v.s * dsf).toFixed(3)).join('/')}, wheel ${+(w.s * dsf).toFixed(2)} → ${+(after.s * dsf).toFixed(3)} device px); the canvas store is its CSS box × dpr exactly`,
     whole(fit.s) && levels.length >= 6 && levels.every(v => whole(v.s)) && !whole(w.s) && whole(after.s) && Math.abs(after.s - w.s) * dsf <= 0.5 + 1e-6 && Math.abs(end.el - end.css * dsf) < 0.01 && Math.abs(end.cw - end.css) < 0.001,
     JSON.stringify({ fit, levels, w, after: { s: after.s }, end }))
-  check(`BIG snap @${dsf}×: the pointer's board point stays put (< 0.02 cell), the ease runs one way and its last frame is the settled view (no jump after it); 「px/格」 shows the drawn size at the fit, each level and after the wheel`,
+  check(`BIG snap @${dsf}×: the pointer's board point stays put (< 0.02 cell), the ease runs one way and its last frame is the settled view (no jump after it); 「px/格」 shows the cell's px rounded to a whole number (no 「约」, read aloud the same) at the fit, each level and after the wheel`,
     drift < 0.02 && steady && mono && firstEnd >= 0 && pxOk(fit) && levels.every(pxOk) && pxOk(end), JSON.stringify({ drift, steady, mono, frames: fr.length, firstEnd, px: [fit.px, ...levels.map(v => v.px), end.px] }))
   await p.context().close()
 }
