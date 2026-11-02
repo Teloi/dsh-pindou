@@ -17,6 +17,7 @@ export const BIG_CSS = `
 .pd-bk-bar{display:flex;align-items:center;gap:6px;margin:0 0 6px}
 .pd-bk-bar span{flex:1}
 .pd-bk-bar .pd-ib{width:28px;height:28px;flex:none}
+.pd-bk-bar .pd-btn{min-height:28px;padding:0 10px;font-size:12px;flex:none}
 /* waiting on IndexedDB: a still bead grid, no motion (shown only past 300 ms) */
 .pd-bk-load{color:var(--pd-text-2);font-size:12.5px;text-align:center}
 .pd-bk-skel{height:240px;margin-bottom:8px;border-radius:var(--pd-radius-board);background:radial-gradient(circle,var(--pd-border) 34%,transparent 38%) 0 0/14px 14px,var(--pd-surface)}
