@@ -62,6 +62,9 @@ const light = (hex: string): boolean => {
 /** Level of detail for `s` CSS px per cell. */
 const lodOf = (s: number): number => (s < 5 ? 0 : s < 14 ? 1 : 2)
 
+/** Tiles built ahead for the next zoom level at most, per idle spell (designer recheck P2). */
+export const PREBUILD_MAX = 48
+
 /**
  * The tiles a view shows on a `cw` × `ch` box over a `w` × `h` board: their size (`b` device px per cell, `lod`,
  * `T` cells a side) and their places, the one nearest the box's middle first (designer recheck P1: on a cold
@@ -77,6 +80,26 @@ export function tilesOf(v: View, cw: number, ch: number, w: number, h: number, d
   const mx = (cw / 2 - v.ox) / span, my = (ch / 2 - v.oy) / span
   const d = ([x, y]: [number, number]): number => (x + 0.5 - mx) ** 2 + (y + 0.5 - my) ** 2
   return { b, lod: lodOf(v.s), T, at: at.toSorted((p, q) => d(p) - d(q)) }
+}
+
+/**
+ * The tiles to build ahead while the page is idle (designer recheck P2): those of the nearest zoom level each
+ * way that needs other tiles than `v` (in first, then out), zoomed about the box's middle as the buttons and keys do, middle first, without the
+ * tile size `v` itself shows, and `max` at most.
+ */
+export function prebuildPlan(v: View, cw: number, ch: number, w: number, h: number, dpr: number, max = PREBUILD_MAX): Array<{ b: number; lod: number; T: number; tx: number; ty: number }> {
+  const now = tilesOf(v, cw, ch, w, h, dpr), key = `${now.b}/${now.lod}`
+  const at = (s: number): ReturnType<typeof tilesOf> => {
+    const k = s / v.s
+    return tilesOf({ s, ox: cw / 2 - (cw / 2 - v.ox) * k, oy: ch / 2 - (ch / 2 - v.oy) * k }, cw, ch, w, h, dpr)
+  }
+  const out: Array<{ b: number; lod: number; T: number; tx: number; ty: number }> = []
+  // each way, the nearest level that needs other tiles than these (4 and 8 px/cell may share a tile size)
+  for (const ls of [LEVELS.filter(l => l > v.s + 0.01), LEVELS.filter(l => l < v.s - 0.01).toReversed()]) {
+    const g = ls.map(at).find(t => `${t.b}/${t.lod}` !== key)
+    if (g) for (const [tx, ty] of g.at) if (out.length < max) out.push({ b: g.b, lod: g.lod, T: g.T, tx, ty })
+  }
+  return out
 }
 
 export class BigCanvas {
@@ -98,6 +121,8 @@ export class BigCanvas {
   /** [b, lod] of every tile size in the cache, for patching. */
   readonly #layers = new Map<string, [number, number]>()
   #frame = 0
+  /** Stops the idle build-ahead in progress (P2). */
+  #idleStop: (() => void) | null = null
   /** Running estimate of one new tile's build time (ms). */
   #tileMs = 4
   #settle: ReturnType<typeof setTimeout> | undefined
@@ -163,6 +188,7 @@ export class BigCanvas {
     for (const f of this.#off) f()
     cancelAnimationFrame(this.#frame)
     cancelAnimationFrame(this.#anim)
+    this.#idleStop?.()
     clearTimeout(this.#settle)
     clearTimeout(this.#wait)
   }
@@ -347,11 +373,12 @@ export class BigCanvas {
     return c
   }
 
-  /** Ask for a frame (coalesced). */
+  /** Ask for a frame (coalesced); once the view is whole, the next zoom levels' tiles are built while idle. */
   paint(): void {
+    this.#idleStop?.()
     if (this.#gesture) { this.#stretch(); return }
     cancelAnimationFrame(this.#frame)
-    this.#frame = requestAnimationFrame(() => { if (this.draw()) this.paint() })
+    this.#frame = requestAnimationFrame(() => { if (this.draw()) this.paint(); else this.#ahead() })
   }
 
   /** Keep a new tile, the oldest going past the memory cap. */
@@ -363,6 +390,35 @@ export class BigCanvas {
       this.#tiles.delete(k2)
       this.#bytes -= old.width * old.height * 4
     }
+  }
+
+  /**
+   * Build the next zoom levels' tiles ahead, in idle time only (designer recheck P2): requestIdleCallback, one
+   * tile per spell and more while it has room for them; without it one tile per 50 ms. At most PREBUILD_MAX, never past the
+   * memory cap (nothing shown is dropped for them); any paint stops it.
+   */
+  #ahead(): void {
+    const plan = prebuildPlan(this.view, this.cw, this.ch, this.#board.w, this.#board.h, this.#dpr)
+    const ric = (globalThis as { requestIdleCallback?: typeof requestIdleCallback }).requestIdleCallback
+    let k = 0, h: unknown
+    const step = (dl?: IdleDeadline): void => {
+      let built = 0
+      while (k < plan.length && this.#bytes + TILE * TILE * 4 <= this.#cap) {
+        // one tile per idle spell at least: Chrome may hand out spells with no time left at all while the page
+        // has frames to draw (seen in e2e, every spell 0 ms), and then nothing would ever be built ahead
+        if (dl && built && dl.timeRemaining() < this.#tileMs + 1) break
+        const { b, lod, T, tx, ty } = plan[k++]!, key = `${b}/${lod}/${tx}/${ty}`
+        if (this.#tiles.has(key)) continue
+        this.#layers.set(`${b}/${lod}`, [b, lod])
+        this.#keep(key, this.#tile(b, lod, T, tx, ty))
+        built++
+        if (!dl) break
+      }
+      if (k < plan.length && this.#bytes + TILE * TILE * 4 <= this.#cap) h = ric ? ric(step) : setTimeout(step, 50)
+      else this.#idleStop = null
+    }
+    h = ric ? ric(step) : setTimeout(step, 50)
+    this.#idleStop = () => { if (ric) cancelIdleCallback(h as number); else clearTimeout(h as ReturnType<typeof setTimeout>); this.#idleStop = null }
   }
 
   /** Draw the view now; true when tiles are still missing (drawn from the base layer). */

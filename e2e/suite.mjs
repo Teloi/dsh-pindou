@@ -1685,6 +1685,37 @@ async function bigHintWidth() {
   check('BIG recheck R4 the wider-sidebar hint: none at 360 or 341 px, shown at 340 px (the container query\'s width)', !res[360] && !res[341] && res[340], JSON.stringify(res))
 }
 
+/**
+ * Recheck P2: on a 208 × 208 board left at 「全图」, idle time builds the next zoom level's tiles ahead, so the first
+ * step in (about the middle, as the + button does) is drawn whole at once, with no base-layer stand-ins.
+ */
+async function bigAhead() {
+  const p = await bigPage()
+  // the designer's case: a 480 px wide panel, where the next level's tiles fit in PREBUILD_MAX (48); on a
+  // 1280 px page they don't (≈ 9 × 6 at 8 px/格), so only the middle 48 are built ahead and the edges come after
+  await setWidth(p, 480)
+  await startPreset(p, 58)
+  await p.evaluate(() => {
+    let s = 7
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const g = document.querySelector('.pd-bk-app').pd.game
+    g.set({ history: { past: [], present: { w: 208, h: 208, cells: Object.freeze(Array.from({ length: 208 * 208 }, () => Math.floor(r() * 16))) }, future: [] } })
+  })
+  await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView(c.fitView()) })
+  await p.waitForTimeout(2500)
+  const r = await p.evaluate(() => {
+    const c = document.querySelector('.pd-bk-app').pd, v = c.view
+    const s = [4, 8, 12, 16, 24, 32, 48, 64].find(l => l > v.s && Math.ceil(Math.log2(l * devicePixelRatio)) !== Math.ceil(Math.log2(Math.max(1, v.s * devicePixelRatio))))
+    const k = s / v.s, cx = c.cw / 2, cy = c.ch / 2
+    c.setView({ s, ox: cx - (cx - v.ox) * k, oy: cy - (cy - v.oy) * k })
+    const t0 = performance.now(), missing = c.draw()
+    return { from: v.s, to: c.view.s, missing, ms: Math.round(performance.now() - t0), box: [c.cw, c.ch] }
+  })
+  await bigShot(p, 'big-p2-ahead-first-step')
+  check('BIG recheck P2: after idle at 「全图」 the first step in on 208² is drawn whole at once (its tiles were built ahead)', r.to > r.from && !r.missing, JSON.stringify(r))
+  await p.context().close()
+}
+
 /** Recheck R7 (user S5): at 300 px 「px/格」 gets a line of its own at the end of the status bar, whole and inside the panel. */
 async function bigStatusNarrow() {
   const p = await bigPage()
@@ -2092,6 +2123,7 @@ async function bigSection() {
   await bigI4()
   await bigHintWidth()
   await bigStatusNarrow()
+  await bigAhead()
   await bigSuggest()
   await bigTileGap()
   await bigStoreChunk()
@@ -2141,7 +2173,7 @@ try {
   sections: {
   if (ONLY === 'i4') { log('BIG. review I4 narrow panel e2e'); await bigI4(); break sections }
   if (ONLY === 'sg') { log('BIG. review S4 S5 S7'); await bigSuggest(); break sections }
-  if (ONLY === 'rc') { log('BIG. designer recheck R2–R7 + the shortcut list chunk'); await keysChunk(); await bigI4(); await bigHintWidth(); await bigStoreChunk(); await bigStatusNarrow(); break sections }
+  if (ONLY === 'rc') { log('BIG. designer recheck R2–R7 + P2 + the shortcut list chunk'); await keysChunk(); await bigI4(); await bigHintWidth(); await bigStoreChunk(); await bigStatusNarrow(); await bigAhead(); break sections }
   if (ONLY === 'sc') { log('BIG. store chunk delayed / failed'); await bigStoreChunk(); break sections }
   if (ONLY === 'tg') { log('BIG. tile gaps mid-zoom'); await bigTileGap(); break sections }
   if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }
