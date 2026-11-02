@@ -150,6 +150,7 @@ dsh plugin --profile desktop remove dsh-pindou
 - **Open it**: the bead button on the right of the session header, or the small pill that appears above the composer after the model has been running for 3 seconds. The pill shows at most twice per session and stays away while you type, while the panel is open, or when the window is too narrow. You can turn it off in the ⋯ menu.
 - **Templates**: faint guide beads and a completion meter; when you finish, it offers to iron the piece.
 - **Tools**: paint, picker, eraser, fill, undo/redo, clear (undoable for 5 seconds). Boards come in 12 / 16 / 24 with 16 colors.
+- **More sizes**: "More sizes" next to the size buttons opens big boards: pegboard presets (29–116) or a custom width × height (8–116), optionally in blocks. Big boards are drawn on a canvas with zoom (buttons, + − 0, Ctrl+wheel, pinch), a minimap, a block list and "This colour only"; progress saves itself to the browser's IndexedDB, and a board can be shared as a `pd2:` code or a pattern file. The shortcut list is under "Keyboard shortcuts" in the ⋯ menu.
 - **Export**: save as PNG, or copy the image to the clipboard (the Copy button is hidden where the browser can't do it).
 - **Shortcut**: in the desktop app ⌘⌥K / Ctrl+Alt+K toggles the panel and can be rebound in Settings → Shortcuts. The Web shell has no default because DSH already uses that combination for "Search sessions"; bind one in Settings if you want it.
 - **Keyboard and screen readers**: arrow keys move, Space/Enter places, Delete erases. The board is a labelled grid and each cell announces its position, color and guide color.
@@ -162,7 +163,7 @@ dsh plugin --profile desktop remove dsh-pindou
 - **Autosave**: progress is kept in the browser's localStorage (key `dsh-pindou:v1`). The wall has its own key, `dsh-pindou:works`, under 1 KB per piece.
 - **Loaded on demand**: Picture to pattern and the wall page are async modules, loaded the first time you open them, so the first-screen bundle does not grow. On a DSH too old to load them the card reads "Requires a newer DSH" and is disabled; if loading fails it reads "Couldn't load · Retry". In both cases a picture dropped on the panel is swallowed and never becomes a chat attachment.
 - **Language and theme**: follows DSH's language (Chinese first, English included) and light/dark theme.
-- **Not yet** (planned for v2): zooming the board (cells already size themselves to the panel), and AI patterns appearing row by row (the whole pattern lands at once).
+- **Not yet** (planned for v2): zooming the 12 / 16 / 24 boards (their cells already size themselves to the panel; big boards are under "More sizes"), and AI patterns appearing row by row (the whole pattern lands at once).
 
 </details>
 
