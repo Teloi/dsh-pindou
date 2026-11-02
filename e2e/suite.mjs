@@ -1685,6 +1685,28 @@ async function bigHintWidth() {
   check('BIG recheck R4 the wider-sidebar hint: none at 360 or 341 px, shown at 340 px (the container query\'s width)', !res[360] && !res[341] && res[340], JSON.stringify(res))
 }
 
+/** Recheck R7 (user S5): at 300 px 「px/格」 gets a line of its own at the end of the status bar, whole and inside the panel. */
+async function bigStatusNarrow() {
+  const p = await bigPage()
+  await setWidth(p, 300)
+  await startPreset(p, 58)
+  await p.locator('.pd-bk-zoom .pd-ib').nth(2).click()
+  await p.waitForTimeout(400)
+  const r = await p.evaluate(() => {
+    const st = document.querySelector('.pd-bk-st')
+    const px = [...st.children].find(e => /px\/格/.test(e.textContent))
+    if (!px) return null
+    const b = px.getBoundingClientRect()
+    const root = document.querySelector('.pd-root').getBoundingClientRect()
+    const others = [...st.children].filter(e => e !== px && e.getBoundingClientRect().width > 0).map(e => e.getBoundingClientRect())
+    return { text: px.textContent, top: Math.round(b.top), below: others.every(o => o.bottom <= b.top + 1), alone: !others.some(o => Math.abs(o.top - b.top) < 4),
+      whole: px.scrollWidth <= Math.ceil(b.width) + 1 && b.height < 24, inside: b.left >= root.left - 1 && b.right <= root.right + 1 }
+  })
+  await bigShot(p, 'big-r7-300-px-line')
+  check('BIG recheck R7 300 px: 「px/格」 sits on its own last line of the status bar, whole and inside the panel', !!r && r.below && r.alone && r.whole && r.inside, JSON.stringify(r))
+  await p.context().close()
+}
+
 /**
  * Review suggestions S4, S5, S7 (v03-p2 findings): touch zoom buttons take the 36 px touch hit (not a fixed
  * 32), a tap on a too-small board zooms straight to 32 (a level, so a pinch afterwards keeps it), and the status
@@ -2069,6 +2091,7 @@ async function bigSection() {
   await bigI3()
   await bigI4()
   await bigHintWidth()
+  await bigStatusNarrow()
   await bigSuggest()
   await bigTileGap()
   await bigStoreChunk()
@@ -2118,7 +2141,7 @@ try {
   sections: {
   if (ONLY === 'i4') { log('BIG. review I4 narrow panel e2e'); await bigI4(); break sections }
   if (ONLY === 'sg') { log('BIG. review S4 S5 S7'); await bigSuggest(); break sections }
-  if (ONLY === 'rc') { log('BIG. designer recheck R2–R7 + the shortcut list chunk'); await keysChunk(); await bigI4(); await bigHintWidth(); await bigStoreChunk(); break sections }
+  if (ONLY === 'rc') { log('BIG. designer recheck R2–R7 + the shortcut list chunk'); await keysChunk(); await bigI4(); await bigHintWidth(); await bigStoreChunk(); await bigStatusNarrow(); break sections }
   if (ONLY === 'sc') { log('BIG. store chunk delayed / failed'); await bigStoreChunk(); break sections }
   if (ONLY === 'tg') { log('BIG. tile gaps mid-zoom'); await bigTileGap(); break sections }
   if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }

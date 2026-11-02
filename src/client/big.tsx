@@ -480,7 +480,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
         <button type="button" className="pd-btn" onClick={() => { nextBlock(1) }}>{t('next')}</button>
         <span className="pd-spacer" />
         <span>{t('pos', { x: s.cx + 1, y: s.cy + 1 })}</span>
-        {level ? <span>{t('px', { n: level })}</span> : null}
+        {level ? <span className="pd-bk-px">{t('px', { n: level })}</span> : null}
         {target
           ? <button type="button" className="pd-btn" aria-pressed={s.only} onClick={() => { game.set({ only: !s.only }) }}>{t('only')}</button>
           : null}

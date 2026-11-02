@@ -65,6 +65,7 @@ export const BIG_CSS = `
   .pd-bk-x.pd-on{display:flex;flex-direction:column;position:absolute;right:0;top:100%;z-index:5;padding:2px;border-radius:var(--pd-radius-ctl);background:var(--pd-surface-raised);box-shadow:0 2px 8px rgba(0,0,0,.18)}
   .pd-bk-play .pd-bk-x.pd-on .pd-tool{flex:none;width:auto;max-width:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 8px;white-space:nowrap}
   .pd-bk-x.pd-on .pd-bk-l{display:inline;font-size:13px;color:var(--pd-text)}
+  .pd-bk-st .pd-bk-px{order:1;flex-basis:100%}
 }
 /* below 360 the minimap starts folded into its button (plan §3.4) */
 .pd-bk-blocks{margin-top:var(--pd-gap);font-size:12.5px;color:var(--pd-text-2)}
