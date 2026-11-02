@@ -188,6 +188,11 @@ export class BigCanvas {
   /** Where the last zoom gesture was (the snap's anchor). */
   #at: [number, number] | null = null
   #gesture = false
+  /** The last frame was in motion (it built nothing). */
+  #moved = false
+  /** A view off whole device px per cell with no ease or gesture on: its key once it stayed SETTLE_MS, then built. */
+  #still = ''
+  #stillT: ReturnType<typeof setTimeout> | undefined
   readonly #ptrs = new Map<number, Ptr>()
   #mode: 'none' | 'wait' | 'paint' | 'pan' | 'pinch' | 'dead' = 'none'
   #wait: ReturnType<typeof setTimeout> | undefined
@@ -248,6 +253,7 @@ export class BigCanvas {
     cancelAnimationFrame(this.#anim)
     this.#idleStop?.()
     clearTimeout(this.#settle)
+    clearTimeout(this.#stillT)
     clearTimeout(this.#wait)
   }
 
@@ -440,7 +446,9 @@ export class BigCanvas {
     this.#idleStop?.()
     if (this.#gesture) { this.#stretch(); return }
     cancelAnimationFrame(this.#frame)
-    this.#frame = requestAnimationFrame(() => { if (this.draw()) this.paint(); else this.#ahead() })
+    // a frame in motion builds nothing, so asking again for the same view would spin: the next frame in motion comes
+    // from the ease, the gesture or the next setView, and a view left off whole px is built SETTLE_MS later (#still)
+    this.#frame = requestAnimationFrame(() => { if (this.draw() && !this.#moved) this.paint(); else if (!this.#moved) this.#ahead() })
   }
 
   /** Keep a new tile, the oldest going past the memory cap. */
@@ -500,7 +508,14 @@ export class BigCanvas {
     // snapScale): the settling scale's tiles (ease), else the last settled ones, resampled nearest-neighbour, so no
     // tile size is built per fractional frame (the b71a0e0 regression: every eased frame a new size, its sprites and
     // tiles built and thrown away); settled: native tiles, 1:1 (strict per-pixel judgement unchanged)
-    const moving = this.#gesture || (this.#to > 0 && Math.abs(this.#to - s) > 1e-6) || Math.abs(k0 - Math.round(k0)) > 1e-6
+    const easing = this.#to > 0 && Math.abs(this.#to - s) > 1e-6, vKey = `${s}/${ox}/${oy}`
+    // off whole px with nothing moving it (a setView mid-sweep): in motion until it stays put SETTLE_MS, then drawn
+    // with its own tiles like any view at rest (no frame loop meanwhile: see paint)
+    const frac = Math.abs(k0 - Math.round(k0)) > 1e-6 && this.#still !== vKey
+    const moving = this.#gesture || easing || frac
+    this.#moved = moving
+    clearTimeout(this.#stillT)
+    if (frac && !this.#gesture && !easing) this.#stillT = setTimeout(() => { if (this.view.s === s && this.view.ox === ox && this.view.oy === oy) { this.#still = vKey; this.paint() } }, SETTLE_MS)
     // a frame in motion builds nothing (a held key retargets every 33 ms: tiles built for a target it never lands on
     // were wasted work and garbage, 200 ms frames at 208²); it draws the target's tiles when the build-ahead made
     // them, else the last settled ones, and the base layer for the rest
