@@ -9,6 +9,8 @@ import { encodeV4, parseShareCode, shareCodeFits } from '../core/codec-v4.ts'
 import { SaveStore, UNSAVED_SLOW, UNSAVED_TOO_BIG } from '../core/save-store.ts'
 
 export { encodeV4, parseShareCode, SaveStore, shareCodeFits, UNSAVED_SLOW, UNSAVED_TOO_BIG }
+/** The ⋯ menu's shortcut list rides here, off the first screen (keys.ts). */
+export { KEYS } from './keys.ts'
 
 /** `localStorage` itself throws where storage is blocked (sandboxed frames, some private modes). */
 function localOrNone(): Storage | undefined {

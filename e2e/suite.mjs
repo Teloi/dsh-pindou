@@ -1833,6 +1833,51 @@ async function bigI2() {
  * 「进度不会保存」 bar says so, the board plays, share and import say 「这部分没加载出来」, no page error.
  */
 const STORE_CHUNK = /\/dsh-pindou\/client\.big-store\.js\?/
+
+/**
+ * The ⋯ menu's shortcut list rides in lib/client.big-store.js (keys.ts, off the first screen). Not there yet: the
+ * menu shows skeleton lines under 「快捷键」 and fills them in place; the chunk fails: 「加载失败，点此重试」, which
+ * fetches it again (never blank).
+ */
+async function keysChunk() {
+  const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh')
+  // held until the menu has been looked at (then let through)
+  let release
+  const gate = new Promise(r => { release = r })
+  await p.route(STORE_CHUNK, async (route) => { await gate; await route.continue() })
+  // the plugin preloads the chunk as soon as the page is idle: load the page again under the route
+  await p.reload()
+  await p.getByRole('button', { name: HOST.zh.choose }).waitFor({ timeout: 30000 })
+  await startSession(p, '看看 README')
+  await openPanel(p)
+  await p.locator('[data-pd-menu-btn]').click()
+  await p.locator('.pd-menu').waitFor()
+  const early = await p.evaluate(() => { const m = document.querySelector('.pd-menu'); window.pdMenu = m; return { skel: m.querySelectorAll('.pd-keys[aria-busy] .pd-skel').length, title: m.textContent.includes('快捷键'), lines: m.textContent.includes('B 画笔') } })
+  await bigShot(p, 'keys-skeleton')
+  release()
+  await p.locator('.pd-menu .pd-keys li', { hasText: 'B 画笔' }).waitFor({ timeout: 8000 }).catch(() => {})
+  const late = await p.evaluate(() => { const m = document.querySelector('.pd-menu'); return { same: m === window.pdMenu, n: m.querySelectorAll('.pd-keys li').length, busy: !!m.querySelector('[aria-busy]'), esc: m.textContent.includes('Esc 关闭菜单或卡片') } })
+  await bigShot(p, 'keys-filled')
+  check('KEYS chunk not ready: the ⋯ menu shows 3 skeleton lines under 「快捷键」, then the 5 lines in place (same open menu)',
+    early.skel === 3 && early.title && !early.lines && late.same && late.n === 5 && !late.busy && late.esc, JSON.stringify({ early, late }))
+  await p.context().close()
+  const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh')
+  let asked = 0
+  await f.route(STORE_CHUNK, (route) => { asked++; return route.abort('internetdisconnected') })
+  await f.reload()
+  await f.getByRole('button', { name: HOST.zh.choose }).waitFor({ timeout: 30000 })
+  await startSession(f, '看看 README')
+  await openPanel(f)
+  await f.locator('[data-pd-menu-btn]').click()
+  const retry = f.locator('.pd-menu button.pd-mi', { hasText: '加载失败，点此重试' })
+  const shown = await retry.waitFor({ timeout: 6000 }).then(() => true, () => false)
+  await bigShot(f, 'keys-failed')
+  await f.unroute(STORE_CHUNK)
+  await retry.click().catch(() => {})
+  const back = await f.locator('.pd-menu .pd-keys li', { hasText: 'B 画笔' }).waitFor({ timeout: 6000 }).then(() => true, () => false)
+  check('KEYS chunk fails: the menu says 「加载失败，点此重试」 (not blank); a click fetches it again and the lines come', asked >= 1 && shown && back, JSON.stringify({ asked, shown, back }))
+  await f.context().close()
+}
 async function bigStoreChunk() {
   const before = pageErrors.length
   const open = async (p) => {
@@ -1899,6 +1944,7 @@ async function bigSection() {
   await bigSuggest()
   await bigTileGap()
   await bigStoreChunk()
+  await keysChunk()
   await undoParity()
   await bigShare()
   await bigStorage()
@@ -1953,6 +1999,7 @@ try {
   if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
   if (ONLY === 's') { log('S. README panel screenshots'); await readmeScreens(); break sections }
   if (ONLY === 'v') { log('V. save safety (review I-1)'); await saveSafetySection(); break sections }
+  if (ONLY === 'keys') { log('KEYS. the ⋯ menu shortcut list from client.big-store.js'); await keysChunk(); break sections }
   log('V. save safety (review I-1)')
   await saveSafetySection()
   log('BIG. more sizes (v0.3)')

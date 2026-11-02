@@ -145,11 +145,6 @@ const COPY = {
   aiErrTimeout: ['模型响应超时，再试一次', 'The model took too long — try again'],
   aiRetry: ['重试', 'Retry'],
   keysTitle: ['快捷键', 'Keyboard shortcuts'],
-  keysTools: ['B 画笔 · E 橡皮 · I 取色 · G 填充', 'B brush · E eraser · I picker · G fill'],
-  keysColors: ['1–9、0 选色，[ ] 切换颜色', '1–9, 0 pick a color; [ ] cycle'],
-  keysHistory: ['⌘/Ctrl+Z 撤销 · ⇧⌘/Ctrl+Z 重做', '⌘/Ctrl+Z undo · ⇧⌘/Ctrl+Z redo'],
-  keysBoard: ['方向键移动 · 空格/回车放豆 · Delete 擦除 · 右键擦除 · Alt+点按取色', 'Arrows move · Space/Enter place · Delete erase · right-click erase · Alt+tap pick'],
-  keysEsc: ['Esc 关闭菜单或卡片', 'Esc closes menus and cards'],
   celebrate: ['完成！', 'Done!'],
 } as const satisfies Record<string, readonly [string, string]>
 

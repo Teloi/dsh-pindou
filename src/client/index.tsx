@@ -83,6 +83,9 @@ export function apply(ctx: ClientContext): void {
   const works = lazy(() => import('./works.tsx'), hostLoadsChunks())
   // big boards on a Canvas (lib/client.big.js, plan §4.4): the 「更多尺寸」 page
   const big = lazy(() => import('./big.tsx'), hostLoadsChunks())
+  // the ⋯ menu's shortcut list lives in lib/client.big-store.js (keys.ts): fetched when the page is idle
+  const keys = lazy(() => import('./big-store.ts'), hostLoadsChunks())
+  ;(globalThis.requestIdleCallback ?? ((f: () => void) => setTimeout(f, 50)))(() => { void keys.load() })
   const lang = (): 'zh' | 'en' => langOf(ctx.locale.getSnapshot().active)
   const tFor = (l: 'zh' | 'en'): Translate => (l === 'zh' ? tZh : tEn)
   const tZh = makeTranslate('zh')
@@ -130,7 +133,7 @@ export function apply(ctx: ClientContext): void {
     const t = tFor(l)
     return (
       <Guard t={t}>
-        <EnvContext.Provider value={{ store, lang: l, t, reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works, big }}>
+        <EnvContext.Provider value={{ store, lang: l, t, reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works, big, keys }}>
           <App />
         </EnvContext.Provider>
       </Guard>

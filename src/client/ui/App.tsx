@@ -27,9 +27,12 @@ function isTyping(el: EventTarget | null): boolean {
 const menuButton = (el: HTMLElement): Element | null | undefined => el.closest('.pd-root')?.querySelector('[data-pd-menu-btn]')
 
 function Menu({ onClose }: { readonly onClose: () => void }): ReactElement {
-  const { store, t } = useEnv()
+  const { store, t, lang, keys } = useEnv()
   const s = useGame()
   const ref = useRef<HTMLDivElement>(null)
+  const ks = useLazy(keys)
+  useEffect(() => { void keys?.load() }, [keys])
+  const lines = keys?.value()?.KEYS[lang]
   // Focus the first item; Esc or an item that closes the menu gives focus back to ⋯ (focus.ts).
   useFocusReturn(ref, true, '[role=menuitemcheckbox],[role=menuitem]', menuButton)
   useEffect(() => {
@@ -66,9 +69,13 @@ function Menu({ onClose }: { readonly onClose: () => void }): ReactElement {
       <button type="button" className="pd-mi" role="menuitem" onClick={() => { store.showCoach(); onClose() }}>{t('menuCoach')}</button>
       <hr />
       <p className="pd-sec" style={{ margin: '4px 8px 2px' }}>{t('keysTitle')}</p>
-      <ul className="pd-keys">
-        <li>{t('keysTools')}</li><li>{t('keysColors')}</li><li>{t('keysHistory')}</li><li>{t('keysBoard')}</li><li>{t('keysEsc')}</li>
-      </ul>
+      {/* the lines come with lib/client.big-store.js (keys.ts): skeleton lines until then, filled in place;
+          a retry if it fails, 「需要新版 DSH」 where chunks can't load (never blank) */}
+      {lines
+        ? <ul className="pd-keys">{lines.map(l => <li key={l}>{l}</li>)}</ul>
+        : ks === 'failed'
+          ? <button type="button" className="pd-mi" role="menuitem" onClick={() => { void keys?.load() }}>{t('loadRetry')}</button>
+          : ks === 'unsupported' ? <p className="pd-sec" style={{ margin: '2px 8px' }}>{t('needNewerDsh')}</p> : <ul className="pd-keys" aria-busy>{[0, 1, 2].map(i => <li key={i}><i className="pd-skel" style={{ display: 'block', height: 10, aspectRatio: 'auto' }} /></li>)}</ul>}
     </div>
   )
 }
