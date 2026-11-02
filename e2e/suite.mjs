@@ -1791,13 +1791,11 @@ async function tileGapAt(dsf) {
   check(`BIG tiles @${dsf}×: filled at 16 px/cell (${res.k} device px, whole) every bead is centred and symmetric — the board gap the same each side, the bead mirror-symmetric left↔right and top↔bottom (no dropped or one-pixel transition row), the hole's centroid ≤ 0.5 device px off the centre and its margins within 1 px`,
     Number.isInteger(res.k) && res.bead.n > 60 && res.bead.gapOff === 0 && res.bead.mirrorOff === 0 && res.bead.holeOff === 0 && res.bead.marginOff === 0, JSON.stringify(res.bead))
   check(`BIG tiles @${dsf}×: mid-zoom on 208² (tiles still missing after one budgeted frame) every sampled cell shows its own colour — no blank, no board colour`, res.missing && res.mid.n > 150 && res.mid.blank === 0 && res.mid.off === 0 && res.full.blank === 0 && res.full.off === 0, JSON.stringify(res))
-  // the earlier seam judgement, kept as it was beside the strict one above (split in its mid and filled halves, every
-  // condition unchanged). Its mid half samples 3 px apart and calls a boundary pixel a seam unless it is near a
-  // pixel on one side; with middle-first a whole built tile sits inside base-coloured cells, and its own board
-  // gap (one board pixel, then the anti-aliased rim) next to a flat base cell reads as a "third colour", its
-  // anti-aliased hole edges as "thin" rows — the correct filled frame fails the same rules (full seam count below)
-  check(`BIG tiles @${dsf}×: [earlier judgement, mid half] no seam at tile boundaries mid-zoom — each boundary pixel matches a side (no third colour), no one-pixel blended line anywhere, the gap at a tile boundary no wider than at ordinary cell edges and the board-between-beads pattern the same as one cell earlier`,
-    res.mid.edges > 40 && res.mid.seam === 0 && res.mid.thin.length === 0 && res.mid.gapT <= res.mid.gapC && res.mid.maskN > 40 && res.mid.maskDiff === 0, JSON.stringify({ dpr: dsf, mid: [res.mid.edges, res.mid.seam, res.mid.seams, res.mid.thin, res.mid.gapT, res.mid.gapC, res.mid.maskN, res.mid.maskDiff, res.mid.fringe], full: [res.full.gapT, res.full.gapC, res.full.maskN, res.full.maskDiff, res.full.seam, res.full.fringe] }))
+  // The earlier seam judgement's mid-zoom half (3 px samples: a tile-boundary pixel near neither side = a seam;
+  // > 20 one-pixel colour changes in a row = a blended line) is replaced by the strict per-pixel mid-frame check
+  // above: it fails the correct filled frame itself (1.5× 146, 1.25× 104, 1× 84 hits), because a built tile's own
+  // board gap + anti-aliased rim next to a flat base cell reads as a third colour, and the anti-aliased hole edges
+  // give 21–31 changes a row. Its filled half stays, at every dpr. Control: e2e/repro/strict-judge-a44692b.mjs.
   check(`BIG tiles @${dsf}×: [earlier judgement, filled half] after fill-in the gap at a tile boundary no wider than at ordinary cell edges and the board-between-beads pattern the same as one cell earlier`,
     res.full.edges > 40 && res.full.gapT <= res.full.gapC && res.full.maskN > 40 && res.full.maskDiff === 0, JSON.stringify({ dpr: dsf, full: [res.full.edges, res.full.gapT, res.full.gapC, res.full.maskN, res.full.maskDiff, res.full.seam, res.full.fringe] }))
   await p.context().close()
