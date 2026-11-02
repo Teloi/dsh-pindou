@@ -1601,7 +1601,11 @@ function judgeTiles(geo, mid, full, want) {
  * (a) the settled frame's pixel the same tile shows at the nearest-neighbour source position of that tile
  * (src = floor((X − tile's left edge + 0.5) × tile width at b1 / tile width on screen), ±1 source px for the
  * sampler's rounding), the settled frame built independently on a fresh page; or (b) the cell's base colour (a tile
- * not built yet); each tile wholly one or the other; no third colour. Only tiles whole on both frames are judged.
+ * not built yet); each tile wholly one or the other; no third colour. Every tile on screen is judged on its visible
+ * pixels; the frame's divider lines and their 1 px margin are left out, and of the reference only the divider
+ * lines' own pixels (a reference pixel next to a divider is still a tile pixel). The caller judges each frame
+ * against the target's settled frame and the start's (a frame in motion borrows the last settled tiles until the
+ * target's are built ahead) and keeps the one it matches.
  */
 function judgeMotion(mv, frame, ref, d, cells, pal, unit) {
   const n = 208, { s, ox, oy } = mv.view, e1 = mv.end, W = mv.W, H = mv.H
@@ -1610,30 +1614,45 @@ function judgeMotion(mv, frame, ref, d, cells, pal, unit) {
   const fx = c => Math.round((e1.ox + c * e1.s) * d), fy = c => Math.round((e1.oy + c * e1.s) * d)
   const lw = Math.max(1, Math.round(0.06 * s * d)), lw1 = Math.max(1, Math.round(0.06 * e1.s * d))
   const nearDiv = (v, e, l) => { if (unit <= 0) return false; for (let u = unit; u < n; u += unit) if (Math.abs(v - e(u)) <= l + 1) return true; return false }
+  // the divider's own device pixels (a line lw wide on whole pixels, from e(u) - floor(lw / 2)), not the margin
+  // nearDiv leaves round it: a reference pixel next to a divider is a tile pixel and must still be matched
+  const onDiv = (v, e, l) => { if (unit <= 0) return false; for (let u = unit; u < n; u += unit) { const a = e(u) - (l >> 1); if (v >= a && v < a + l) return true } return false }
   const rgb = pal.map(h => [1, 3, 5].map(q => parseInt(h.slice(q, q + 2), 16)))
   const same = (i, j) => frame[i] === ref[j] && frame[i + 1] === ref[j + 1] && frame[i + 2] === ref[j + 2] && frame[i + 3] === ref[j + 3]
-  const out = { b1, T, tiles: 0, built: 0, unbuilt: 0, mixed: 0, px: 0, other: 0, worst: [] }
+  const out = { b1, T, tiles: 0, hidden: 0, built: 0, unbuilt: 0, mixed: 0, px: 0, other: 0, worst: [] }
   for (let ty = 0; ty * T < n; ty++) for (let tx = 0; tx * T < n; tx++) {
     const x0 = tx * T, y0 = ty * T, nx = Math.min(T, n - x0), ny = Math.min(T, n - y0)
     const dx = ex(x0), dy = ey(y0), dw = ex(x0 + nx) - dx, dh = ey(y0 + ny) - dy
-    if (dx < 0 || dy < 0 || dx + dw > W || dy + dh > H || fx(x0) < 0 || fy(y0) < 0 || fx(x0 + nx) > W || fy(y0 + ny) > H) continue
+    // tiles cut by the canvas edge are judged too, on their visible pixels (at 1× a 21-cell tile is wider than half the box)
+    if (dx >= W || dy >= H || dx + dw <= 0 || dy + dh <= 0) continue
     out.tiles++
     let w = 0, b = 0
-    for (let Y = dy; Y < dy + dh; Y++) {
+    for (let Y = Math.max(0, dy); Y < Math.min(H, dy + dh); Y++) {
       if (nearDiv(Y, ey, lw)) continue
       const sy = Math.floor((Y - dy + 0.5) * ny * b1 / dh)
-      for (let X = dx; X < dx + dw; X++) {
+      for (let X = Math.max(0, dx); X < Math.min(W, dx + dw); X++) {
         if (nearDiv(X, ex, lw)) continue
         const sx = Math.floor((X - dx + 0.5) * nx * b1 / dw), i = (Y * W + X) * 4
-        const cell = Math.min(n - 1, x0 + Math.floor((X - dx) * nx / dw)) + Math.min(n - 1, y0 + Math.floor((Y - dy) * ny / dh)) * n
-        out.px++
-        let asRef = false
+        let asRef = false, seen = 0
         for (let a = -1; a <= 1 && !asRef; a++) for (let c = -1; c <= 1 && !asRef; c++) {
           const rx = fx(x0) + sx + c, ry = fy(y0) + sy + a
-          if (rx < fx(x0) || ry < fy(y0) || rx >= fx(x0 + nx) || ry >= fy(y0 + ny) || nearDiv(rx, fx, lw1) || nearDiv(ry, fy, lw1)) continue
+          if (rx < fx(x0) || ry < fy(y0) || rx >= fx(x0 + nx) || ry >= fy(y0 + ny) || rx < 0 || ry < 0 || rx >= W || ry >= H || onDiv(rx, fx, lw1) || onDiv(ry, fy, lw1)) continue
+          seen++
           asRef = same(i, (ry * W + rx) * 4)
         }
-        const base = rgb[cells[cell]], asBase = frame[i] === base[0] && frame[i + 1] === base[1] && frame[i + 2] === base[2] && frame[i + 3] === 255
+        // its source pixels all lie under a divider line of the reference frame or off its edge: not judgeable,
+        // left out like the frame's own divider pixels
+        if (!seen) { out.hidden++; continue }
+        out.px++
+        // the base layer is 1 px per cell, so its source px is a cell: ±1 cell for the sampler's rounding, as for tiles
+        const cxB = Math.min(n - 1, x0 + Math.floor((X - dx) * nx / dw)), cyB = Math.min(n - 1, y0 + Math.floor((Y - dy) * ny / dh))
+        let asBase = false
+        for (let a = -1; a <= 1 && !asBase; a++) for (let c = -1; c <= 1 && !asBase; c++) {
+          const qx = cxB + c, qy = cyB + a
+          if (qx < x0 || qy < y0 || qx >= x0 + nx || qy >= y0 + ny) continue
+          const base = rgb[cells[qx + qy * n]]
+          asBase = frame[i] === base[0] && frame[i + 1] === base[1] && frame[i + 2] === base[2] && frame[i + 3] === 255
+        }
         if (asRef && !asBase) w++
         else if (asBase && !asRef) b++
         else if (!asRef && !asBase) { out.other++; if (out.worst.length < 5) out.worst.push({ X, Y, tile: [tx, ty], px: [...frame.subarray(i, i + 4)] }) }
@@ -1645,6 +1664,8 @@ function judgeMotion(mv, frame, ref, d, cells, pal, unit) {
   }
   return out
 }
+
+const motionScore = m => m.other * 1e6 + m.mixed * 1e3 - m.px
 
 async function tileGapAt(dsf) {
   const sfx = dsf === 2 ? '' : `-dpr${dsf}`
@@ -1856,20 +1877,46 @@ async function tileGapAt(dsf) {
   const mv = await p.evaluate(async () => {
     const c = document.querySelector('.pd-bk-app').pd, draw = c.draw.bind(c), shots = []
     c.draw = () => { const r = draw(); if (shots.length < 4) shots.push({ view: { ...c.view }, png: c.el.toDataURL() }); return r }
+    const start = { ...c.view }
     c.step(-1)
     for (let i = 0; i < 30; i++) await new Promise(r => requestAnimationFrame(r))
     c.draw = draw
     let n = 0
     while (c.draw() && n < 5000) n++
     const end = c.view
-    return { end, W: c.el.width, H: c.el.height, shots: shots.filter(x => Math.abs(x.view.s - end.s) > 1e-6) }
+    return { start, end, W: c.el.width, H: c.el.height, shots: shots.filter(x => Math.abs(x.view.s - end.s) > 1e-6) }
   })
   const mref = await expectedFrame(dsf, mv.end), mrefPx = decodePng(Buffer.from(mref.png.split(',')[1], 'base64')).data
-  const mres = mv.shots.map(x => judgeMotion({ view: x.view, end: mv.end, W: mv.W, H: mv.H }, decodePng(Buffer.from(x.png.split(',')[1], 'base64')).data, mrefPx, geo.d, geo.cells, geo.pal, geo.unit))
+  // a frame in motion draws the target's tiles when the build-ahead made them, else the last settled ones: judge
+  // each frame against both settled frames (target and start), each built independently, and keep the one it is
+  const sref = await expectedFrame(dsf, mv.start), srefPx = decodePng(Buffer.from(sref.png.split(',')[1], 'base64')).data
+  const mres = mv.shots.map(x => {
+    const f = decodePng(Buffer.from(x.png.split(',')[1], 'base64')).data
+    const a = { from: 'target', ...judgeMotion({ view: x.view, end: mv.end, W: mv.W, H: mv.H }, f, mrefPx, geo.d, geo.cells, geo.pal, geo.unit) }
+    const z = { from: 'start', ...judgeMotion({ view: x.view, end: mv.start, W: mv.W, H: mv.H }, f, srefPx, geo.d, geo.cells, geo.pal, geo.unit) }
+    return motionScore(a) <= motionScore(z) ? a : z
+  })
   if (PHASE2_SHOTS && mv.shots[0]) writeFileSync(join(PHASE2_SHOTS, `tile-gap-motion${sfx}.png`), Buffer.from(mv.shots[0].png.split(',')[1], 'base64'))
   check(`BIG tiles @${dsf}×: strict motion frames — every eased frame's board pixel is the settled scale's tile resampled nearest-neighbour (±1 source px) or its cell's base colour, each tile wholly one or the other, no third colour; tiles built ahead are used (built > 0)`,
-    mres.length > 0 && mref.left === false && mres.every(m => m.tiles > 4 && m.px > 50000 && m.other === 0 && m.mixed === 0) && mres.some(m => m.built > 0),
+    mres.length > 0 && mref.left === false && sref.left === false && mres.every(m => m.tiles > 0 && m.px > 50000 && m.px > 10 * m.hidden && m.other === 0 && m.mixed === 0) && mres.some(m => m.built > 0),
     JSON.stringify(mres.map(m => ({ ...m, worst: m.worst.slice(0, 3) }))))
+  // a view left off whole px (a setView mid-sweep) builds nothing while in motion: it must not ask for frame after
+  // frame (the full run's page.screenshot timed out behind such a loop), and once it stays put it fills in
+  const still = await p.evaluate(async () => {
+    const c = document.querySelector('.pd-bk-app').pd, draw = c.draw.bind(c)
+    let n = 0
+    c.draw = () => { n++; return draw() }
+    const v = c.view
+    c.setView({ s: v.s * 1.037, ox: v.ox - 3.3, oy: v.oy - 2.1 })
+    c.paint()
+    await new Promise(r => setTimeout(r, 100))
+    const early = n
+    await new Promise(r => setTimeout(r, 2500))
+    c.draw = draw
+    return { early, total: n, left: c.draw() }
+  })
+  check(`BIG tiles @${dsf}×: a view off whole device px draws once, does not loop frame after frame, and fills in once it stays put`,
+    still.early <= 2 && still.total <= 60 && still.left === false, JSON.stringify(still))
   await p.context().close()
 }
 
