@@ -69,7 +69,9 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ensureStyles(), 'pindou: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'pindou: dictionaries')
 
-  const store = new GameStore({ store: new SafeStore(browserStorage()), api: fetchApi(), reducedMotion: prefersReducedMotion })
+  // the works wall (lib/client.works.js): loaded once per session, kept (spec §18.4/§18.6); its capWall also trims a wall past 80 on iron
+  const works = lazy(() => import('./works.tsx'), hostLoadsChunks())
+  const store = new GameStore({ store: new SafeStore(browserStorage()), api: fetchApi(), reducedMotion: prefersReducedMotion, cap: () => works.load().then(m => m?.capWall) })
   ctx.effect(() => () => { store.dispose() }, 'pindou: game store')
   const flush = (): void => { store.flush() }
   ctx.effect(() => {
@@ -79,8 +81,6 @@ export function apply(ctx: ClientContext): void {
 
   // Picture to pattern lives in lib/client.picture.js, fetched on first open (spec §18.6)
   const picture = lazy(() => import('./picture.tsx'), hostLoadsChunks())
-  // the works wall (lib/client.works.js): loaded once per session, kept (spec §18.4/§18.6)
-  const works = lazy(() => import('./works.tsx'), hostLoadsChunks())
   // big boards on a Canvas (lib/client.big.js, plan §4.4): the 「更多尺寸」 page
   const big = lazy(() => import('./big.tsx'), hostLoadsChunks())
   // the ⋯ menu's shortcut list lives in lib/client.big-store.js (keys.ts): fetched when the page is idle

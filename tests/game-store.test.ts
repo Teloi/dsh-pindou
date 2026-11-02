@@ -1,15 +1,15 @@
-import { capWall } from '../src/core/works.ts'
+import { capWall, MAX_STORED } from '../src/core/works.ts'
 import { NOTICES } from '../src/client/notice.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { BAD_SAVE_KEY, createBoard, EMPTY, encode, findTemplate, getCell, makeTranslate, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
-import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi } from '../src/client/game-store.ts'
+import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi, type GameDeps } from '../src/client/game-store.ts'
 
 function mem(): StorageLike & { data: Map<string, string> } {
   const data = new Map<string, string>()
   return { data, getItem: k => data.get(k) ?? null, setItem: (k, v) => { data.set(k, v) }, removeItem: (k) => { data.delete(k) } }
 }
 
-function make(opts: { api?: GameApi; reduced?: boolean; backend?: StorageLike } = {}) {
+function make(opts: { api?: GameApi; reduced?: boolean; backend?: StorageLike; cap?: GameDeps['cap'] } = {}) {
   let now = 1_000_000
   const timers: Array<{ fn: () => void; at: number }> = []
   const backend = opts.backend ?? mem()
@@ -20,6 +20,7 @@ function make(opts: { api?: GameApi; reduced?: boolean; backend?: StorageLike } 
     reducedMotion: () => opts.reduced ?? false,
     setTimeout: (fn, ms) => { const t = { fn, at: now + ms }; timers.push(t); return t },
     clearTimeout: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1) },
+    cap: opts.cap,
   })
   const advance = (ms: number): void => {
     now += ms
@@ -716,6 +717,10 @@ describe('v1.6 §4.3 source keys', () => {
 const ironOne = (store: GameStore, x = 0): void => { store.startFree(); store.applyAt(x % 16, 0); store.iron() }
 const wallOf = (backend: { data: Map<string, string> }): Array<{ i: number }> => JSON.parse(backend.data.get(WORKS_KEY) ?? '[]')
 
+/** A readable 12×12 work and an entry this version can't show (recheck R6). */
+const goodW = (i: number) => ({ i, n: 12, b: '.'.repeat(144), s: null })
+const badW = (i: number) => ({ i, n: 29, b: 'x', s: null })
+
 describe('GameStore works wall (spec §18.4)', () => {
 
   it('a non-square or non-12/16/24 piece never goes into the v0.2 works key (audit A1-6)', () => {
@@ -744,6 +749,50 @@ describe('GameStore works wall (spec §18.4)', () => {
     ironOne(store)
     expect(wallOf(backend).map(w => w.i)).toEqual([7, 8, store.works().at(-1)!.i])
     expect(JSON.parse(backend.data.get(WORKS_KEY)!).slice(0, 2)).toEqual(odd)
+  })
+
+  it('a wall past 80 entries is cut back right after ironing with the wall’s own rules (designer recheck R6)', async () => {
+    expect(MAX_STORED).toBe(80)
+    let asked = 0
+    const cap = async () => { asked++; return capWall }
+    // 59 readable + 21 unreadable, then one more ironed: 81 → the earliest unreadable goes, every readable work stays
+    const backend = mem()
+    const start = [...Array.from({ length: 21 }, (_, k) => badW(100 + k)), ...Array.from({ length: 59 }, (_, k) => goodW(200 + k))]
+    backend.data.set(WORKS_KEY, JSON.stringify(start))
+    const { store } = make({ backend, reduced: true, cap })
+    ironOne(store)
+    await Promise.resolve(); await Promise.resolve()
+    const after = wallOf(backend)
+    expect(asked).toBe(1)
+    expect(after).toHaveLength(80)
+    expect(after.map(w => w.i)).not.toContain(100)
+    expect(after.filter(w => (w as { n?: number }).n !== 29)).toHaveLength(60)
+    expect(store.works()).toEqual(after)
+    expect(after.at(-1)!.i).toBe(store.getSnapshot().work)
+    // 60 readable + 20 unreadable, then one more: the oldest readable goes (60 rule), the unreadable stay, the new work stays
+    const b2 = mem()
+    b2.data.set(WORKS_KEY, JSON.stringify([...Array.from({ length: 20 }, (_, k) => badW(100 + k)), ...Array.from({ length: 60 }, (_, k) => goodW(200 + k))]))
+    const two = make({ backend: b2, reduced: true, cap })
+    ironOne(two.store)
+    await Promise.resolve(); await Promise.resolve()
+    const w2 = wallOf(b2).map(w => w.i)
+    expect(w2).toHaveLength(80)
+    expect(w2).not.toContain(200)
+    expect(w2).toContain(two.store.getSnapshot().work)
+    expect(w2.filter(i => i < 200)).toHaveLength(20)
+    // up to 80 nothing is fetched; without the chunk (cap → undefined) the wall stays as written
+    const b3 = mem()
+    b3.data.set(WORKS_KEY, JSON.stringify(Array.from({ length: 79 }, (_, k) => goodW(200 + k))))
+    asked = 0
+    ironOne(make({ backend: b3, reduced: true, cap }).store)
+    await Promise.resolve()
+    expect(asked).toBe(0)
+    expect(wallOf(b3)).toHaveLength(80)
+    const b4 = mem()
+    b4.data.set(WORKS_KEY, JSON.stringify(start))
+    ironOne(make({ backend: b4, reduced: true, cap: async () => undefined }).store)
+    await Promise.resolve(); await Promise.resolve()
+    expect(wallOf(b4)).toHaveLength(81)
   })
 
   it('ironing puts the piece on the wall at once (its own key), un-ironing takes it off', () => {

@@ -116,6 +116,12 @@ export interface GameDeps {
   readonly setTimeout?: (fn: () => void, ms: number) => unknown
   readonly clearTimeout?: (handle: unknown) => void
   readonly saveDelayMs?: number
+  /**
+   * The works chunk's capWall, fetched (designer recheck R6): a wall past 80 entries after ironing is cut back
+   * with the wall's own rules (unreadable ones earliest first, a readable work never for one of those), so the
+   * stored list never grows while the wall stays unopened. Without it the wall caps when it next shows.
+   */
+  readonly cap?: (() => Promise<(<T>(wall: readonly T[]) => T[]) | undefined>) | undefined
 }
 
 /** Matches the designer's --pd-t-iron-total (the sweep and the staggered melt). */
@@ -643,8 +649,8 @@ export class GameStore {
   }
 
   /**
-   * The ironed piece goes on the wall; the wall chunk trims it to 60 readable works and
-   * 80 entries when it next shows (capWall). Its id is the ironing time, kept past every stored id. A `board:` source up to 16×16 keeps
+   * The ironed piece goes on the wall; past 80 entries the wall chunk's capWall trims it right after
+   * (deps.cap), and in any case to 60 readable works and 80 entries when it next shows. Its id is the ironing time, kept past every stored id. A `board:` source up to 16×16 keeps
    * its pattern too (still under 1 KB), so 再拼一次 can follow it again.
    * Only 12/16/24 squares go on this wall: v0.2 reads WORKS_KEY too (audit A1-6).
    */
@@ -658,6 +664,8 @@ export class GameStore {
     }
     this.setWall([...this.#wall, w])
     this.#set({ work: w.i })
+    // 80 = core/works.ts MAX_STORED (tests/game-store.test.ts keeps them equal)
+    if (this.#wall.length > 80) void this.#deps.cap?.().then((c) => { if (c && this.#wall.length > 80) this.setWall(c(this.#wall)) })
   }
 
   /** Leaving a game mid-iron: finish it now, so the ironed piece belongs to that game and not the next. */
