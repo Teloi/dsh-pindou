@@ -106,6 +106,7 @@ beforeEach(() => {
   root = createRoot(host)
 })
 afterEach(() => {
+  vi.useRealTimers()
   act(() => { root.unmount() })
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -636,19 +637,25 @@ describe('drop and paste (spec §18.2)', () => {
     expect(calls).toHaveLength(1) // no reload attempt either
   })
 
-  it('C5: a non-image file dropped on another page is swallowed and silently ignored', async () => {
-    const { rootEl } = await panel(ready())
-    for (const where of ['home', 'play'] as const) {
-      if (where === 'play') await act(async () => { host.querySelector<HTMLButtonElement>('.pd-start .pd-big')!.click() })
-      expect(rootEl().dataset['mode']).toBe(where)
-      const drop = dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])
-      await act(async () => { rootEl().dispatchEvent(drop) })
-      await flush(20)
-      expect(drop.defaultPrevented).toBe(true) // still not the chat's
-      expect(rootEl().dataset['mode']).toBe(where)
-      expect(host.querySelector('[role=alert]')?.textContent ?? '').toBe('')
-    }
-  })
+  // C5 on the start page and while playing, one page per test. Was one test with two real 20 ms sleeps: under a loaded
+  // parallel run (audit, 1e198af) it took 14 s and hit the 5 s timeout. The drop is decided synchronously
+  // (useFileDrops → onFiles), so nothing needs real time: fake timers carry the check past ANNOUNCE_MS
+  // instead, which also proves no announcement comes late.
+  const nonImageIgnored = async (where: 'home' | 'play'): Promise<void> => {
+    const { rootEl, store } = await panel(ready())
+    if (where === 'play') await act(async () => { store.startFree() })
+    expect(rootEl().dataset['mode']).toBe(where)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    const drop = dropEvent('drop', [file('hello', 'notes.txt', 'text/plain')])
+    await act(async () => { rootEl().dispatchEvent(drop) })
+    await act(async () => { vi.advanceTimersByTime(chunk.ANNOUNCE_MS + 20) })
+    expect(drop.defaultPrevented).toBe(true) // still not the chat's
+    expect(rootEl().dataset['mode']).toBe(where)
+    expect(host.querySelector('[role=alert]')?.textContent ?? '').toBe('')
+    expect(bitmap).not.toHaveBeenCalled()
+  }
+  it('C5: a non-image file dropped on the start page is swallowed and silently ignored', async () => { await nonImageIgnored('home') })
+  it('C5: a non-image file dropped while playing is swallowed and silently ignored', async () => { await nonImageIgnored('play') })
 
   it('C5: several files dropped at once — the first picture is taken', async () => {
     const { rootEl } = await panel(ready())
