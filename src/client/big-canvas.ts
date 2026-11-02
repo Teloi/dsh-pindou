@@ -62,6 +62,23 @@ const light = (hex: string): boolean => {
 /** Level of detail for `s` CSS px per cell. */
 const lodOf = (s: number): number => (s < 5 ? 0 : s < 14 ? 1 : 2)
 
+/**
+ * The tiles a view shows on a `cw` × `ch` box over a `w` × `h` board: their size (`b` device px per cell, `lod`,
+ * `T` cells a side) and their places, the one nearest the box's middle first (designer recheck P1: on a cold
+ * cache the detail fills in from the middle outwards, where the eye is).
+ */
+export function tilesOf(v: View, cw: number, ch: number, w: number, h: number, dpr: number): { b: number; lod: number; T: number; at: Array<[number, number]> } {
+  const b = Math.min(128, 2 ** Math.ceil(Math.log2(Math.max(1, v.s * dpr))))
+  const T = Math.max(1, (TILE / b) | 0), span = T * v.s
+  const at: Array<[number, number]> = []
+  for (let ty = Math.max(0, Math.floor(-v.oy / span)); ty <= Math.min(Math.ceil(h / T) - 1, Math.floor((ch - v.oy) / span)); ty++) {
+    for (let tx = Math.max(0, Math.floor(-v.ox / span)); tx <= Math.min(Math.ceil(w / T) - 1, Math.floor((cw - v.ox) / span)); tx++) at.push([tx, ty])
+  }
+  const mx = (cw / 2 - v.ox) / span, my = (ch / 2 - v.oy) / span
+  const d = ([x, y]: [number, number]): number => (x + 0.5 - mx) ** 2 + (y + 0.5 - my) ** 2
+  return { b, lod: lodOf(v.s), T, at: at.toSorted((p, q) => d(p) - d(q)) }
+}
+
 export class BigCanvas {
   view: View = { s: 16, ox: 0, oy: 0 }
   /** What the canvas shows now (differs from `view` while a gesture stretches it). */
@@ -337,13 +354,23 @@ export class BigCanvas {
     this.#frame = requestAnimationFrame(() => { if (this.draw()) this.paint() })
   }
 
+  /** Keep a new tile, the oldest going past the memory cap. */
+  #keep(key: string, t: HTMLCanvasElement): void {
+    this.#tiles.set(key, t)
+    this.#bytes += t.width * t.height * 4
+    for (const [k2, old] of this.#tiles) {
+      if (this.#bytes <= this.#cap) break
+      this.#tiles.delete(k2)
+      this.#bytes -= old.width * old.height * 4
+    }
+  }
+
   /** Draw the view now; true when tiles are still missing (drawn from the base layer). */
   draw(): boolean {
     const ctx = this.#ctx, dpr = this.#dpr, { w, h } = this.#board
     const { s, ox, oy } = this.view
     const k0 = s * dpr
-    const b = Math.min(128, 2 ** Math.ceil(Math.log2(Math.max(1, k0))))
-    const lod = lodOf(s), T = Math.max(1, (TILE / b) | 0)
+    const { b, lod, T, at } = tilesOf(this.view, this.cw, this.ch, w, h, dpr)
     this.#shown = this.view
     this.el.style.transform = ''
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -357,31 +384,23 @@ export class BigCanvas {
     this.#layers.set(`${b}/${lod}`, [b, lod])
     const t0 = performance.now()
     let built = 0, more = false
-    const span = T * s
-    for (let ty = Math.max(0, Math.floor(-oy / span)); ty <= Math.min(Math.ceil(h / T) - 1, Math.floor((this.ch - oy) / span)); ty++) {
-      for (let tx = Math.max(0, Math.floor(-ox / span)); tx <= Math.min(Math.ceil(w / T) - 1, Math.floor((this.cw - ox) / span)); tx++) {
-        const key = `${b}/${lod}/${tx}/${ty}`
-        let t = this.#tiles.get(key)
-        if (t) { this.#tiles.delete(key); this.#tiles.set(key, t) } else if (!built || performance.now() - t0 + this.#tileMs < TILE_BUDGET_MS) {
-          built++
-          const tb = performance.now()
-          t = this.#tile(b, lod, T, tx, ty)
-          this.#tileMs = (this.#tileMs + performance.now() - tb) / 2
-          this.#tiles.set(key, t)
-          this.#bytes += t.width * t.height * 4
-          for (const [k2, old] of this.#tiles) {
-            if (this.#bytes <= this.#cap) break
-            this.#tiles.delete(k2)
-            this.#bytes -= old.width * old.height * 4
-          }
-        }
-        const x = tx * T, y = ty * T, n = Math.min(T, w - x), m = Math.min(T, h - y)
-        const dx = ex(x), dy = ey(y), dw = ex(x + n) - dx, dh = ey(y + m) - dy
-        if (t) ctx.drawImage(t, dx, dy, dw, dh)
-        else {
-          more = true
-          ctx.drawImage(this.#base, x, y, n, m, dx, dy, dw, dh)
-        }
+    // nearest the middle first, so a cold cache fills in from where the eye is (P1)
+    for (const [tx, ty] of at) {
+      const key = `${b}/${lod}/${tx}/${ty}`
+      let t = this.#tiles.get(key)
+      if (t) { this.#tiles.delete(key); this.#tiles.set(key, t) } else if (!built || performance.now() - t0 + this.#tileMs < TILE_BUDGET_MS) {
+        built++
+        const tb = performance.now()
+        t = this.#tile(b, lod, T, tx, ty)
+        this.#tileMs = (this.#tileMs + performance.now() - tb) / 2
+        this.#keep(key, t)
+      }
+      const x = tx * T, y = ty * T, n = Math.min(T, w - x), m = Math.min(T, h - y)
+      const dx = ex(x), dy = ey(y), dw = ex(x + n) - dx, dh = ey(y + m) - dy
+      if (t) ctx.drawImage(t, dx, dy, dw, dh)
+      else {
+        more = true
+        ctx.drawImage(this.#base, x, y, n, m, dx, dy, dw, dh)
       }
     }
     const g = this.game.get()
