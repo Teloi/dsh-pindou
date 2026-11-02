@@ -4,10 +4,12 @@
  *
  * - view: `s` CSS px per cell and the board's offset; zoom levels fit, 4 … 64;
  *   the board stays centred when smaller than the canvas, else may overhang 48 px.
- * - tiles: the board is cut into square tiles of whole cells drawn at a power of
- *   two device px per cell (`b`), at most 256 × 256 device px; a tile is drawn
- *   once from pre-rendered bead sprites (drawImage only: no paths or gradients
- *   per frame) and reused at every zoom that maps to its `b`. A frame only
+ * - tiles: the board is cut into square tiles of whole cells drawn at the view's
+ *   own device px per cell (`b` = s × dpr, rounded), at most 256 × 256 device px,
+ *   so a whole `b` draws 1:1 (no resampling: bead gaps even on both sides, no
+ *   dropped rows); a tile is drawn once from pre-rendered bead sprites (drawImage
+ *   only: no paths or gradients per frame) and reused while the view keeps its
+ *   `b`. A frame only
  *   drawImages the visible tiles and builds new ones within a time budget (one
  *   at least, more while the frame stays under ~10 ms by the measured tile cost;
  *   the 1 px/cell base layer stands in for the rest); an edit patches its cells
@@ -66,13 +68,38 @@ const lodOf = (s: number): number => (s < 5 ? 0 : s < 14 ? 1 : 2)
 export const PREBUILD_MAX = 48
 
 /**
+ * Device px per cell a tile is built at for `k` device px per cell on screen: `k` itself, rounded (any dpr, not
+ * only powers of two). On a whole `k` (every level at dpr 1, 1.25, 1.5, 2 …) the frame's cell edges, rounded to
+ * whole device px, lie exactly `k` apart, so the tile draws 1:1: the bead's gaps stay even on both sides and no
+ * row or column is dropped, which a power-of-two tile scaled down by nearest neighbour did (32 → 24 at 1.5×:
+ * 1 px gap left/top, 2 px right/bottom).
+ */
+export function tileB(k: number): number {
+  return Math.min(TILE, Math.max(1, Math.round(k)))
+}
+
+/**
+ * A scale settled on (designer, native tiles): `s` CSS px per cell snapped to a whole number of device px per cell,
+ * the nearest (`down`: not over, for a fit that must stay inside the box), 1 device px at least. Every level is whole
+ * already at dpr 1, 1.25, 1.5, 2; at e.g. 1.1 a level moves by half a device px at most, so no two levels meet (they
+ * are ≥ 4 CSS px apart).
+ */
+export function snapScale(s: number, dpr: number, down = false): number {
+  const k = s * dpr, r = Math.round(k)
+  return Math.max(1, Math.abs(k - r) < 1e-6 ? r : down ? Math.floor(k) : r) / dpr
+}
+
+/** Cells a side of a tile built at `b` device px per cell (at most TILE device px a side, one cell at least). */
+export const tileCells = (b: number): number => Math.max(1, (TILE / b) | 0)
+
+/**
  * The tiles a view shows on a `cw` × `ch` box over a `w` × `h` board: their size (`b` device px per cell, `lod`,
  * `T` cells a side) and their places, the one nearest the box's middle first (designer recheck P1: on a cold
  * cache the detail fills in from the middle outwards, where the eye is).
  */
 export function tilesOf(v: View, cw: number, ch: number, w: number, h: number, dpr: number): { b: number; lod: number; T: number; at: Array<[number, number]> } {
-  const b = Math.min(128, 2 ** Math.ceil(Math.log2(Math.max(1, v.s * dpr))))
-  const T = Math.max(1, (TILE / b) | 0), span = T * v.s
+  const b = tileB(v.s * dpr)
+  const T = tileCells(b), span = T * v.s
   const at: Array<[number, number]> = []
   for (let ty = Math.max(0, Math.floor(-v.oy / span)); ty <= Math.min(Math.ceil(h / T) - 1, Math.floor((ch - v.oy) / span)); ty++) {
     for (let tx = Math.max(0, Math.floor(-v.ox / span)); tx <= Math.min(Math.ceil(w / T) - 1, Math.floor((cw - v.ox) / span)); tx++) at.push([tx, ty])
@@ -197,16 +224,21 @@ export class BigCanvas {
 
   /** The canvas box in CSS px; the first call fits the board. */
   resize(cw: number, ch: number): void {
-    const first = this.cw === 0
+    const first = this.cw === 0, was = this.#dpr
     this.#dpr = Math.min(3, globalThis.devicePixelRatio || 1)
-    this.cw = cw
-    this.ch = ch
-    this.el.width = Math.round(cw * this.#dpr)
-    this.el.height = Math.round(ch * this.#dpr)
-    this.el.style.width = `${cw}px`
-    this.el.style.height = `${ch}px`
+    // whole device px both ways and the CSS box exactly that, so the backing store maps 1:1 on the screen (a
+    // rounded-up store in a whole CSS box would be rescaled, e.g. 815 px into 543 × 1.5 = 814.5)
+    this.el.width = Math.max(1, Math.floor(cw * this.#dpr))
+    this.el.height = Math.max(1, Math.floor(ch * this.#dpr))
+    this.cw = this.el.width / this.#dpr
+    this.ch = this.el.height / this.#dpr
+    this.el.style.width = `${this.cw}px`
+    this.el.style.height = `${this.ch}px`
     this.#flush()
-    this.setView(first ? this.fitView() : this.view)
+    if (first) this.setView(this.fitView())
+    // a new screen scale: settle on whole device px again, about the middle
+    else if (this.#dpr !== was) this.#zoomAt(this.view.s, this.cw / 2, this.ch / 2)
+    else this.setView(this.view)
   }
 
   #theme(): void {
@@ -273,7 +305,7 @@ export class BigCanvas {
       this.#basePx(i)
       x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y)
       for (const [b, lod] of this.#layers.values()) {
-        const T = Math.max(1, (TILE / b) | 0)
+        const T = tileCells(b)
         const tile = this.#tiles.get(`${b}/${lod}/${(x / T) | 0}/${(y / T) | 0}`)
         if (!tile) continue
         const c = ctx2(tile), px = (x % T) * b, py = (y % T) * b
@@ -509,14 +541,20 @@ export class BigCanvas {
 
   // —— view ——
 
+  /** The whole board in the box, on whole device px per cell (rounded down, so it still fits). */
   #fitScale(): number {
-    return Math.max(1, Math.min((this.cw - 8) / this.#board.w, (this.ch - 8) / this.#board.h))
+    return snapScale(Math.max(1, Math.min((this.cw - 8) / this.#board.w, (this.ch - 8) / this.#board.h)), this.#dpr, true)
+  }
+
+  /** The zoom levels on whole device px per cell. */
+  #levels(): number[] {
+    return LEVELS.map(l => snapScale(l, this.#dpr))
   }
 
   fitView(): View { return this.#clamp({ s: this.#fitScale(), ox: 0, oy: 0 }) }
 
   #clamp(v: View): View {
-    const s = Math.max(Math.min(this.#fitScale(), 4), Math.min(64, v.s))
+    const lv = this.#levels(), s = Math.max(Math.min(this.#fitScale(), lv[0]!), Math.min(lv.at(-1)!, v.s))
     const one = (o: number, size: number, box: number): number => (size <= box ? (box - size) / 2 : Math.min(EDGE, Math.max(box - size - EDGE, o)))
     return { s, ox: one(v.ox, this.#board.w * s, this.cw), oy: one(v.oy, this.#board.h * s, this.ch) }
   }
@@ -532,10 +570,11 @@ export class BigCanvas {
 
   /**
    * Zoom to `s` keeping the cell under (px, py) in place: at once, or eased over 120 ms (ease-out) when `ease`
-   * is set and motion is not reduced.
+   * is set and motion is not reduced. It ends on whole device px per cell (snapScale), the anchor exact on the
+   * last frame (no jump after the ease); `raw`: a gesture's own frames, which may be fractional until it settles.
    */
-  #zoomAt(s: number, px: number, py: number, ease?: boolean): void {
-    const a = this.view, z = this.#clamp({ ...a, s }).s / a.s, t0 = performance.now()
+  #zoomAt(s: number, px: number, py: number, ease?: boolean, raw?: boolean): void {
+    const a = this.view, c = this.#clamp({ ...a, s }).s, z = (raw ? c : this.#clamp({ ...a, s: snapScale(c, this.#dpr) }).s) / a.s, t0 = performance.now()
     const at = (k: number): View => ({ s: a.s * k, ox: px - (px - a.ox) * k, oy: py - (py - a.oy) * k })
     if (!ease || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { this.setView(at(z)); return }
     cancelAnimationFrame(this.#anim)
@@ -552,7 +591,7 @@ export class BigCanvas {
   /** One level in or out (keys, buttons), around the cursor cell when it is in view; a held key goes on from where the ease is heading. */
   step(d: 1 | -1): void {
     const v = this.view, at = this.#to || v.s, fit = this.#fitScale()
-    const lv = [...new Set([fit, ...LEVELS])].toSorted((a, b) => a - b)
+    const lv = [...new Set([fit, ...this.#levels()])].toSorted((a, b) => a - b)
     const s = d > 0 ? lv.find(l => l > at * 1.001) : lv.findLast(l => l < at / 1.001)
     if (s === undefined) return
     const g = this.game.get()
@@ -573,7 +612,7 @@ export class BigCanvas {
 
   /** Show a block whole (N, the block list). */
   showBlock(x0: number, y0: number, x1: number, y1: number): void {
-    const s = Math.min(64, (this.cw - 16) / (x1 - x0), (this.ch - 16) / (y1 - y0))
+    const s = snapScale(Math.min(64, (this.cw - 16) / (x1 - x0), (this.ch - 16) / (y1 - y0)), this.#dpr, true)
     this.setView({ s, ox: this.cw / 2 - ((x0 + x1) / 2) * s, oy: this.ch / 2 - ((y0 + y1) / 2) * s })
   }
 
@@ -589,10 +628,11 @@ export class BigCanvas {
     if (this.#mode === 'pinch') { this.#stretch(); return }
     this.#gesture = false
     const v = this.view, fit = this.#fitScale()
-    const near = [fit, ...LEVELS].find(l => Math.abs(v.s - l) / l < 0.15 && l >= Math.min(fit, 4))
-    // around the last pointer or pinch centre, so the cell under it stays put (review I3)
-    const [px, py] = this.#at ?? [this.cw / 2, this.ch / 2]
-    if (near !== undefined && near !== v.s) this.#zoomAt(near, px, py, true)
+    const lv = this.#levels(), near = [fit, ...lv].find(l => Math.abs(v.s - l) / l < 0.15 && l >= Math.min(fit, lv[0]!))
+    // around the last pointer or pinch centre, so the cell under it stays put (review I3); between levels it still
+    // ends on whole device px per cell
+    const [px, py] = this.#at ?? [this.cw / 2, this.ch / 2], to = near ?? snapScale(v.s, this.#dpr)
+    if (to !== v.s) this.#zoomAt(to, px, py, true)
     else this.paint()
   }
 
@@ -618,7 +658,7 @@ export class BigCanvas {
       const [px, py] = this.#local(e)
       this.#at = [px, py]
       this.#gesture = true
-      this.#zoomAt(v.s * Math.exp(-Math.max(-50, Math.min(50, e.deltaY * u)) / 100), px, py)
+      this.#zoomAt(v.s * Math.exp(-Math.max(-50, Math.min(50, e.deltaY * u)) / 100), px, py, false, true)
       return
     }
     const dx = (e.shiftKey ? e.deltaY : e.deltaX) * u, dy = e.shiftKey ? 0 : e.deltaY * u
@@ -739,7 +779,7 @@ export class BigCanvas {
     e.preventDefault()
     const r = this.mini.getBoundingClientRect(), { w, h } = this.#board
     const cx = ((e.clientX - r.left) / r.width) * w, cy = ((e.clientY - r.top) / r.height) * h
-    const s = first && this.view.s <= this.#fitScale() + 0.01 ? 16 : this.view.s
+    const s = first && this.view.s <= this.#fitScale() + 0.01 ? snapScale(16, this.#dpr) : this.view.s
     this.setView({ s, ox: this.cw / 2 - cx * s, oy: this.ch / 2 - cy * s })
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LEVELS, PREBUILD_MAX, prebuildPlan, tilesOf } from '../src/client/big-canvas.ts'
+import { LEVELS, PREBUILD_MAX, prebuildPlan, snapScale, tileB, tileCells, tilesOf } from '../src/client/big-canvas.ts'
 
 /** A 208 × 208 board on a 480 × 520 box at 2× (the designer's cold-cache case). */
 const W = 208, CW = 480, CH = 520, DPR = 2
@@ -7,6 +7,8 @@ const about = (s0: number, ox: number, oy: number, s: number) => {
   const k = s / s0
   return { s, ox: CW / 2 - (CW / 2 - ox) * k, oy: CH / 2 - (CH / 2 - oy) * k }
 }
+/** The frame puts cell c's left edge at round((ox + c·s)·dpr) (BigCanvas.draw): device px of cells c0 … c0 + n − 1. */
+const edges = (ox: number, s: number, dpr: number, c0: number, n: number) => Math.round((ox + (c0 + n) * s) * dpr) - Math.round((ox + c0 * s) * dpr)
 
 describe('big canvas tiles (designer recheck P1/P2)', () => {
   it('P1: a view’s tiles come nearest the box’s middle first, each once', () => {
@@ -34,17 +36,69 @@ describe('big canvas tiles (designer recheck P1/P2)', () => {
     expect(plan.length).toBeLessThanOrEqual(PREBUILD_MAX)
     const now = tilesOf(fit, CW, CH, W, W, DPR)
     expect(plan.some(p => p.b === now.b && p.lod === now.lod)).toBe(false)
-    // first comes the level in that needs new tiles: 4 px/cell shares 2.3's (8 device px, lod 0), so 8 px/cell, its middle tile first
-    expect(tilesOf(about(fit.s, fit.ox, fit.oy, 4), CW, CH, W, W, DPR)).toMatchObject({ b: now.b, lod: now.lod })
-    const inV = about(fit.s, fit.ox, fit.oy, LEVELS.find(l => l > 4)!)
+    // first comes the next level in (tiles are built at each view's own device px per cell: 2.3 → 5, 4 → 8), its middle tile first
+    expect(now).toMatchObject({ b: 5, lod: 0 })
+    const inV = about(fit.s, fit.ox, fit.oy, LEVELS.find(l => l > fit.s)!)
     const want = tilesOf(inV, CW, CH, W, W, DPR)
     expect(plan[0]).toMatchObject({ b: want.b, lod: want.lod, T: want.T, tx: want.at[0]![0], ty: want.at[0]![1] })
     expect(plan.slice(0, Math.min(PREBUILD_MAX, want.at.length)).map(p => [p.tx, p.ty])).toEqual(want.at.slice(0, PREBUILD_MAX))
     // a smaller cap is kept
     expect(prebuildPlan(fit, CW, CH, W, W, DPR, 3)).toHaveLength(3)
-    // at the top level only the level out is left: 48 px/cell shares 64's tiles (128 device px), so 32 (64)
+    // at the top level only the level out is left: 48 px/cell, 96 device px
     const top = prebuildPlan({ s: 64, ox: -2000, oy: -2000 }, CW, CH, W, W, DPR)
     expect(top.length).toBeGreaterThan(0)
-    expect(top.every(p => p.b === 64 && p.lod === 2)).toBe(true)
+    expect(top.every(p => p.b === 96 && p.lod === 2)).toBe(true)
+  })
+
+  it.each([1, 1.25, 1.5, 2])('native tile size at dpr %s: b = device px per cell on every level, and a tile draws 1:1 wherever the view sits', (dpr) => {
+    for (const s of LEVELS) {
+      const k = s * dpr, b = tileB(k), T = tileCells(b)
+      expect(b).toBe(k) // whole at these dprs, never a power of two rounded up
+      expect(T).toBe(Math.max(1, Math.floor(256 / b)))
+      expect(T * b).toBeLessThanOrEqual(256)
+      expect(tilesOf({ s, ox: 0, oy: 0 }, CW, CH, W, W, dpr)).toMatchObject({ b, T })
+      // any (fractional) offset: a whole tile spans exactly T·b device px, and every cell b, so no resampling
+      for (const ox of [0, 0.3, 0.5, 0.8, -17.4, 123.6]) {
+        for (const c0 of [0, 1, 7, T, 3 * T]) {
+          expect(edges(ox, s, dpr, c0, T)).toBe(T * b)
+          expect(edges(ox, s, dpr, c0, 1)).toBe(b)
+        }
+      }
+    }
+  })
+
+  it('native tile size: a fractional device px per cell rounds to the nearest whole px, within 1…256', () => {
+    expect(tileB(2.3 * 2)).toBe(5)
+    expect(tileB(2.3 * 1.25)).toBe(3)
+    expect(tileB(12 * 1.1)).toBe(13)
+    expect(tileB(0.2)).toBe(1)
+    expect(tileB(64 * 3)).toBe(192)
+    expect(tileCells(192)).toBe(1)
+    expect(tileB(400)).toBe(256)
+    // the old rule built 1.5× · 16 px/cell at 32 and scaled it by 3/4: the gap went 1 px left, 2 px right
+    expect(tileB(16 * 1.5)).toBe(24)
+    expect(tileCells(24)).toBe(10)
+  })
+
+
+  it.each([1, 1.1, 1.25, 1.5, 1.75, 2, 3])('snapScale at dpr %s: a settled view has whole device px per cell, levels stay apart, a fit stays inside', (dpr) => {
+    const whole = (s: number) => Math.abs(s * dpr - Math.round(s * dpr)) < 1e-9
+    const lv = LEVELS.map(l => snapScale(l, dpr))
+    for (const [i, s] of lv.entries()) {
+      expect(whole(s)).toBe(true)
+      expect(Math.abs(s * dpr - LEVELS[i]! * dpr)).toBeLessThanOrEqual(0.5) // half a device px at most
+      if (i) expect(s).toBeGreaterThan(lv[i - 1]!) // no two levels meet
+    }
+    // the levels are whole already at 1, 1.25, 1.5, 2, 3: unchanged there
+    if ([1, 1.25, 1.5, 2, 3].includes(dpr)) expect(lv).toEqual(LEVELS)
+    for (const raw of [1, 2.3, 2.69, 3.9, 7.77, 19.5, 63.9]) {
+      const d = snapScale(raw, dpr, true)
+      expect(whole(d)).toBe(true)
+      expect(d).toBeLessThanOrEqual(Math.max(raw, 1 / dpr) + 1e-9)
+      expect(raw * dpr - d * dpr).toBeLessThan(1)
+      expect(whole(snapScale(raw, dpr))).toBe(true)
+    }
+    // a whole scale is kept as it is (no drift from repeated snapping)
+    for (const s of lv) expect(snapScale(s, dpr)).toBe(s)
   })
 })

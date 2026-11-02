@@ -1398,11 +1398,68 @@ async function bigAria() {
  * own colour (not transparent, not the board). The same check on the frame once every tile is in, and a screenshot.
  */
 async function bigTileGap() {
-  // the default 2× screen, then 1.5× (fractional device pixels everywhere)
-  for (const dsf of [2, 1.5]) await tileGapAt(dsf)
+  // the default 2× screen, then 1.5× and 1.25× (fractional device pixels everywhere), then 1×
+  for (const dsf of [2, 1.5, 1.25, 1]) await tileGapAt(dsf)
+  for (const dsf of [1.1, 1.25, 1.5]) await snapAt(dsf)
+}
+
+/**
+ * Designer (native tiles): a settled view has a whole number of device px per cell, at any dpr — the fit, every
+ * level, a Ctrl+wheel that stops between levels; the anchor (pointer) stays on its board point, the ease's last
+ * frame is the settled view (no jump after it) and 「px/格」 shows the cell as drawn. Frames inside a gesture or an
+ * ease may be fractional.
+ */
+/** 「px/格」 reads the drawn cell size (one decimal when fractional) */
+const pxOk = v => v.px.startsWith(`${Math.round(v.s * 10) / 10} `)
+async function snapAt(dsf) {
+  const p = await bigPage({ deviceScaleFactor: dsf })
+  await startPreset(p, 58)
+  const whole = s => Math.abs(s * dsf - Math.round(s * dsf)) < 1e-5
+  const shown = () => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; return { s: c.view.s, ox: c.view.ox, oy: c.view.oy, px: document.querySelector('.pd-bk-px')?.textContent ?? '', cw: c.cw, el: c.el.width, css: parseFloat(c.el.style.width) } })
+  await p.keyboard.press('Escape')
+  await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView(c.fitView()); c.draw() })
+  await p.waitForTimeout(150)
+  const fit = await shown()
+  // the levels, one + at a time from the fit (around the middle: the cursor cell is in view)
+  const levels = []
+  await bigHost(p).focus()
+  for (let i = 0; i < 9; i++) {
+    await p.keyboard.press('+')
+    await p.waitForTimeout(260)
+    const v = await shown()
+    if (levels.length && levels.at(-1).s === v.s) break
+    levels.push(v)
+  }
+  // Ctrl+wheel to 19.5 px/cell (between 16 and 24, near neither), pointer off centre, then let go
+  const w = await p.evaluate(() => {
+    const c = document.querySelector('.pd-bk-app').pd
+    c.setView({ s: 16, ox: -100, oy: -80 }); c.draw()
+    const r = c.el.getBoundingClientRect(), px = c.cw * 0.3, py = c.ch * 0.35
+    c.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 * Math.log(19.5 / 16), ctrlKey: true, clientX: r.left + px, clientY: r.top + py, bubbles: true, cancelable: true }))
+    const v = c.view
+    window.pdV = []
+    const t0 = performance.now(), f = () => { window.pdV.push([c.view.s, c.view.ox, c.view.oy]); if (performance.now() - t0 < 700) requestAnimationFrame(f) }
+    requestAnimationFrame(f)
+    return { px, py, s: v.s, fx: (px - v.ox) / v.s, fy: (py - v.oy) / v.s }
+  })
+  await p.waitForTimeout(800)
+  const after = await p.evaluate(([px, py]) => { const v = document.querySelector('.pd-bk-app').pd.view; return { s: v.s, fx: (px - v.ox) / v.s, fy: (py - v.oy) / v.s, frames: window.pdV } }, [w.px, w.py])
+  const end = await shown()
+  const fr = after.frames, last = fr.at(-1), firstEnd = fr.findIndex(f => f[0] === last[0] && f[1] === last[1] && f[2] === last[2])
+  // no jump: every frame from the ease's end on is the settled view, and the eased scales run one way to it
+  const steady = fr.slice(firstEnd).every(f => f[0] === last[0] && f[1] === last[1] && f[2] === last[2])
+  const ss = fr.map(f => f[0]), mono = ss.every((v, i) => !i || (ss[0] <= last[0] ? v >= ss[i - 1] - 1e-9 : v <= ss[i - 1] + 1e-9))
+  const drift = Math.hypot(after.fx - w.fx, after.fy - w.fy)
+  if (PHASE2_SHOTS) await bigShot(p, `snap-dpr${dsf}`)
+  check(`BIG snap @${dsf}×: the fit, every level and a Ctrl+wheel stopped between levels settle on whole device px per cell (fit ${fit.s * dsf}, levels ${levels.map(v => +(v.s * dsf).toFixed(3)).join('/')}, wheel ${+(w.s * dsf).toFixed(2)} → ${+(after.s * dsf).toFixed(3)} device px); the canvas store is its CSS box × dpr exactly`,
+    whole(fit.s) && levels.length >= 6 && levels.every(v => whole(v.s)) && !whole(w.s) && whole(after.s) && Math.abs(after.s - w.s) * dsf <= 0.5 + 1e-6 && Math.abs(end.el - end.css * dsf) < 0.01 && Math.abs(end.cw - end.css) < 0.001,
+    JSON.stringify({ fit, levels, w, after: { s: after.s }, end }))
+  check(`BIG snap @${dsf}×: the pointer's board point stays put (< 0.02 cell), the ease runs one way and its last frame is the settled view (no jump after it); 「px/格」 shows the drawn size at the fit, each level and after the wheel`,
+    drift < 0.02 && steady && mono && firstEnd >= 0 && pxOk(fit) && levels.every(pxOk) && pxOk(end), JSON.stringify({ drift, steady, mono, frames: fr.length, firstEnd, px: [fit.px, ...levels.map(v => v.px), end.px] }))
+  await p.context().close()
 }
 async function tileGapAt(dsf) {
-  const sfx = dsf === 2 ? '' : '-dpr1.5'
+  const sfx = dsf === 2 ? '' : `-dpr${dsf}`
   const p = await bigPage({ deviceScaleFactor: dsf })
   await startPreset(p, 58)
   const cdp = await p.context().newCDPSession(p)
@@ -1440,7 +1497,8 @@ async function tileGapAt(dsf) {
       }
       // designer steering 2: across every tile boundary (cells at multiples of T) the two pixels at the seam each
       // match a pixel just outside it on one side: no third colour (no bright seam), sampled through bead centres
-      const b = Math.min(128, 2 ** Math.ceil(Math.log2(Math.max(1, vs * d)))), T = Math.max(1, (256 / b) | 0)
+      // tiles are built at the view's own device px per cell, at most 256 device px a side (big-canvas.ts tileB)
+      const b = Math.min(256, Math.max(1, Math.round(vs * d))), T = Math.max(1, (256 / b) | 0)
       const px = (x, y) => { const j = (y * c.el.width + x) * 4; return [img[j], img[j + 1], img[j + 2], img[j + 3]] }
       let edges = 0, seam = 0
       const seams = []
@@ -1512,18 +1570,80 @@ async function tileGapAt(dsf) {
       }
       return { n, blank, off, edges, seam, seams, thin: thin.slice(0, 8), fringe, gapT, gapC, maskN, maskDiff }
     }
+    // designer (native tiles): each bead as drawn is centred and mirror-symmetric in its cell. Every pixel of a sampled
+    // cell is classed board / bead / hole (nearest of the board colour, the bead's colour, the hole's mix(-0.5));
+    // then: the board gap the same width each side (left = right, top = bottom, on the middle rows / columns), the
+    // classes the same mirrored left↔right and top↔bottom along those lines (a dropped row or a one-pixel transition
+    // row on one side breaks it), and the hole's centroid within 0.5 device px of the cell's centre, its margins
+    // differing by 1 px at most
+    const beads = () => {
+      // the canvas's own scale (its cell edges are round((o + c·s)·dpr), big-canvas.ts draw)
+      const { s: vs, ox, oy } = c.view, d = Math.min(3, devicePixelRatio), { w, cells } = c.game.get().history.present
+      const img = c.el.getContext('2d').getImageData(0, 0, c.el.width, c.el.height).data, W = c.el.width
+      const ex = q => Math.round((ox + q * vs) * d), ey = q => Math.round((oy + q * vs) * d)
+      // rgb channels; AMB: an anti-aliased pixel whose class depends on the shading under it, never compared
+      const RGB = [0, 1, 2], AMB = -1
+      const dist = (a, q) => Math.hypot(...RGB.map(i => a[i] - q[i])), differ = (m, q) => m !== AMB && q !== AMB && m !== q
+      // the board colour: a cell's corner pixel, outside its round bead
+      const c0 = (Math.round((oy + (Math.max(0, Math.ceil(-oy / vs)) + 1) * vs) * d) * W + Math.round((ox + (Math.max(0, Math.ceil(-ox / vs)) + 1) * vs) * d)) * 4
+      const bg = [img[c0], img[c0 + 1], img[c0 + 2]], unit = c.game.get().unit
+      let n = 0, gapOff = 0, mirrorOff = 0, holeOff = 0, worst = 0, marginOff = 0
+      const odd = []
+      for (let yy = Math.max(0, Math.ceil(-oy / vs)) + 1; yy < 207 && oy + (yy + 2) * vs <= c.ch; yy += 2) {
+        for (let xx = Math.max(0, Math.ceil(-ox / vs)) + 1; xx < 207 && ox + (xx + 2) * vs <= c.cw; xx += 2) {
+          // not next to a 29-cell divider (drawn on the cell edge)
+          if (unit > 0 && [xx, yy].some(q => q % unit === 0 || q % unit === unit - 1)) continue
+          const hex = c.pal[cells[yy * w + xx]], bead = RGB.map(i => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16)), hole = bead.map(q => Math.round(q * 0.5))
+          if (dist(bead, bg) < 60 || dist(hole, bg) < 60) continue
+          const x0 = ex(xx), y0 = ey(yy), kw = ex(xx + 1) - x0, kh = ey(yy + 1) - y0
+          const dbh = dist(bead, hole), dbg = Math.min(dist(bead, bg), dist(hole, bg))
+          // −1: an anti-aliased edge pixel whose class depends on the shading under it (the highlight is up-left), not compared
+          const cls = (x, y) => { const j = ((y0 + y) * W + x0 + x) * 4, v = [img[j], img[j + 1], img[j + 2]], a = dist(v, bg), o = dist(v, hole); return a <= 12 ? 0 : o <= 0.15 * dbh ? 2 : a >= 0.5 * dbg && o >= 0.5 * dbh ? 1 : AMB }
+          n++
+          const r1 = Math.floor((kw - 1) / 2), r2 = kw - 1 - r1
+          const sides = [[y => cls(r1, y), kh], [y => cls(r2, y), kh], [x => cls(x, r1), kw], [x => cls(x, r2), kw]]
+          let gapBad = false, mirBad = false
+          for (const [f, len] of sides) {
+            let lead = 0, trail = 0
+            while (lead < len && f(lead) === 0) lead++
+            while (trail < len && f(len - 1 - trail) === 0) trail++
+            if (lead !== trail) gapBad = true
+            for (let i = 0; i < len; i++) if (differ(f(i), f(len - 1 - i))) mirBad = true
+          }
+          // the whole cell mirrored too: row y against row kh−1−y, column x against kw−1−x (where a dropped or
+          // doubled row shows: the rows that differ from their mirror)
+          const rowsOff = [], colsOff = []
+          for (let y = 0; y < kh / 2; y++) for (let x = 0; x < kw; x++) if (differ(cls(x, y), cls(x, kh - 1 - y))) { rowsOff.push(y); break }
+          for (let x = 0; x < kw / 2; x++) for (let y = 0; y < kh; y++) if (differ(cls(x, y), cls(kw - 1 - x, y))) { colsOff.push(x); break }
+          if (rowsOff.length || colsOff.length) mirBad = true
+          let hn = 0, sx = 0, sy = 0, hx0 = kw, hx1 = -1, hy0 = kh, hy1 = -1
+          for (let y = 0; y < kh; y++) for (let x = 0; x < kw; x++) if (cls(x, y) === 2) { hn++; sx += x + 0.5; sy += y + 0.5; hx0 = Math.min(hx0, x); hx1 = Math.max(hx1, x); hy0 = Math.min(hy0, y); hy1 = Math.max(hy1, y) }
+          const dev = hn ? Math.hypot(sx / hn - kw / 2, sy / hn - kh / 2) : 99
+          worst = Math.max(worst, dev)
+          const mBad = !hn || Math.abs(hx0 - (kw - 1 - hx1)) > 1 || Math.abs(hy0 - (kh - 1 - hy1)) > 1
+          if (gapBad) gapOff++
+          if (mirBad) mirrorOff++
+          if (dev > 0.5) holeOff++
+          if (mBad) marginOff++
+          if ((gapBad || mirBad || dev > 0.5 || mBad) && odd.length < 3) odd.push({ cell: [xx, yy], k: kw, rows: [r1, r2].map(r => Array.from({ length: kw }, (_, x) => 'x012'[cls(x, r) + 1]).join('')), cols: [r1, r2].map(r => Array.from({ length: kh }, (_, y) => 'x012'[cls(r, y) + 1]).join('')), rowsOff, colsOff, dev: Math.round(dev * 100) / 100 })
+        }
+      }
+      return { n, gapOff, mirrorOff, holeOff, marginOff, worst: Math.round(worst * 100) / 100, bad: odd }
+    }
     const t0 = performance.now()
     const missing = c.draw()
     const mid = look(), midPng = c.el.toDataURL()
     let frames = 1
     while (c.draw() && frames < 400) frames++
-    return { missing, mid, full: look(), frames, fillMs: Math.round(performance.now() - t0), midPng }
+    return { missing, mid, full: look(), frames, fillMs: Math.round(performance.now() - t0), midPng, bead: beads(), s: c.view.s, k: c.view.s * Math.min(3, devicePixelRatio) }
   })
   // the mid-zoom frame itself (the canvas as drawn, tiles still missing)
   if (PHASE2_SHOTS) writeFileSync(join(PHASE2_SHOTS, `tile-gap-mid${sfx}.png`), Buffer.from(res.midPng.split(',')[1], 'base64'))
   delete res.midPng
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
   await bigShot(p, `tile-gap-full${sfx}`)
+  check(`BIG tiles @${dsf}×: filled at 16 px/cell (${res.k} device px, whole) every bead is centred and symmetric — the board gap the same each side, the bead mirror-symmetric left↔right and top↔bottom (no dropped or one-pixel transition row), the hole's centroid ≤ 0.5 device px off the centre and its margins within 1 px`,
+    Number.isInteger(res.k) && res.bead.n > 60 && res.bead.gapOff === 0 && res.bead.mirrorOff === 0 && res.bead.holeOff === 0 && res.bead.marginOff === 0, JSON.stringify(res.bead))
   check(`BIG tiles @${dsf}×: mid-zoom on 208² (tiles still missing after one budgeted frame) every sampled cell shows its own colour — no blank, no board colour`, res.missing && res.mid.n > 150 && res.mid.blank === 0 && res.mid.off === 0 && res.full.blank === 0 && res.full.off === 0, JSON.stringify(res))
   check(`BIG tiles @${dsf}×: no seam at tile boundaries mid-zoom or after fill-in — mid frame: each boundary pixel matches a side (no third colour), no one-pixel blended line anywhere; mid and filled: the gap at a tile boundary no wider than at ordinary cell edges and the board-between-beads pattern the same as one cell earlier`, res.mid.edges > 40 && res.mid.seam === 0 && res.mid.thin.length === 0 && res.mid.gapT <= res.mid.gapC && res.full.edges > 40 && res.full.gapT <= res.full.gapC && res.mid.maskN > 40 && res.mid.maskDiff === 0 && res.full.maskN > 40 && res.full.maskDiff === 0, JSON.stringify({ dpr: dsf, mid: [res.mid.edges, res.mid.seam, res.mid.seams, res.mid.thin, res.mid.gapT, res.mid.gapC, res.mid.maskN, res.mid.maskDiff, res.mid.fringe], full: [res.full.gapT, res.full.gapC, res.full.maskN, res.full.maskDiff, res.full.seam, res.full.fringe] }))
   await p.context().close()

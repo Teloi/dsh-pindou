@@ -407,7 +407,8 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
   const sv = st?.status()
   // a board this page cannot save, on the localStorage fallback: IDB missing (card) or only slow (a quiet line)
   const local = st && !st.canSave(w, h) && sv?.backend === 'local', slow = sv?.slow
-  const level = view ? Math.round(view.s) : 0
+  // the cell as drawn: whole device px since the view settles on them, so e.g. 2.5 at a 2× fit, not a rounded 3
+  const level = view ? Math.round(view.s * 10) / 10 : 0
 
   return (
     <div className="pd-bk-play" onKeyDown={onKey}>
