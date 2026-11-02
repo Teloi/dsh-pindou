@@ -2,7 +2,7 @@
   "name": "dsh-pindou",
   "displayName": "Bead Break",
   "version": "0.2.1",
-  "description": "拼豆小憩 Bead Break — 等模型思考时拼一会儿的像素拼豆小游戏 · a tiny perler-bead pixel game for DeepSeek Harness (DSH) while the model is busy",
+  "description": "拼豆小憩 Bead Break — 等模型思考时拼一会儿的像素拼豆小游戏 · a tiny pixel bead game for DeepSeek Harness (DSH) while the model is busy",
   "type": "module",
   "license": "MIT",
   "author": "Teloi",
@@ -18,7 +18,7 @@
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
-    "perler-beads",
+    "beads",
     "pixel-art",
     "game",
     "拼豆"
