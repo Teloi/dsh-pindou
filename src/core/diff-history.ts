@@ -45,9 +45,14 @@ export const historyBytes = (h: DiffHistory): number =>
 /** The step that turns `to` back into `from`. */
 export function diff(from: Board, to: Board): Step {
   if (!sameShape(from, to)) return from
-  const i: number[] = []
-  to.cells.forEach((c, k) => { if (c !== from.cells[k]) i.push(k) })
-  return { i: Uint16Array.from(i), v: Int8Array.from(i, k => from.cells[k]!) }
+  // two plain passes straight into typed arrays (count, then fill): a whole-board repaint of 208² is 43,264 cells,
+  // and growing a number[] then copying it twice cost ~6 ms a step (seconds for a test of 120 of them under load)
+  const a = from.cells, b = to.cells
+  let n = 0
+  for (let k = 0; k < b.length; k++) if (b[k] !== a[k]) n++
+  const i = new Uint16Array(n), v = new Int8Array(n)
+  for (let k = 0, j = 0; j < n; k++) if (b[k] !== a[k]) { i[j] = k; v[j++] = a[k]! }
+  return { i, v }
 }
 
 /** Swap a step in; also returns the step that swaps it back out. */

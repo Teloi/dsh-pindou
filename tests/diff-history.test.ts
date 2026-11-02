@@ -99,8 +99,10 @@ describe('diff history', () => {
 
   it('keeps the same 100 steps as snapshot undo even for whole-board repaints of 208² (steering 1)', () => {
     let h = createHistory(createBoard(208))
-    // each full repaint of 208² is 129,792 B; 100 of them (≈ 13 MB) stay under the 16 MB cap
-    for (let i = 0; i < 120; i++) h = push(h, floodFill(clearBoard(h.present), 0, 0, i % 16))
+    // each full repaint of 208² is 129,792 B; 100 of them (≈ 13 MB) stay under the 16 MB cap. The 16 repainted
+    // boards are filled once (filling is not what is under test); each push still diffs a whole board
+    const fills = Array.from({ length: 16 }, (_, c) => floodFill(createBoard(208), 0, 0, c))
+    for (let i = 0; i < 120; i++) h = push(h, fills[i % 16]!)
     expect(h.past).toHaveLength(100)
     expect(historyBytes(h)).toBeLessThanOrEqual(HISTORY_BYTES)
   })
