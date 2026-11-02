@@ -644,6 +644,56 @@ async function saveSafetySection() {
   check('V S2-1 the big setup page says 「本次进度不会保存」 for the session (designer 22:05)', hLine.includes('本次进度不会保存') && !(await backedUp(h)), JSON.stringify(hLine))
   await bigShot(h, 'v-held-setup')
   await h.context().close()
+  // 1b. designer recheck R1: in a 300 px panel the long line wraps (≤ 3 lines, nothing cut), stays ≥ 5 s from the moment
+  // it replaces the short one, and hovering or keyboard focus holds the clock. A timer records when it appeared and left.
+  const clock = `window.pdL = null; window.pdGone = null; setInterval(() => { const s = document.querySelector('.pd-toast span'); if (s && s.textContent === ${JSON.stringify(HELD)} && window.pdL === null) window.pdL = performance.now(); if (!s && window.pdL !== null && window.pdGone === null) window.pdGone = performance.now() }, 20)`
+  const narrowToast = async (hold) => {
+    const n = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${clock}; ${quota}; ${init.replace("'v'", `'n${hold}'`)}`)
+    await n.route(WORK_CHUNK, async (route) => { await new Promise(r => { setTimeout(r, 1500) }); await route.continue() })
+    await startSession(n, '看看 README')
+    await openPanel(n)
+    await setWidth(n, 300)
+    const long = await waitToast(n, HELD)
+    await n.waitForTimeout(100)
+    const look = await n.evaluate(() => {
+      const s = document.querySelector('.pd-toast span'), cs = getComputedStyle(s), lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45
+      const r = s.getBoundingClientRect(), root = document.querySelector('.pd-root').getBoundingClientRect()
+      return { lines: Math.round(r.height / lh), cut: s.scrollHeight > s.clientHeight + 1 || s.scrollWidth > s.clientWidth + 1, inside: r.left >= root.left && r.right <= root.right, w: Math.round(root.width) }
+    })
+    return { n, long, look }
+  }
+  {
+    const { n, long, look } = await narrowToast(0)
+    await bigShot(n, 'v-held-long-300')
+    check('V recheck R1 300 px: the long line wraps to ≤ 3 lines inside the panel, nothing cut (「…这次的进度不会保存」 visible)', long && look.w === 300 && look.lines >= 2 && look.lines <= 3 && !look.cut && look.inside, JSON.stringify(look))
+    await n.waitForTimeout(4600 - (await n.evaluate(() => performance.now() - window.pdL)))
+    const at46 = await toastNow(n)
+    await n.waitForFunction(() => window.pdGone !== null, null, { timeout: 4000 }).catch(() => {})
+    const stay = await n.evaluate(() => window.pdGone === null ? null : Math.round(window.pdGone - window.pdL))
+    check('V recheck R1 the long line stays ≥ 5 s from the moment it replaced the short one (then goes)', at46 === HELD && stay !== null && stay >= 4950 && stay <= 6500, JSON.stringify({ at46, stay }))
+    await n.context().close()
+  }
+  {
+    // hover: the clock stops while the pointer is on the toast, and runs on once it leaves
+    const { n, long } = await narrowToast(1)
+    const box = await n.locator('.pd-toast').boundingBox()
+    await n.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await n.waitForTimeout(6500)
+    const hovered = await toastNow(n)
+    await n.mouse.move(5, 5)
+    await n.waitForTimeout(800)
+    const unhovered = await toastNow(n)
+    // keyboard: focus on the toast (it takes focus while it holds the long line) holds it too
+    await n.evaluate(() => { document.querySelector('.pd-toast')?.focus() })
+    const focused = await n.evaluate(() => document.activeElement?.classList.contains('pd-toast') ?? false)
+    await n.waitForTimeout(6500)
+    const kept = await toastNow(n)
+    await n.evaluate(() => { document.activeElement?.blur() })
+    await n.waitForFunction(() => !document.querySelector('.pd-toast'), null, { timeout: 7000 }).catch(() => {})
+    const gone = await toastNow(n)
+    check('V recheck R1 hovering or focusing the long toast holds it (6.5 s each); it goes once both end', long && hovered === HELD && unhovered === HELD && focused && kept === HELD && gone === null, JSON.stringify({ hovered, unhovered, focused, kept, gone }))
+    await n.context().close()
+  }
   // 2. a crash whose backup is refused (chunk ok): the short line, then 「出错了，已重新开始。这次的进度不会保存」
   const ch = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${sampler}; ${boom}; ${quota}; if (!sessionStorage.getItem('k2')) { sessionStorage.setItem('k2', '1'); localStorage.setItem('dsh-pindou:v1', JSON.stringify({ v: 2, size: 16, board: '.'.repeat(255) + '3', color: 3, tool: 'paint', mode: 'home', target: null, pattern: null, ironed: false, coached: true })) }`)
   await startSession(ch, '看看 README')

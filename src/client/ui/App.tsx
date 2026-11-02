@@ -104,23 +104,29 @@ function ToastView({ toast }: { toast: NonNullable<GameState['toast']> }): React
   const rare = store.getSnapshot().storage === 'held'
   useLazy(works)
   useEffect(() => { if (rare) void works?.load() }, [rare, works])
-  const text = (rare && works?.value()?.NOTICES[lang][toast.key as 'held']) || t(toast.key, toast.params)
+  const w = rare ? works?.value() : undefined
+  const long = w?.NOTICES[lang][toast.key as 'held']
+  const text = long || t(toast.key, toast.params)
   const [held, setHeld] = useState(0)
   const left = useRef(toast.undo ? TOAST_UNDO_MS : TOAST_MS)
   const started = useRef(0)
+  // the long line gets a fresh clock (≥ 5 s) the moment it takes the short one's place (recheck R1)
+  const fresh = useRef(true)
   useEffect(() => {
     if (held > 0) return
+    if (long && fresh.current) { fresh.current = false; left.current = w!.NOTICE_MS }
     started.current = Date.now()
     const id = setTimeout(() => { store.hideToast() }, left.current)
     return () => { clearTimeout(id); left.current = Math.max(0, left.current - (Date.now() - started.current)) }
-  }, [held, store])
+  }, [held, store, long, w])
   const hold = (on: boolean) => (): void => { setHeld(h => Math.max(0, h + (on ? 1 : -1))) }
   return (
-    <div className="pd-toast" role="status" data-held={held > 0 || undefined}
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the long line takes focus, so the keyboard can hold it too (recheck R1)
+    <div className="pd-toast" role="status" data-held={held > 0 || undefined} tabIndex={long ? 0 : undefined}
       onPointerEnter={hold(true)} onPointerLeave={hold(false)}
       onFocus={hold(true)} onBlur={hold(false)}>
       {/* the whole text stays in the DOM (read out by role=status) and in the tooltip when it is cut */}
-      <span title={text}>{text}</span>
+      <span title={text} style={long ? w!.NOTICE_STYLE : undefined}>{text}</span>
       {toast.undo
         ? (
           <button type="button" onClick={(e) => {

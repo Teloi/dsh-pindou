@@ -16,3 +16,12 @@ export const NOTICES = {
     restart: 'Something went wrong — started over. Progress will not be saved',
   },
 } as const
+
+/**
+ * How the long line shows (designer recheck R1): it may wrap to at most 3 lines (the toast's text is one
+ * ellipsised line otherwise, which cut 「…这次的进度不会保存」 at 300 px), and it stays at least 5 s from the
+ * moment it takes the short line's place (hovering or focusing the toast still holds the clock). Here, not
+ * in the first screen, which has no bytes for it.
+ */
+export const NOTICE_MS = 5000
+export const NOTICE_STYLE = { whiteSpace: 'normal', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' } as const
