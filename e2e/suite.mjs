@@ -1458,11 +1458,8 @@ async function snapAt(dsf) {
     drift < 0.02 && steady && mono && firstEnd >= 0 && pxOk(fit) && levels.every(pxOk) && pxOk(end), JSON.stringify({ drift, steady, mono, frames: fr.length, firstEnd, px: [fit.px, ...levels.map(v => v.px), end.px] }))
   await p.context().close()
 }
-async function tileGapAt(dsf) {
-  const sfx = dsf === 2 ? '' : `-dpr${dsf}`
-  const p = await bigPage({ deviceScaleFactor: dsf })
-  await startPreset(p, 58)
-  const cdp = await p.context().newCDPSession(p)
+/** The tile-gap board: 208² of 16 colours from a fixed seed. */
+async function seed208(p) {
   await p.evaluate(() => {
     let s = 11
     const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
@@ -1470,6 +1467,139 @@ async function tileGapAt(dsf) {
     g.set({ history: { past: [], present: { w: 208, h: 208, cells: Object.freeze(Array.from({ length: 208 * 208 }, () => Math.floor(r() * 16))) }, future: [] } })
   })
   await p.waitForTimeout(500)
+}
+
+/** The filled frame drawn by a fresh canvas (empty cache) at the same board and view, every tile built before it is read. */
+async function expectedFrame(dsf, view) {
+  const q = await bigPage({ deviceScaleFactor: dsf })
+  await startPreset(q, 58)
+  await seed208(q)
+  const out = await q.evaluate(v => {
+    const c = document.querySelector('.pd-bk-app').pd
+    c.setView(v)
+    let n = 0
+    while (c.draw() && n < 5000) n++
+    return { png: c.el.toDataURL(), view: c.view, W: c.el.width, H: c.el.height, left: c.draw(), draws: n + 1 }
+  }, view)
+  await q.context().close()
+  return out
+}
+
+/**
+ * The strict tile judgement (pixel for pixel, in Node). `geo` is the view and board, mid / full / want decoded
+ * RGBA frames: the mid-zoom frame, the filled frame and the independently built expected frame. Pixels on a
+ * divider line (drawn over everything, after the tiles) are left out.
+ */
+const samePx = (a, i, q, j) => a[i] === q[j] && a[i + 1] === q[j + 1] && a[i + 2] === q[j + 2] && a[i + 3] === q[j + 3]
+const isBase = (a, i, c) => a[i] === c[0] && a[i + 1] === c[1] && a[i + 2] === c[2] && a[i + 3] === 255
+function judgeTiles(geo, mid, full, want) {
+  const { view: { s, ox, oy }, d, W, H, unit, cells, pal } = geo, n = 208
+  const b = Math.min(256, Math.max(1, Math.round(s * d))), T = Math.max(1, (256 / b) | 0), k = Math.round(s * d)
+  const ex = c => Math.round((ox + c * s) * d), ey = c => Math.round((oy + c * s) * d)
+  const lw = Math.max(1, Math.round(0.06 * s * d))
+  const owner = (len, e) => { const o = new Int32Array(len).fill(-1); for (let c = 0; c < n; c++) for (let x = Math.max(0, e(c)); x < Math.min(len, e(c + 1)); x++) o[x] = c; return o }
+  const cx = owner(W, ex), cy = owner(H, ey)
+  const near = (len, e) => { const o = new Uint8Array(len); if (unit > 0) for (let u = unit; u < n; u += unit) for (let x = e(u) - lw - 1; x <= e(u) + lw + 1; x++) if (x >= 0 && x < len) o[x] = 1; return o }
+  const nx = near(W, ex), ny = near(H, ey)
+  const rgb = pal.map(h => [1, 3, 5].map(q => parseInt(h.slice(q, q + 2), 16)))
+  const tiles = new Map(), m = { px: 0, other: 0, asWant: 0, asBase: 0, worst: [] }, f = { px: 0, diff: 0, maxDiff: 0, first: [] }
+  // per cell: every visible pixel equal to the base colour (a base-covered cell); a cell with a bead never is when filled
+  const baseM = new Uint8Array(n * n).fill(1), baseF = new Uint8Array(n * n).fill(1), seen = new Uint8Array(n * n)
+  for (let y = 0; y < H; y++) {
+    if (cy[y] < 0 || ny[y]) continue
+    for (let x = 0; x < W; x++) {
+      if (cx[x] < 0 || nx[x]) continue
+      const cell = cy[y] * n + cx[x], i = (y * W + x) * 4, base = rgb[cells[cell]]
+      seen[cell] = 1
+      m.px++
+      f.px++
+      const w1 = samePx(mid, i, want, i), b1 = isBase(mid, i, base)
+      if (!isBase(mid, i, base)) baseM[cell] = 0
+      if (!isBase(full, i, base)) baseF[cell] = 0
+      const key = `${(cx[x] / T) | 0},${(cy[y] / T) | 0}`
+      let t = tiles.get(key)
+      if (!t) tiles.set(key, t = { w: 0, b: 0 })
+      if (w1) m.asWant++
+      if (b1) m.asBase++
+      if (w1 && !b1) t.w++
+      else if (b1 && !w1) t.b++
+      else if (!w1 && !b1) { m.other++; if (m.worst.length < 5) m.worst.push({ x, y, cell: [cx[x], cy[y]], mid: [...mid.subarray(i, i + 4)], want: [...want.subarray(i, i + 4)], base }) }
+      if (!samePx(full, i, want, i)) {
+        f.diff++
+        f.maxDiff = Math.max(f.maxDiff, ...[0, 1, 2, 3].map(q => Math.abs(full[i + q] - want[i + q])))
+        if (f.first.length < 5) f.first.push({ x, y, full: [...full.subarray(i, i + 4)], want: [...want.subarray(i, i + 4)] })
+      }
+    }
+  }
+  let built = 0, unbuilt = 0, mixed = 0
+  for (const t of tiles.values()) { if (t.w && t.b) mixed++; else if (t.w) built++; else if (t.b) unbuilt++ }
+  let bm = 0, bf = 0
+  for (let c = 0; c < n * n; c++) if (seen[c]) { bm += baseM[c]; bf += baseF[c] }
+  // the board gap around each cell edge on the middle row (across) and column (down) of the filled frame, at tile
+  // boundaries (cell index a multiple of T) and at ordinary edges; beads next to a divider or near the board colour skipped
+  // the board colour: the top-left corner pixel of the first whole cell in view, off the dividers
+  const okC = c => !(unit > 0 && (c % unit === 0 || c % unit === unit - 1))
+  let gx = 0, gy = 0
+  while (ex(gx) < 0 || !okC(gx)) gx++
+  while (ey(gy) < 0 || !okC(gy)) gy++
+  const bg = [...want.subarray((ey(gy) * W + ex(gx)) * 4, (ey(gy) * W + ex(gx)) * 4 + 3)]
+  const isBg = j => Math.hypot(full[j] - bg[0], full[j + 1] - bg[1], full[j + 2] - bg[2]) <= 12
+  const far = c => Math.hypot(rgb[c][0] - bg[0], rgb[c][1] - bg[1], rgb[c][2] - bg[2]) >= 60
+  const ord = {}, til = {}
+  let nT = 0, nO = 0
+  const r1 = Math.floor((k - 1) / 2)
+  const add = (edge, key) => { if (edge % T === 0) { til[key] = (til[key] ?? 0) + 1; nT++ } else { ord[key] = (ord[key] ?? 0) + 1; nO++ } }
+  for (let a = 1; a < n - 1; a++) {
+    for (let e = 1; e < n; e++) {
+      if (unit > 0 && [a, e, e - 1].some(q => q % unit === 0 || q % unit === unit - 1)) continue
+      // across: row a, edge between cells e−1 and e
+      if (ey(a) >= 0 && ey(a + 1) <= H && ex(e - 1) >= 0 && ex(e + 1) <= W && far(cells[a * n + e - 1]) && far(cells[a * n + e])) {
+        const y = ey(a) + r1, x0 = ex(e)
+        let l = 0, r = 0
+        while (l < k && isBg((y * W + x0 - 1 - l) * 4)) l++
+        while (r < k && isBg((y * W + x0 + r) * 4)) r++
+        add(e, `${l}+${r}`)
+      }
+      // down: column a, edge between rows e−1 and e
+      if (ex(a) >= 0 && ex(a + 1) <= W && ey(e - 1) >= 0 && ey(e + 1) <= H && far(cells[(e - 1) * n + a]) && far(cells[e * n + a])) {
+        const x = ex(a) + r1, y0 = ey(e)
+        let u = 0, v = 0
+        while (u < k && isBg(((y0 - 1 - u) * W + x) * 4)) u++
+        while (v < k && isBg(((y0 + v) * W + x) * 4)) v++
+        add(e, `${u}+${v}`)
+      }
+    }
+  }
+  // and the whole cell: at a whole number of device px per cell every cell of a colour is the same k × k block of
+  // pixels wherever it is, so a cell on a tile boundary must be exactly the block of that colour inside a tile
+  const blocks = new Map()
+  let nB = 0
+  for (let a = 0; a < n; a++) for (let e = 0; e < n; e++) {
+    if (!okC(a) || !okC(e) || ex(e) < 0 || ex(e + 1) > W || ey(a) < 0 || ey(a + 1) > H) continue
+    const ids = []
+    for (let y = ey(a); y < ey(a + 1); y++) ids.push(Buffer.from(full.subarray((y * W + ex(e)) * 4, (y * W + ex(e + 1)) * 4)).toString('base64'))
+    const id = ids.join(''), col = cells[a * n + e], edge = [a, e].some(q => q % T === 0 || q % T === T - 1)
+    let g = blocks.get(col)
+    if (!g) blocks.set(col, g = { inner: new Set(), edge: new Set() })
+    g[edge ? 'edge' : 'inner'].add(id)
+    nB++
+  }
+  const kinds = [...blocks.entries()].map(([col, g]) => [col, g.inner.size, g.edge.size, [...g.edge].every(id => g.inner.has(id))])
+  const blockOk = kinds.length > 4 && kinds.every(([, i, e, inside]) => i === 1 && e <= 1 && inside)
+  const ok = blockOk && Object.keys(til).every(key => key in ord)
+  return {
+    mid: { b, T, px: m.px, asWant: m.asWant, asBase: m.asBase, other: m.other, worst: m.worst, tiles: tiles.size, built, unbuilt, mixed, baseCells: bm },
+    full: { px: f.px, diff: f.diff, maxDiff: f.maxDiff, first: f.first, baseCells: bf },
+    gaps: { T, nT, nO, til, ord, nB, colours: kinds.length, odd: kinds.filter(([, i, e, inside]) => i !== 1 || e > 1 || !inside), ok },
+  }
+}
+
+async function tileGapAt(dsf) {
+  const sfx = dsf === 2 ? '' : `-dpr${dsf}`
+  const p = await bigPage({ deviceScaleFactor: dsf })
+  await startPreset(p, 58)
+  const cdp = await p.context().newCDPSession(p)
+  await seed208(p)
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
   const res = await p.evaluate(() => {
     const c = document.querySelector('.pd-bk-app').pd
@@ -1635,17 +1765,41 @@ async function tileGapAt(dsf) {
     const mid = look(), midPng = c.el.toDataURL()
     let frames = 1
     while (c.draw() && frames < 400) frames++
-    return { missing, mid, full: look(), frames, fillMs: Math.round(performance.now() - t0), midPng, bead: beads(), s: c.view.s, k: c.view.s * Math.min(3, devicePixelRatio) }
+    const left = c.draw(), g = c.game.get()
+    const geo = { view: c.view, d: Math.min(3, devicePixelRatio), W: c.el.width, H: c.el.height, unit: g.unit, cells: [...g.history.present.cells], pal: c.pal, fullPng: c.el.toDataURL() }
+    return { missing, left, mid, full: look(), frames, fillMs: Math.round(performance.now() - t0), midPng, bead: beads(), s: c.view.s, k: c.view.s * Math.min(3, devicePixelRatio), geo }
   })
   // the mid-zoom frame itself (the canvas as drawn, tiles still missing)
   if (PHASE2_SHOTS) writeFileSync(join(PHASE2_SHOTS, `tile-gap-mid${sfx}.png`), Buffer.from(res.midPng.split(',')[1], 'base64'))
+  const midPx = decodePng(Buffer.from(res.midPng.split(',')[1], 'base64')), geo = res.geo
   delete res.midPng
+  delete res.geo
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
   await bigShot(p, `tile-gap-full${sfx}`)
+  // the expected filled frame, independently: a fresh page (its own canvas, empty tile cache), the same board and
+  // view, every tile built synchronously before the frame is read (no budget, no middle-first, no throttling)
+  const want = await expectedFrame(dsf, geo.view)
+  const strict = judgeTiles(geo, midPx.data, decodePng(Buffer.from(geo.fullPng.split(',')[1], 'base64')).data, decodePng(Buffer.from(want.png.split(',')[1], 'base64')).data)
+  check(`BIG tiles @${dsf}×: the expected filled frame was built independently (a fresh canvas, same board and view, every tile built synchronously) at the same size`,
+    want.left === false && want.W === geo.W && want.H === geo.H && JSON.stringify(want.view) === JSON.stringify(geo.view), JSON.stringify({ want: { ...want, png: undefined }, W: geo.W, H: geo.H, view: geo.view }))
+  check(`BIG tiles @${dsf}×: strict mid-zoom frame — every board pixel equals the filled pixel at the same zoom and place (a built tile) or its cell's base colour (a tile not built yet), each tile wholly one or the other (both sides of every tile boundary), no third colour or blended line; some tiles are still base (it is a mid frame)`,
+    strict.mid.px > 100000 && strict.mid.other === 0 && strict.mid.mixed === 0 && strict.mid.built > 0 && strict.mid.unbuilt > 0 && strict.mid.baseCells > 0, JSON.stringify(strict.mid))
+  check(`BIG tiles @${dsf}×: strict filled frame — no cell left in its base colour, and pixel-for-pixel equal to the independently built expected frame`,
+    res.left === false && strict.full.px > 100000 && strict.full.baseCells === 0 && strict.full.diff === 0, JSON.stringify(strict.full))
+  check(`BIG tiles @${dsf}×: strict filled frame — at tile boundaries the board gap between beads is as at ordinary cell edges (across and down, gap widths ${JSON.stringify(strict.gaps.til)} ⊆ ${JSON.stringify(strict.gaps.ord)}) and every cell on a tile boundary is pixel for pixel the same block as a cell of its colour inside a tile`,
+    strict.gaps.nT > 20 && strict.gaps.nO > 100 && strict.gaps.nB > 200 && strict.gaps.ok, JSON.stringify(strict.gaps))
   check(`BIG tiles @${dsf}×: filled at 16 px/cell (${res.k} device px, whole) every bead is centred and symmetric — the board gap the same each side, the bead mirror-symmetric left↔right and top↔bottom (no dropped or one-pixel transition row), the hole's centroid ≤ 0.5 device px off the centre and its margins within 1 px`,
     Number.isInteger(res.k) && res.bead.n > 60 && res.bead.gapOff === 0 && res.bead.mirrorOff === 0 && res.bead.holeOff === 0 && res.bead.marginOff === 0, JSON.stringify(res.bead))
   check(`BIG tiles @${dsf}×: mid-zoom on 208² (tiles still missing after one budgeted frame) every sampled cell shows its own colour — no blank, no board colour`, res.missing && res.mid.n > 150 && res.mid.blank === 0 && res.mid.off === 0 && res.full.blank === 0 && res.full.off === 0, JSON.stringify(res))
-  check(`BIG tiles @${dsf}×: no seam at tile boundaries mid-zoom or after fill-in — mid frame: each boundary pixel matches a side (no third colour), no one-pixel blended line anywhere; mid and filled: the gap at a tile boundary no wider than at ordinary cell edges and the board-between-beads pattern the same as one cell earlier`, res.mid.edges > 40 && res.mid.seam === 0 && res.mid.thin.length === 0 && res.mid.gapT <= res.mid.gapC && res.full.edges > 40 && res.full.gapT <= res.full.gapC && res.mid.maskN > 40 && res.mid.maskDiff === 0 && res.full.maskN > 40 && res.full.maskDiff === 0, JSON.stringify({ dpr: dsf, mid: [res.mid.edges, res.mid.seam, res.mid.seams, res.mid.thin, res.mid.gapT, res.mid.gapC, res.mid.maskN, res.mid.maskDiff, res.mid.fringe], full: [res.full.gapT, res.full.gapC, res.full.maskN, res.full.maskDiff, res.full.seam, res.full.fringe] }))
+  // the earlier seam judgement, kept as it was beside the strict one above (split in its mid and filled halves, every
+  // condition unchanged). Its mid half samples 3 px apart and calls a boundary pixel a seam unless it is near a
+  // pixel on one side; with middle-first a whole built tile sits inside base-coloured cells, and its own board
+  // gap (one board pixel, then the anti-aliased rim) next to a flat base cell reads as a "third colour", its
+  // anti-aliased hole edges as "thin" rows — the correct filled frame fails the same rules (full seam count below)
+  check(`BIG tiles @${dsf}×: [earlier judgement, mid half] no seam at tile boundaries mid-zoom — each boundary pixel matches a side (no third colour), no one-pixel blended line anywhere, the gap at a tile boundary no wider than at ordinary cell edges and the board-between-beads pattern the same as one cell earlier`,
+    res.mid.edges > 40 && res.mid.seam === 0 && res.mid.thin.length === 0 && res.mid.gapT <= res.mid.gapC && res.mid.maskN > 40 && res.mid.maskDiff === 0, JSON.stringify({ dpr: dsf, mid: [res.mid.edges, res.mid.seam, res.mid.seams, res.mid.thin, res.mid.gapT, res.mid.gapC, res.mid.maskN, res.mid.maskDiff, res.mid.fringe], full: [res.full.gapT, res.full.gapC, res.full.maskN, res.full.maskDiff, res.full.seam, res.full.fringe] }))
+  check(`BIG tiles @${dsf}×: [earlier judgement, filled half] after fill-in the gap at a tile boundary no wider than at ordinary cell edges and the board-between-beads pattern the same as one cell earlier`,
+    res.full.edges > 40 && res.full.gapT <= res.full.gapC && res.full.maskN > 40 && res.full.maskDiff === 0, JSON.stringify({ dpr: dsf, full: [res.full.edges, res.full.gapT, res.full.gapC, res.full.maskN, res.full.maskDiff, res.full.seam, res.full.fringe] }))
   await p.context().close()
 }
 
