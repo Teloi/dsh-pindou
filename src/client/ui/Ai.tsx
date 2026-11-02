@@ -31,7 +31,7 @@ export function AiView(): ReactElement {
   }, [store])
   // While generation cannot work the input is disabled; put focus on the card's first action instead.
   useFocusReturn(card, notConfigured)
-  const opener = notConfigured ? (env.settings?.() ?? {}) : {}
+  const opener = (notConfigured && env.settings?.()) || {}
   const off = loading || notConfigured
 
   // A failed generation puts focus on 重试 (design N4), unless the user is busy elsewhere (e.g. the chat composer).

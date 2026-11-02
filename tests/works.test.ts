@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { BOARD_SIZES, createBoard, encode, MAX_WORKS as STORE_MAX, setCell, WORKS_KEY as STORE_KEY } from '../src/core/index.ts'
-import { addWork, cleanWorks, MAX_WORK_CHARS, MAX_WORKS, parseWork, parseWorks, removeWork, WORK_SIZES, WORKS_KEY, type Work } from '../src/core/works.ts'
+import { addWork, capWall, cleanWorks, MAX_WORK_CHARS, MAX_WORKS, parseWork, parseWorks, removeWork, WORK_SIZES, WORKS_KEY, type Work } from '../src/core/works.ts'
 
 const b12 = encode(setCell(createBoard(12), 0, 0, 3))
 const work = (i: number, extra: Partial<Work> = {}): Work => ({ i, n: 12, b: b12, s: null, ...extra })
+/** Another version's size: an entry this wall can't show. */
+const odd = (k: number): unknown => ({ i: 1000 + k, n: 52 })
 
 describe('works wall (core/works.ts, in the works chunk)', () => {
   it('its copies of the entry constants match (the chunk may not import the entry)', () => {
@@ -46,6 +48,32 @@ describe('works wall (core/works.ts, in the works chunk)', () => {
     expect(wall[0]!.i).toBe(2)
     expect(wall.at(-1)!.i).toBe(61)
     expect(cleanWorks(Array.from({ length: 61 }, (_, k) => work(k + 1))).works.map(w => w.i)[0]).toBe(2)
+  })
+
+  it('caps the stored wall: 60 readable, 80 in all, unreadable ones out of the 60 (designer 22:05)', () => {
+    // 60 readable + 20 unreadable: nothing goes, as stored
+    const full: unknown[] = [...Array.from({ length: 20 }, (_, k) => odd(k)), ...Array.from({ length: 60 }, (_, k) => work(k + 1))]
+    expect(capWall(full)).toEqual(full)
+    // one more unreadable: the earliest unreadable goes, never a readable work
+    expect(capWall([...full, 'junk'])).toEqual([...full.slice(1), 'junk'])
+    // one more readable: the oldest readable goes (the 60 rule), then the earliest unreadable too
+    const more = capWall([...full, work(61)])
+    expect(more).toHaveLength(80)
+    expect(cleanWorks(more).works.map(w => w.i)).toEqual(Array.from({ length: 60 }, (_, k) => k + 2))
+    expect(more.slice(0, 20)).toEqual(full.slice(0, 20))
+    // 100 unreadable alone: the newest 80 stay
+    const junk = Array.from({ length: 100 }, (_, k) => odd(k))
+    expect(capWall(junk)).toEqual(junk.slice(20))
+    // a repeated id counts as unreadable; null and strings stay as stored
+    expect(capWall([work(1), work(1), null, 'x'])).toEqual([work(1), work(1), null, 'x'])
+  })
+
+  it('undo and delete keep unreadable entries in place', () => {
+    const wall: unknown[] = [work(1), { n: 52 }, null, work(3)]
+    const without = removeWork(wall, 3)
+    expect(without).toEqual([work(1), { n: 52 }, null])
+    expect(addWork(without, work(3))).toEqual(wall)
+    expect(addWork(wall, work(2))).toEqual([work(1), { n: 52 }, null, work(2), work(3)])
   })
 
   it('removes by id (undo puts it back in place)', () => {

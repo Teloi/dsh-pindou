@@ -55,7 +55,7 @@ export function HomeView(): ReactElement {
                 <span className="pd-meta">
                   {t('tplMeta', { n: tpl.colors })}
                   {/* the accessible name starts with the visible text (WCAG 2.5.3) */}
-                  <span className="pd-sr">{t('tplSr', { size: tpl.board.size, diff: tpl.difficulty })}{done ? t('tplSrDone') : ''}</span>
+                  <span className="pd-sr">{t('tplSr', { size: tpl.board.w, diff: tpl.difficulty })}{done ? t('tplSrDone') : ''}</span>
                   <span className="pd-diff" aria-hidden>{[1, 2, 3].map(d => <i key={d} className={d <= tpl.difficulty ? 'pd-on' : undefined} />)}</span>
                 </span>
                 {done ? <span className="pd-done" aria-hidden><IconCheck /></span> : null}

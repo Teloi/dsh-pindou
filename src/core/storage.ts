@@ -1,4 +1,4 @@
-import { type Board, type BoardSize, createBoard, DEFAULT_SIZE, isBoardSize } from './board.ts'
+import { type Board, type BoardSize, createBoard, DEFAULT_SIZE, isBoardSize, isClassic } from './board.ts'
 import { decode, encode } from './codec.ts'
 import { isColorIndex } from './palette.ts'
 
@@ -10,6 +10,8 @@ export interface StorageLike {
 }
 
 export const STORAGE_KEY = 'dsh-pindou:v1'
+/** Where a save that did not parse is kept (the latest one), instead of being thrown away. */
+export const BAD_SAVE_KEY = 'dsh-pindou:v1:unreadable'
 /** Hard cap on what we write; a full board is ~600 bytes, the cache a few KB. */
 export const MAX_STORED_CHARS = 64 * 1024
 
@@ -102,14 +104,20 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
   const r = raw as Record<string, unknown>
   let corrupt = false
   let board = fallback.board
-  if (isBoardSize(r['size']) && typeof r['board'] === 'string') {
-    const d = decode(r['board'], r['size'])
-    if (d.ok) board = d.board
+  // v2 saves have `size` (square); v3 adds `h` for w × h boards, `size` stays the width.
+  // decode() refuses any side outside 8–208 (a `size` error), which marks the save corrupt.
+  // This key only ever holds a first-screen board (12, 16 or 24 square); any other shape
+  // decodes but would crash the DOM board, so it counts as unreadable too: backed up, not rendered.
+  const w = r['size']
+  if (typeof w === 'number' && typeof r['board'] === 'string') {
+    const d = decode(r['board'], w, typeof r['h'] === 'number' ? r['h'] : w)
+    if (d.ok && d.board.h === w && isBoardSize(w)) board = d.board
     else corrupt = true
   } else {
     corrupt = true
   }
-  const prefsRaw = (typeof r['prefs'] === 'object' && r['prefs'] !== null ? r['prefs'] : {}) as Record<string, unknown>
+  // anything but an object just has no booleans to read (a string or number reads undefined)
+  const prefsRaw = (r['prefs'] ?? {}) as Record<string, unknown>
   const state: SavedState = {
     board,
     color: isColorIndex(r['color']) ? r['color'] : fallback.color,
@@ -117,11 +125,8 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
     mode: MODES.includes(r['mode'] as Mode) ? (r['mode'] as Mode) : fallback.mode,
     ...parseSource(r['target'], r['pattern']),
     ironed: r['ironed'] === true,
-    prefs: {
-      busyHint: typeof prefsRaw['busyHint'] === 'boolean' ? prefsRaw['busyHint'] : DEFAULT_PREFS.busyHint,
-      showGuide: typeof prefsRaw['showGuide'] === 'boolean' ? prefsRaw['showGuide'] : DEFAULT_PREFS.showGuide,
-      showCodes: typeof prefsRaw['showCodes'] === 'boolean' ? prefsRaw['showCodes'] : DEFAULT_PREFS.showCodes,
-    },
+    // each known pref: the stored boolean, else its default (unknown keys are dropped)
+    prefs: Object.fromEntries(Object.entries(DEFAULT_PREFS).map(([k, v]) => [k, typeof prefsRaw[k] === 'boolean' ? prefsRaw[k] : v])) as unknown as Prefs,
     done: Array.isArray(r['done'])
       ? [...new Set(r['done'].filter((id): id is string => typeof id === 'string' && ID_RE.test(id)))].slice(0, 64)
       : [],
@@ -131,52 +136,43 @@ export function parseState(json: string | null): { state: SavedState; corrupt: b
   return { state, corrupt }
 }
 
-export function serializeState(state: SavedState): string {
-  return JSON.stringify({
-    v: 2,
-    size: state.board.size,
-    board: encode(state.board),
-    color: state.color,
-    tool: state.tool,
-    mode: state.mode,
-    target: state.target,
-    pattern: state.pattern,
-    ironed: state.ironed,
-    prefs: state.prefs,
-    done: state.done,
-    coached: state.coached,
-    work: state.work,
-  })
+export function serializeState({ board, ...rest }: SavedState): string {
+  // the width keeps the v2 name (`size`), so a square save still opens in older versions;
+  // the rest keeps SavedState's key order (color … work), so the string is the one written before
+  return JSON.stringify({ v: 3, size: board.w, h: board.h, board: encode(board), ...rest })
 }
 
-export type StorageStatus = 'ok' | 'unavailable' | 'recovered'
+/**
+ * `recovered`: an unreadable (or crashed-on) save was backed up; `held`: it could not be (it stays,
+ * this session does not save; designer 22:05, audit S2-1).
+ */
+export type StorageStatus = 'ok' | 'unavailable' | 'recovered' | 'held'
 
 /**
  * Storage that never throws: reads and writes degrade to memory when the
  * browser refuses (private mode, quota, disabled cookies, sandboxing).
  */
 export class SafeStore {
-  private memory = new Map<string, string>()
+  readonly #memory = new Map<string, string>()
+  readonly #backend: StorageLike | undefined
   status: StorageStatus = 'ok'
 
-  constructor(private readonly backend: StorageLike | undefined) {
-    if (backend === undefined) this.status = 'unavailable'
-    else {
-      try {
-        const probe = `${STORAGE_KEY}:probe`
-        backend.setItem(probe, '1')
-        backend.removeItem(probe)
-      } catch {
-        this.status = 'unavailable'
-      }
+  constructor(backend: StorageLike | undefined) {
+    this.#backend = backend
+    // no backend throws here too
+    try {
+      backend!.setItem(STORAGE_KEY + ':probe', '1')
+      backend!.removeItem(STORAGE_KEY + ':probe')
+    } catch {
+      this.status = 'unavailable'
     }
   }
 
   get(key: string): string | null {
-    if (this.status !== 'unavailable' && this.backend) {
-      try { return this.backend.getItem(key) } catch { this.status = 'unavailable' }
+    if (this.status !== 'unavailable' && this.#backend) {
+      try { return this.#backend.getItem(key) } catch { this.status = 'unavailable' }
     }
-    return this.memory.get(key) ?? null
+    return this.#memory.get(key) ?? null
   }
 
   /**
@@ -184,11 +180,11 @@ export class SafeStore {
    * works wall): its refusal (quota) must never stop the game from saving.
    */
   set(key: string, value: string, side = false): boolean {
-    if (value.length > MAX_STORED_CHARS) return false
-    this.memory.set(key, value)
-    if (this.status === 'unavailable' || !this.backend) return false
+    if (value.length > MAX_STORED_CHARS && !side) return false
+    this.#memory.set(key, value)
+    if (this.status === 'unavailable' || !this.#backend) return false
     try {
-      this.backend.setItem(key, value)
+      this.#backend.setItem(key, value)
       return true
     } catch {
       if (!side) this.status = 'unavailable'
@@ -197,21 +193,43 @@ export class SafeStore {
   }
 
   remove(key: string): void {
-    this.memory.delete(key)
-    try { this.backend?.removeItem(key) } catch { /* ignore */ }
+    this.#memory.delete(key)
+    try { this.#backend?.removeItem(key) } catch { /* ignore */ }
   }
 
   loadState(): SavedState {
     const { state, corrupt } = parseState(this.get(STORAGE_KEY))
-    if (corrupt) {
-      if (this.status === 'ok') this.status = 'recovered'
-      this.remove(STORAGE_KEY)
-    }
+    if (corrupt) this.setAside()
     return state
   }
 
+  /**
+   * Keep the save for a later version (or a human) and start over (an unreadable save, a reset after a crash).
+   * True only when a backup was really written (the crash toast may then say so).
+   */
+  setAside(): boolean {
+    const raw = this.get(STORAGE_KEY)
+    if (raw === null) return false
+    // three backups, newest first (`…:unreadable`, `:2`, `:3`); each shifts down one, the oldest drops off.
+    // Shifted from the old end, so a slot is reused only once its backup has a verified copy one down:
+    // a refused write stops there with every backup still stored, and the original stays put (audit phase 2).
+    // How many shift: up to the first empty slot; none when the newest already has its copy one down
+    // (a rotation that stopped at its last write). A backup is written whatever its size.
+    const keys = ['', ':2', ':3'].map(n => BAD_SAVE_KEY + n)
+    const olds = keys.map(k => this.get(k))
+    let k = olds[0] === olds[1] ? 0 : Math.min(2, olds.indexOf(null) >>> 0)
+    while (k && this.set(keys[k]!, olds[k - 1]!, true)) k--
+    const ok = !k && this.set(keys[0]!, raw, true)
+    if (ok) this.remove(STORAGE_KEY)
+    // only a backup really written says so (audit S2-1); `held`: it could not be, so the save stays and this
+    // session does not save over it (audit A1-5; with storage gone, 'unavailable' stays and nothing saves anyway)
+    if (this.status !== 'unavailable') this.status = ok ? 'recovered' : 'held'
+    return ok
+  }
+
+  /** Only a 12/16/24 square ever goes to `dsh-pindou:v1` (review I-2: v0.2 cannot open anything else); big boards save via save-store. */
   saveState(state: SavedState): boolean {
-    return this.set(STORAGE_KEY, serializeState(state))
+    return isClassic(state.board) && this.status !== 'held' && this.set(STORAGE_KEY, serializeState(state))
   }
 }
 

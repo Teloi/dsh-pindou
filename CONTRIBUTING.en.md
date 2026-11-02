@@ -17,7 +17,7 @@ pnpm run lint
 pnpm run typecheck
 pnpm test
 pnpm run build          # writes lib/
-pnpm run check:bundle   # checks the shape of lib/ (ModuleLoader wrapper, react-only requires, lazy chunks loaded only via require.async) and gzip sizes: first-screen lib/client.js ≤ 40 KB, lazy lib/client.<name>.js chunks ≤ 20 KB together, each at most 90% of its budget
+pnpm run check:bundle   # checks the shape of lib/ (ModuleLoader wrapper, react-only requires, lazy chunks loaded only via require.async) and gzip sizes: first-screen lib/client.js ≤ 40 KB, each lazy lib/client.<name>.js chunk ≤ 20 KB, each at most 90% of its budget; all lazy chunks together ≤ 48 KB (soft cap, warns above 90%)
 pnpm run check          # all of the above
 pnpm run e2e            # end-to-end: DSH Web from source + a fake model server; screenshots and logs go to $TMPDIR/pindou-e2e-out (E2E_OUT; give concurrent runs their own TMPDIR)
 pnpm run e2e -- --update-assets   # same, and write the README panel screenshots to docs/assets/screens (or E2E_UPDATE_ASSETS=1; add E2E_ONLY=s for just those shots)

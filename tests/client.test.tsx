@@ -9,7 +9,7 @@ import { formatKeys, settingsOpener } from '../src/client/settings.ts'
 import { cellSize } from '../src/client/ui/Board.tsx'
 import { panelOnScreen } from '../src/client/ui/App.tsx'
 import { canCopyImage, copyPng, exportFileName, cornerRadii, saveRoute } from '../src/client/render.ts'
-import { createBoard, defaultState, findTemplate, serializeState, setCell, STORAGE_KEY } from '../src/core/index.ts'
+import { BAD_SAVE_KEY, createBoard, defaultState, findTemplate, serializeState, setCell, STORAGE_KEY } from '../src/core/index.ts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -46,6 +46,9 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
   localStorage.clear(); host = document.createElement('div'); document.body.append(host) })
 afterEach(() => { vi.restoreAllMocks(); host.remove(); document.body.innerHTML = '' })
+
+/** jsdom reports an effect error a boundary caught as uncaught too: keep the log quiet. */
+const quietError = (e: ErrorEvent): void => { e.preventDefault() }
 
 /** Split a selector list on top-level commas only (not inside :where()/:is()). */
 function splitTop(list: string): string[] {
@@ -113,6 +116,74 @@ describe('client apply', () => {
     await act(async () => { root.unmount() })
     f.dispose()
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).target).toBe('template:heart')
+  })
+
+  it('review I-1: a render crash shows 「出错了」 + 重置 instead of a blank panel; 重置 sets the save aside and starts over', async () => {
+    const save = serializeState({ ...defaultState(), board: setCell(createBoard(16), 1, 1, 3) })
+    localStorage.setItem(STORAGE_KEY, save)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    window.addEventListener('error', quietError)
+    const ctx2d = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => { throw new Error('boom') })
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    const alert = host.querySelector('[role=alert]')
+    expect(alert?.textContent).toContain('出错了')
+    expect(host.querySelector('.pd-tpl')).toBeNull()
+    // plan 修订 20:25: focus is on 重置 as soon as the card shows
+    expect(document.activeElement).toBe(alert!.querySelector('button'))
+    expect(document.activeElement?.textContent).toBe('重置')
+    ctx2d.mockReturnValue(null)
+    await act(async () => { alert!.querySelector('button')!.click() })
+    expect(host.querySelector('[role=alert]')).toBeNull()
+    expect(host.querySelectorAll('.pd-tpl')).toHaveLength(12)
+    // the crash's own toast, not the unreadable-save words
+    expect(host.querySelector('.pd-toast')?.textContent).toContain('出错了，已重新开始，出错前的进度已备份')
+    expect(localStorage.getItem(BAD_SAVE_KEY)).toBe(save)
+    await act(async () => { root.unmount() })
+    f.dispose()
+    window.removeEventListener('error', quietError)
+  })
+
+  it('audit S2-1: an unreadable save whose backup is refused, no notice chunk (old host): the short 「出错了，已重新开始」, never blank, no 「已备份」', async () => {
+    localStorage.setItem(STORAGE_KEY, '{oops')
+    const set = Storage.prototype.setItem
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, v: string) {
+      if (k.startsWith(BAD_SAVE_KEY)) throw new Error('quota')
+      set.call(this, k, v)
+    })
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    expect(host.querySelector('.pd-toast span')?.textContent).toBe('出错了，已重新开始')
+    expect(host.textContent).not.toMatch(/备份/)
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('{oops')
+    await act(async () => { root.unmount() })
+    f.dispose()
+  })
+
+  it('plan 修订 20:25: with no browser storage the first screen keeps v0.2\u2019s toast (role=status, no close button, gone after 2.4 s); the dismissible bar is only on the big-board page', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied') })
+    const f = fakeCtx()
+    apply(f.ctx)
+    const Body = f.slots[0]!.component as ComponentType
+    const root = createRoot(host)
+    await act(async () => { root.render(<Body />) })
+    const toast = host.querySelector('.pd-toast')
+    expect(toast?.getAttribute('role')).toBe('status')
+    expect(toast?.textContent).toContain('浏览器存储不可用，进度不会保存')
+    expect(toast?.querySelector('button')).toBeNull()
+    expect(host.querySelector('.pd-bk-bar')).toBeNull()
+    await act(async () => { vi.advanceTimersByTime(2500) })
+    expect(host.querySelector('.pd-toast')).toBeNull()
+    await act(async () => { root.unmount() })
+    f.dispose()
+    vi.useRealTimers()
   })
 
   for (const desktop of [false, true]) {

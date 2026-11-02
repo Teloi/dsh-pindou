@@ -1,7 +1,7 @@
 /** The play view: status line, board, toolbar, palette, footer and the under-board cards. */
 import { useRef, type CSSProperties, type ReactElement } from 'react'
 import {
-  type Board, BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, PALETTE, remainingByColor, templateIdOf, type Tool,
+  type Board, BOARD_SIZES, codeOf, completion, COLOR_COUNT, EMPTY, findTemplate, isSquareOf, PALETTE, remainingByColor, templateIdOf, type Tool,
 } from '../../core/index.ts'
 import { IconBrush, IconCopy, IconEraser, IconFill, IconIron, IconPicker, IconRedo, IconSparkle, IconTrash, IconUndo, IconDownload } from '../icons.tsx'
 import { canCopyImage, copyPng, downloadBlob, exportBlob, exportFileName, saveRoute } from '../render.ts'
@@ -45,7 +45,7 @@ export function copySupported(): boolean {
 }
 
 function StatusLine(): ReactElement {
-  const { store, t, lang } = useEnv()
+  const { store, t, lang, big } = useEnv()
   const s = useGame()
   const board = s.history.present
   const target = s.targetBoard
@@ -55,7 +55,7 @@ function StatusLine(): ReactElement {
   const isAi = !pic && (s.target?.startsWith('board:') ?? false)
   // only the board the last generation made: undo back to an older one and its facts are gone (R3-4)
   const ai = isAi && s.ai.result?.board === target ? s.ai.result : undefined
-  const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : pic ? t('myPattern') : isAi ? (ai?.prompt ?? t('homeAi')) : t('playFree')
+  const name = tpl ? (lang === 'zh' ? tpl.zh : tpl.en) : pic ? t('myPattern') : isAi ? (ai?.prompt ?? t('homeAi')) : t('homeFree')
   const beads = board.cells.filter(c => c !== EMPTY).length
   const c = target ? completion(board, target) : null
   return (
@@ -72,9 +72,11 @@ function StatusLine(): ReactElement {
           : (
             <span className="pd-r pd-seg" role="group" aria-label={t('size')}>
               {BOARD_SIZES.map(size => (
-                <button key={size} type="button" aria-pressed={board.size === size} disabled={s.ironed}
+                <button key={size} type="button" aria-pressed={isSquareOf(board, size)} disabled={s.ironed}
                   onClick={() => { store.resize(size) }}>{size}</button>
               ))}
+              {/* 29–116 and w×h live in the big-board chunk (plan §4.4); hidden where chunks cannot load */}
+              {big && big.status() !== 'unsupported' ? <button type="button" onClick={() => { store.go('big') }}>{t('moreSizes')}</button> : null}
             </span>
           )}
         {!c ? <span className="pd-tokens">{t('playBeads', { n: beads })}</span> : null}

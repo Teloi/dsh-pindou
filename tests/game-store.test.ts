@@ -1,13 +1,15 @@
+import { capWall, MAX_STORED } from '../src/core/works.ts'
+import { NOTICES } from '../src/client/notice.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { createBoard, EMPTY, encode, findTemplate, getCell, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
-import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi } from '../src/client/game-store.ts'
+import { BAD_SAVE_KEY, createBoard, EMPTY, encode, findTemplate, getCell, makeTranslate, SafeStore, setCell, STORAGE_KEY, TEMPLATES, WORKS_KEY, type GenerateResponse, type StorageLike } from '../src/core/index.ts'
+import { AI_COOLDOWN_MS, DONE_DELAY_MS, entryDot, GameStore, IRON_MS, MAX_KEPT_GAMES, resolveTarget, type GameApi, type GameDeps } from '../src/client/game-store.ts'
 
 function mem(): StorageLike & { data: Map<string, string> } {
   const data = new Map<string, string>()
   return { data, getItem: k => data.get(k) ?? null, setItem: (k, v) => { data.set(k, v) }, removeItem: (k) => { data.delete(k) } }
 }
 
-function make(opts: { api?: GameApi; reduced?: boolean; backend?: StorageLike } = {}) {
+function make(opts: { api?: GameApi; reduced?: boolean; backend?: StorageLike; cap?: GameDeps['cap'] } = {}) {
   let now = 1_000_000
   const timers: Array<{ fn: () => void; at: number }> = []
   const backend = opts.backend ?? mem()
@@ -18,6 +20,7 @@ function make(opts: { api?: GameApi; reduced?: boolean; backend?: StorageLike } 
     reducedMotion: () => opts.reduced ?? false,
     setTimeout: (fn, ms) => { const t = { fn, at: now + ms }; timers.push(t); return t },
     clearTimeout: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1) },
+    cap: opts.cap,
   })
   const advance = (ms: number): void => {
     now += ms
@@ -134,7 +137,7 @@ describe('GameStore', () => {
     store.strokeStart(0, 0, 'erase'); store.strokeEnd()
     const t = findTemplate('heart')!
     const firstFilled = t.board.cells.findIndex(c => c !== EMPTY)
-    const x = firstFilled % t.board.size, y = Math.floor(firstFilled / t.board.size)
+    const x = firstFilled % t.board.w, y = Math.floor(firstFilled / t.board.w)
     store.strokeStart(x, y, 'erase'); store.strokeEnd()
     expect(store.getSnapshot().complete).toBe(false)
     store.setColor(t.board.cells[firstFilled]!)
@@ -197,12 +200,12 @@ describe('GameStore', () => {
     expect(JSON.parse(backend.data.get(STORAGE_KEY)!).board).toContain('4')
     backend.data.set(STORAGE_KEY, '{"board":"<img src=x onerror=alert(1)>"')
     const again = make({ backend })
-    expect(again.store.getSnapshot()).toMatchObject({ storage: 'recovered', toast: { key: 'storageRecovered' } })
+    expect(again.store.getSnapshot()).toMatchObject({ storage: 'recovered', toast: { key: 'recovered' } })
   })
 
   it('resolves saved sources strictly', () => {
     const b = setCell(createBoard(12), 0, 0, 3)
-    expect(resolveTarget('board:x1', encode(b), 12)?.size).toBe(12)
+    expect(resolveTarget('board:x1', encode(b), 12)?.w).toBe(12)
     expect(resolveTarget('board:x1', 'zz', 12)).toBeNull()
     expect(resolveTarget('board:x1', encode(b), 16)).toBeNull()
     expect(resolveTarget('board:x1', null, 12)).toBeNull()
@@ -337,7 +340,7 @@ function placeCorrect(store: GameStore, n: number): void {
     const c = target.cells[i]!
     if (c === EMPTY) continue
     store.setColor(c)
-    store.applyAt(i % target.size, Math.floor(i / target.size))
+    store.applyAt(i % target.w, Math.floor(i / target.w))
     placed++
   }
 }
@@ -640,7 +643,7 @@ describe('v1.6 §4.3 source keys', () => {
     first.store.applyAt(1, 1)
     first.advance(400)
     const saved = JSON.parse(backend.data.get(STORAGE_KEY)!)
-    expect(saved).toMatchObject({ v: 2, target: first.store.getSnapshot().target, pattern: encode(pic) })
+    expect(saved).toMatchObject({ v: 3, target: first.store.getSnapshot().target, pattern: encode(pic) })
     const again = make({ backend })
     expect(again.store.getSnapshot().target).toBe(first.store.getSnapshot().target)
     expect(again.store.getSnapshot().targetBoard?.cells).toEqual(pic.cells)
@@ -714,7 +717,83 @@ describe('v1.6 §4.3 source keys', () => {
 const ironOne = (store: GameStore, x = 0): void => { store.startFree(); store.applyAt(x % 16, 0); store.iron() }
 const wallOf = (backend: { data: Map<string, string> }): Array<{ i: number }> => JSON.parse(backend.data.get(WORKS_KEY) ?? '[]')
 
+/** A readable 12×12 work and an entry this version can't show (recheck R6). */
+const goodW = (i: number) => ({ i, n: 12, b: '.'.repeat(144), s: null })
+const badW = (i: number) => ({ i, n: 29, b: 'x', s: null })
+
 describe('GameStore works wall (spec §18.4)', () => {
+
+  it('a non-square or non-12/16/24 piece never goes into the v0.2 works key (audit A1-6)', () => {
+    const backend = mem()
+    const { store } = make({ backend, reduced: true })
+    store.startPicture(setCell(createBoard(16, 12), 0, 0, 3))
+    store.applyAt(0, 0)
+    store.iron()
+    expect(store.getSnapshot().ironed).toBe(true)
+    expect(store.works()).toEqual([])
+    expect(backend.data.get(WORKS_KEY) ?? '[]').toBe('[]')
+    // every way to a game ends on a 12/16/24 square or not on the wall at all
+    for (const [w, h] of [[29, 29], [12, 16], [40, 30], [58, 58]] as const) {
+      store.startPicture(setCell(createBoard(w, h), 0, 0, 3))
+      if (store.board.w === w && store.board.h === h) { store.applyAt(1, 0); store.iron() }
+    }
+    const kept = JSON.parse(backend.data.get(WORKS_KEY) ?? '[]') as Array<{ n: number; b: string }>
+    expect(kept.every(k => [12, 16, 24].includes(k.n) && k.b.length === k.n * k.n)).toBe(true)
+  })
+
+  it('entries already stored that this version can’t show stay as stored when the wall is written (review A1-6: v0.2 dropped them silently)', () => {
+    const odd = [{ i: 7, n: 29, b: '.'.repeat(841), s: null }, { i: 8, n: 16, b: '.'.repeat(192), s: null }]
+    const backend = mem()
+    backend.data.set(WORKS_KEY, JSON.stringify(odd))
+    const { store } = make({ backend, reduced: true })
+    ironOne(store)
+    expect(wallOf(backend).map(w => w.i)).toEqual([7, 8, store.works().at(-1)!.i])
+    expect(JSON.parse(backend.data.get(WORKS_KEY)!).slice(0, 2)).toEqual(odd)
+  })
+
+  it('a wall past 80 entries is cut back right after ironing with the wall’s own rules (designer recheck R6)', async () => {
+    expect(MAX_STORED).toBe(80)
+    let asked = 0
+    const cap = async () => { asked++; return capWall }
+    // 59 readable + 21 unreadable, then one more ironed: 81 → the earliest unreadable goes, every readable work stays
+    const backend = mem()
+    const start = [...Array.from({ length: 21 }, (_, k) => badW(100 + k)), ...Array.from({ length: 59 }, (_, k) => goodW(200 + k))]
+    backend.data.set(WORKS_KEY, JSON.stringify(start))
+    const { store } = make({ backend, reduced: true, cap })
+    ironOne(store)
+    await Promise.resolve(); await Promise.resolve()
+    const after = wallOf(backend)
+    expect(asked).toBe(1)
+    expect(after).toHaveLength(80)
+    expect(after.map(w => w.i)).not.toContain(100)
+    expect(after.filter(w => (w as { n?: number }).n !== 29)).toHaveLength(60)
+    expect(store.works()).toEqual(after)
+    expect(after.at(-1)!.i).toBe(store.getSnapshot().work)
+    // 60 readable + 20 unreadable, then one more: the oldest readable goes (60 rule), the unreadable stay, the new work stays
+    const b2 = mem()
+    b2.data.set(WORKS_KEY, JSON.stringify([...Array.from({ length: 20 }, (_, k) => badW(100 + k)), ...Array.from({ length: 60 }, (_, k) => goodW(200 + k))]))
+    const two = make({ backend: b2, reduced: true, cap })
+    ironOne(two.store)
+    await Promise.resolve(); await Promise.resolve()
+    const w2 = wallOf(b2).map(w => w.i)
+    expect(w2).toHaveLength(80)
+    expect(w2).not.toContain(200)
+    expect(w2).toContain(two.store.getSnapshot().work)
+    expect(w2.filter(i => i < 200)).toHaveLength(20)
+    // up to 80 nothing is fetched; without the chunk (cap → undefined) the wall stays as written
+    const b3 = mem()
+    b3.data.set(WORKS_KEY, JSON.stringify(Array.from({ length: 79 }, (_, k) => goodW(200 + k))))
+    asked = 0
+    ironOne(make({ backend: b3, reduced: true, cap }).store)
+    await Promise.resolve()
+    expect(asked).toBe(0)
+    expect(wallOf(b3)).toHaveLength(80)
+    const b4 = mem()
+    b4.data.set(WORKS_KEY, JSON.stringify(start))
+    ironOne(make({ backend: b4, reduced: true, cap: async () => undefined }).store)
+    await Promise.resolve(); await Promise.resolve()
+    expect(wallOf(b4)).toHaveLength(81)
+  })
 
   it('ironing puts the piece on the wall at once (its own key), un-ironing takes it off', () => {
     const backend = mem()
@@ -731,13 +810,16 @@ describe('GameStore works wall (spec §18.4)', () => {
     expect(store.getSnapshot().work).toBeNull()
   })
 
-  it('the 61st piece pushes the oldest off; ids stay unique when ironed in the same millisecond', () => {
+  it('the 61st piece stays until the wall chunk trims it; ids stay unique when ironed in the same millisecond', () => {
     const { store } = make({ reduced: true })
     for (let k = 0; k < 61; k++) ironOne(store, k)
     const ids = store.works().map(w => w.i)
-    expect(ids).toHaveLength(60)
-    expect(new Set(ids).size).toBe(60)
-    expect(ids[0]).toBe(1_000_001)
+    // the entry can't tell a readable entry, so it never trims (designer 22:05); capWall does, when shown
+    expect(ids).toHaveLength(61)
+    expect(new Set(ids).size).toBe(61)
+    const capped = capWall(store.works()).map(w => w.i)
+    expect(capped).toHaveLength(60)
+    expect(capped[0]).toBe(1_000_001)
   })
 
   it('withdraws by id after a reload: the reloaded game still knows its piece', () => {
@@ -795,7 +877,7 @@ describe('GameStore works wall (spec §18.4)', () => {
     expect(make({ backend: broken }).store.works()).toEqual([])
   })
 
-  it('corrupt wall storage: broken JSON or a non-array is an empty wall; entries without an id are left out', () => {
+  it('corrupt wall storage: broken JSON or a non-array is an empty wall; odd entries stay as stored', () => {
     for (const bad of ['{', '"x"', '{"i":1}', 'null', '7']) {
       const backend = mem()
       backend.data.set(WORKS_KEY, bad)
@@ -804,10 +886,11 @@ describe('GameStore works wall (spec §18.4)', () => {
     const backend = mem()
     backend.data.set(WORKS_KEY, JSON.stringify([{ i: 5, n: 12, b: 'x', s: null }, null, { i: 'x' }, { n: 12 }]))
     const { store } = make({ backend, reduced: true })
-    expect(store.works().map(w => w.i)).toEqual([5])
+    expect(store.works()).toEqual([{ i: 5, n: 12, b: 'x', s: null }, null, { i: 'x' }, { n: 12 }])
     // a new piece goes after the newest id; validation of each entry is the wall page's (core/works.ts)
     ironOne(store)
-    expect(store.works().map(w => w.i)).toEqual([5, 1_000_000])
+    expect(store.works().map(w => w?.i)).toEqual([5, undefined, 'x', undefined, 1_000_000])
+    expect(wallOf(backend)).toHaveLength(5)
   })
 
   it('leaving mid-iron still collects the piece (once), for the game it belongs to', () => {
@@ -834,5 +917,94 @@ describe('GameStore works wall (spec §18.4)', () => {
     store.iron()
     expect(store.works()[1]).toMatchObject({ s: 'template:heart' })
     expect(store.works()[1]).not.toHaveProperty('p')
+  })
+})
+
+describe('GameStore.reset (the panel crash boundary, review I-1)', () => {
+  it('sets the save aside under the backup key and starts over from a fresh game', () => {
+    const backend = mem()
+    const { store } = make({ backend })
+    store.startFree()
+    store.setColor(4)
+    store.applyAt(2, 2)
+    store.flush()
+    const saved = backend.data.get(STORAGE_KEY)!
+    let calls = 0
+    store.subscribe(() => { calls++ })
+    store.reset()
+    expect(calls).toBe(1)
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe(saved)
+    expect(backend.data.has(STORAGE_KEY)).toBe(false)
+    expect(store.getSnapshot()).toMatchObject({ mode: 'home', storage: 'recovered', toast: { key: 'restarted' } })
+    // plan 修订 20:25: the crash's own words, not the unreadable-save toast
+    expect(makeTranslate('zh')('restarted')).toBe('出错了，已重新开始，出错前的进度已备份')
+    expect(store.board).toEqual(createBoard(16))
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('with no storage at all nothing was backed up: exactly 「出错了，已重新开始」, no 「已备份」 (designer 21:33)', () => {
+    const broken: StorageLike = { getItem: () => null, setItem: () => { throw new Error('denied') }, removeItem: () => undefined }
+    const { store } = make({ backend: broken })
+    store.startFree()
+    store.applyAt(1, 1)
+    store.reset()
+    expect(store.getSnapshot()).toMatchObject({ storage: 'unavailable', toast: { key: 'restart' } })
+  })
+
+  it('a refused backup write (quota): 「出错了，已重新开始。这次的进度不会保存」, and the save stays put (audit S2-1)', () => {
+    const backend = mem()
+    const { store } = make({ backend })
+    store.startFree()
+    store.applyAt(1, 1)
+    store.flush()
+    const saved = backend.data.get(STORAGE_KEY)!
+    const setItem = backend.setItem.bind(backend)
+    backend.setItem = (k: string, v: string): void => { if (k.startsWith(BAD_SAVE_KEY)) throw new Error('QuotaExceededError'); setItem(k, v) }
+    store.reset()
+    expect(store.getSnapshot()).toMatchObject({ storage: 'held', toast: { key: 'restart' } })
+    expect(backend.data.get(STORAGE_KEY)).toBe(saved)
+    expect(backend.data.has(BAD_SAVE_KEY)).toBe(false)
+    // and it is true: this session's progress is not saved over the kept save
+    store.startFree()
+    store.applyAt(2, 2)
+    store.flush()
+    expect(backend.data.get(STORAGE_KEY)).toBe(saved)
+  })
+
+  it('an unreadable save whose backup is refused: 「存档读不了，已重新开始。原存档已保留，但这次的进度不会保存」, never 「已备份」 (audit S2-1)', () => {
+    const backend = mem()
+    backend.data.set(STORAGE_KEY, '{broken')
+    const setItem = backend.setItem.bind(backend)
+    backend.setItem = (k: string, v: string): void => { if (k.startsWith(BAD_SAVE_KEY)) throw new Error('QuotaExceededError'); setItem(k, v) }
+    const { store } = make({ backend })
+    expect(store.getSnapshot()).toMatchObject({ storage: 'held', toast: { key: 'held' } })
+    expect(backend.data.get(STORAGE_KEY)).toBe('{broken')
+  })
+
+  it('nothing saved yet means nothing to back up: 「出错了，已重新开始」', () => {
+    const backend = mem()
+    const { store } = make({ backend })
+    store.reset()
+    expect(backend.data.has(BAD_SAVE_KEY)).toBe(false)
+    expect(store.getSnapshot().toast).toMatchObject({ key: 'restart' })
+  })
+
+  it('the two crash toasts, zh and en: 「已备份」 only in the one used after a written backup', () => {
+    const zh = makeTranslate('zh'), en = makeTranslate('en')
+    expect(zh('restart')).toBe('出错了，已重新开始')
+    expect(en('restart')).toBe('Something went wrong — started over')
+    expect(zh('restarted')).toBe('出错了，已重新开始，出错前的进度已备份')
+    expect(en('restarted')).toBe('Something went wrong — backed it up and started over')
+    expect(zh('restart')).not.toMatch(/备份/)
+    expect(en('restart')).not.toMatch(/back/i)
+  })
+
+  it('the backup-refused copy, zh and en (designer 22:05), from the lazy notice chunk', () => {
+    expect(NOTICES.zh).toEqual({ held: '存档读不了，已重新开始。原存档已保留，但这次的进度不会保存', restart: '出错了，已重新开始。这次的进度不会保存' })
+    expect(NOTICES.en).toEqual({ held: 'Could not read the save — started over. It is kept, but progress will not be saved', restart: 'Something went wrong — started over. Progress will not be saved' })
+    // until the chunk is here (or when it can't load): the short line, no 「已备份」
+    const zh = makeTranslate('zh'), en = makeTranslate('en')
+    expect([zh('held'), en('held')]).toEqual([zh('restart'), en('restart')])
+    expect(JSON.stringify(NOTICES)).not.toMatch(/备份|backed/)
   })
 })

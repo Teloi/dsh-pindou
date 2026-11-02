@@ -16,6 +16,10 @@ export interface Env {
   readonly picture?: Lazy<typeof import('../picture.tsx')>
   /** The works wall, the lazy chunk lib/client.works.js (spec §18.4/§18.6). */
   readonly works?: Lazy<typeof import('../works.tsx')>
+  /** Big boards (29–116, w×h, Canvas), the lazy chunk lib/client.big.js (plan §4.4). */
+  readonly big?: Lazy<typeof import('../big.tsx')>
+  /** lib/client.big-store.js, for the ⋯ menu's shortcut list (keys.ts); preloaded when idle. */
+  readonly keys?: Lazy<typeof import('../big-store.ts')>
 }
 
 export const EnvContext = createContext<Env | null>(null)

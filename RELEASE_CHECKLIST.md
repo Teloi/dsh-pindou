@@ -12,9 +12,9 @@
 
 - [ ] **经主人明确确认后**，合并 PR，把 `feat/pindou-break-v0.1.0` 合进 `main`（`github:Teloi/dsh-pindou` 安装的是默认分支；未确认前不得合并）
 - [ ] 在 GitHub 上用 README 里的命令装一次：`npx @deepseek-ai/dsh plugin --profile web add github:Teloi/dsh-pindou`
-- [ ] 仓库 About → Topics 加上：`dsh-plugin`（awesome-dsh-hub 靠它收录）、`game`、`perler-beads`、`pixel-art`、`deepseek-harness`
+- [ ] 仓库 About → Topics 加上：`dsh-plugin`（awesome-dsh-hub 靠它收录）、`game`、`beads`、`pixel-art`、`deepseek-harness`
 - [ ] 仓库 About → Description 填：
-      `拼豆小憩 Bead Break — 等模型思考时拼一会儿的像素拼豆小游戏 · a tiny perler-bead pixel game for DeepSeek Harness (DSH) while the model is busy`
+      `拼豆小憩 Bead Break — 等模型思考时拼一会儿的像素拼豆小游戏 · a tiny pixel bead game for DeepSeek Harness (DSH) while the model is busy`
 - [ ] 仓库 About → Website 可留空或填 README 链接
 - [ ] awesome-dsh-hub 每小时刷新一次；约 1 小时后确认插件出现在列表里（应归入 fun/游戏类）
 - [ ] 发布后向 awesome 列表投稿（提 PR 前须经主人确认）

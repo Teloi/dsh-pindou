@@ -90,7 +90,8 @@ export function BoardView({ overlay }: { readonly overlay?: ReactNode }): ReactE
   const s = useGame()
   const board = s.history.present
   const target = s.targetBoard
-  const n = board.size
+  // the DOM board shows the square UI sizes (BOARD_SIZES); w × h boards get the canvas (plan §4.2)
+  const n = board.w
   const uid = useId().replaceAll(':', '')
   const wrapRef = useRef<HTMLDivElement>(null)
   const boardRef = useRef<HTMLDivElement>(null)

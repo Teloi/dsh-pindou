@@ -10,7 +10,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import type { StoredWork, Template } from '../core/index.ts'
-import { addWork, cleanWorks, removeWork, type Work } from '../core/works.ts'
+import { addWork, capWall, cleanWorks, removeWork, type Work } from '../core/works.ts'
 import type { Env } from './ui/context.tsx'
 import type { WorksKit } from './ui/Works.tsx'
 import { WORKS_CSS } from './works-styles.ts'
@@ -29,6 +29,11 @@ export const WORKS_STRINGS = STRINGS
 
 const STYLE_ID = 'dsh-pindou-works-styles'
 /** Spec §18.4: the delete toast stays 5 s (paused while hovered or focused), like 清空. */
+// the two rare save-failure lines ride in this chunk (audit S2-1, option 2): the toast loads it for them (ui/App.tsx)
+export { NOTICES, NOTICE_MS, NOTICE_STYLE } from './notice.ts'
+/** The store trims a wall past 80 entries on iron with this (game-store.ts deps.cap, designer recheck R6). */
+export { capWall }
+
 export const UNDO_MS = 5000
 /** Home row: 56px thumbnails, 8px apart. */
 const THUMB = 56
@@ -38,18 +43,22 @@ const GAP = 8
 export interface WorksProps {
   readonly env: Env
   readonly kit: WorksKit
-  /** The wall as the entry holds it (ids checked only). */
+  /** The wall as stored (the entry checks nothing). */
   readonly wall: readonly StoredWork[]
 }
 
 /**
- * The valid works, oldest first. A wall with broken entries is written back
- * cleaned (only the broken ones go), once, from an effect.
+ * The works this wall can show, oldest first. Entries it can't show (another
+ * version's sizes, a damaged one) are skipped but never written away: deleting
+ * and restoring edit the wall as stored (review A1-6).
  */
 function useWorks({ env, wall }: WorksProps): readonly Work[] {
-  const clean = useMemo(() => cleanWorks(wall), [wall])
-  useEffect(() => { if (clean.dropped) env.store.setWall(clean.works) }, [clean, env])
-  return clean.works
+  // the caps live here, not in the entry (which can't tell a readable entry): trimmed when shown
+  useEffect(() => {
+    const c = capWall(wall)
+    if (c.length < wall.length) env.store.setWall(c as StoredWork[])
+  }, [env, wall])
+  return useMemo(() => cleanWorks(wall).works, [wall])
 }
 
 /**
@@ -319,14 +328,14 @@ export function WorksPage(props: WorksProps): ReactElement {
     env.store.hideToast()
     const i = order.indexOf(w)
     const next = order[i + 1] ?? order[i - 1]
-    env.store.setWall(removeWork(wall, w.i))
+    env.store.setWall(removeWork(env.store.works(), w.i) as StoredWork[])
     setOpen(null)
     setActive(next?.i ?? null)
     refocus.current = next?.i ?? null
     setUndo(u => ({ w, seq: (u?.seq ?? 0) + 1 }))
   }
 
-  const restore = (w: Work): void => { env.store.setWall(addWork(env.store.works() as Work[], w)); refocus.current = w.i; setActive(w.i); setUndo(null) }
+  const restore = (w: Work): void => { env.store.setWall(addWork(env.store.works(), w) as StoredWork[]); refocus.current = w.i; setActive(w.i); setUndo(null) }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     // Ctrl+Z / ⌘Z while the delete toast is up does what its 撤销 does (b4 suggestion)

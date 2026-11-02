@@ -3,11 +3,12 @@
  * so the inner header carries only ‹ Back and ⋯ (spec §3.1/§14.3).
  */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from 'react'
-import { COLOR_COUNT, type MessageKey } from '../../core/index.ts'
-import type { GameState, ToastKey } from '../game-store.ts'
+import { COLOR_COUNT } from '../../core/index.ts'
+import type { GameState } from '../game-store.ts'
 import { focusBoard, useFocusGuard, useFocusReturn } from '../focus.ts'
 import { IconBack, IconMore } from '../icons.tsx'
 import { AiView } from './Ai.tsx'
+import { BigView } from './Big.tsx'
 import { cx, useEnv, useGame } from './context.tsx'
 import { HomeView } from './Home.tsx'
 import { useLazy } from './LazyView.tsx'
@@ -15,11 +16,6 @@ import { PictureView } from './Picture.tsx'
 import { PlayView } from './Play.tsx'
 import { WorksView } from './Works.tsx'
 
-const TOAST_TEXT: Record<ToastKey, MessageKey> = {
-  cleared: 'toastCleared', newGame: 'toastNewGame', locked: 'toastLocked', exported: 'toastExported', exportFailed: 'toastExportFailed',
-  copied: 'toastCopied', copyFailed: 'toastCopyFailed',
-  storageUnavailable: 'storageUnavailable', storageRecovered: 'storageRecovered', say: 'say',
-}
 const TOAST_MS = 2400
 const TOAST_UNDO_MS = 5000
 
@@ -31,9 +27,12 @@ function isTyping(el: EventTarget | null): boolean {
 const menuButton = (el: HTMLElement): Element | null | undefined => el.closest('.pd-root')?.querySelector('[data-pd-menu-btn]')
 
 function Menu({ onClose }: { readonly onClose: () => void }): ReactElement {
-  const { store, t } = useEnv()
+  const { store, t, lang, keys } = useEnv()
   const s = useGame()
   const ref = useRef<HTMLDivElement>(null)
+  const ks = useLazy(keys)
+  useEffect(() => { void keys?.load() }, [keys])
+  const lines = keys?.value()?.KEYS[lang]
   // Focus the first item; Esc or an item that closes the menu gives focus back to ⋯ (focus.ts).
   useFocusReturn(ref, true, '[role=menuitemcheckbox],[role=menuitem]', menuButton)
   useEffect(() => {
@@ -70,9 +69,13 @@ function Menu({ onClose }: { readonly onClose: () => void }): ReactElement {
       <button type="button" className="pd-mi" role="menuitem" onClick={() => { store.showCoach(); onClose() }}>{t('menuCoach')}</button>
       <hr />
       <p className="pd-sec" style={{ margin: '4px 8px 2px' }}>{t('keysTitle')}</p>
-      <ul className="pd-keys">
-        <li>{t('keysTools')}</li><li>{t('keysColors')}</li><li>{t('keysHistory')}</li><li>{t('keysBoard')}</li><li>{t('keysEsc')}</li>
-      </ul>
+      {/* the lines come with lib/client.big-store.js (keys.ts): skeleton lines until then, filled in place;
+          a retry if it fails, 「需要新版 DSH」 where chunks can't load (never blank) */}
+      {lines
+        ? <ul className="pd-keys">{lines.map(l => <li key={l}>{l}</li>)}</ul>
+        : ks === 'failed'
+          ? <button type="button" className="pd-mi" role="menuitem" onClick={() => { void keys?.load() }}>{t('loadRetry')}</button>
+          : ks === 'unsupported' ? <p className="pd-sec" style={{ margin: '2px 8px' }}>{t('needNewerDsh')}</p> : <ul className="pd-keys" aria-busy>{[0, 1, 2].map(i => <li key={i}><i className="pd-skel" style={{ display: 'block', height: 10, aspectRatio: 'auto' }} /></li>)}</ul>}
     </div>
   )
 }
@@ -94,30 +97,43 @@ function Toast(): ReactElement | null {
 }
 
 function ToastView({ toast }: { toast: NonNullable<GameState['toast']> }): ReactElement {
-  const { store, t } = useEnv()
+  const { store, t, lang, works } = useEnv()
+  // a save that couldn't be backed up (audit S2-1): its toast (`held` on load, `restart` after a crash) says
+  // 「出错了，已重新开始」 at once, and the long line in its place once the works chunk (client/notice.ts) is here;
+  // the short line stays when the chunk can't load
+  const rare = store.getSnapshot().storage === 'held'
+  useLazy(works)
+  useEffect(() => { if (rare) void works?.load() }, [rare, works])
+  const w = rare ? works?.value() : undefined
+  const long = w?.NOTICES[lang][toast.key as 'held']
+  const text = long || t(toast.key, toast.params)
   const [held, setHeld] = useState(0)
   const left = useRef(toast.undo ? TOAST_UNDO_MS : TOAST_MS)
   const started = useRef(0)
+  // the long line gets a fresh clock (≥ 5 s) the moment it takes the short one's place (recheck R1)
+  const fresh = useRef(true)
   useEffect(() => {
     if (held > 0) return
+    if (long && fresh.current) { fresh.current = false; left.current = w!.NOTICE_MS }
     started.current = Date.now()
     const id = setTimeout(() => { store.hideToast() }, left.current)
     return () => { clearTimeout(id); left.current = Math.max(0, left.current - (Date.now() - started.current)) }
-  }, [held, store])
+  }, [held, store, long, w])
   const hold = (on: boolean) => (): void => { setHeld(h => Math.max(0, h + (on ? 1 : -1))) }
   return (
-    <div className="pd-toast" role="status" data-held={held > 0 || undefined}
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the long line takes focus, so the keyboard can hold it too (recheck R1)
+    <div className="pd-toast" role="status" data-held={held > 0 || undefined} tabIndex={long ? 0 : undefined}
       onPointerEnter={hold(true)} onPointerLeave={hold(false)}
       onFocus={hold(true)} onBlur={hold(false)}>
       {/* the whole text stays in the DOM (read out by role=status) and in the tooltip when it is cut */}
-      <span title={t(TOAST_TEXT[toast.key], toast.params)}>{t(TOAST_TEXT[toast.key], toast.params)}</span>
+      <span title={text} style={long ? w!.NOTICE_STYLE : undefined}>{text}</span>
       {toast.undo
         ? (
           <button type="button" onClick={(e) => {
             const root = e.currentTarget.closest('.pd-root')
             store.undoToast()
             setTimeout(() => { focusBoard(root) }, 0)
-          }}>{t('toastUndo')}</button>
+          }}>{t('undo')}</button>
         )
         : null}
     </div>
@@ -290,7 +306,7 @@ export function App(): ReactElement {
       </header>
       {menu ? <Menu onClose={() => { setMenu(false) }} /> : null}
       <div className="pd-scroll" ref={scroller}>
-        {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : s.mode === 'picture' ? <PictureView file={dropped} onTaken={taken} /> : s.mode === 'works' ? <WorksView /> : <PlayView />}
+        {s.mode === 'home' ? <HomeView /> : s.mode === 'ai' ? <AiView /> : s.mode === 'picture' ? <PictureView file={dropped} onTaken={taken} /> : s.mode === 'works' ? <WorksView /> : s.mode === 'big' ? <BigView /> : <PlayView />}
       </div>
       <Preview />
       <Toast />

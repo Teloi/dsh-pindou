@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CACHE_KEY, createBoard, encode, GenerationCache, parseState, SafeStore, serializeState, setCell, STORAGE_KEY,
+  DEFAULT_PREFS,
+  BAD_SAVE_KEY, CACHE_KEY, createBoard, encode, GenerationCache, parseState, SafeStore, serializeState, setCell, STORAGE_KEY,
   defaultState, type StorageLike,
 } from '../src/core/index.ts'
+
+/** A valid save with `prefs` swapped in, read back. */
+const prefsOf = (prefs: unknown) => parseState(JSON.stringify({ ...JSON.parse(serializeState(defaultState())) as object, prefs })).state.prefs
 
 function memoryStorage(): StorageLike & { data: Map<string, string> } {
   const data = new Map<string, string>()
@@ -29,12 +33,188 @@ describe('storage', () => {
     expect(state).toMatchObject({ color: 9, tool: 'erase', target: 'template:heart', pattern: null })
   })
 
+  it('reads v2 saves (square, `size` only) unchanged', () => {
+    const board = setCell(createBoard(12), 3, 4, 7)
+    const v2 = JSON.stringify({ v: 2, size: 12, board: encode(board), color: 7, tool: 'paint', mode: 'play', target: null, pattern: null, ironed: false })
+    const { state, corrupt } = parseState(v2)
+    expect(corrupt).toBe(false)
+    expect(state.board).toEqual(board)
+    expect(state).toMatchObject({ color: 7, mode: 'play' })
+  })
+
+  it('writes v3 with the width under `size`, so a square save still opens in v0.2 (isBoardSize(size) + size² cells)', () => {
+    const raw = JSON.parse(serializeState({ ...defaultState(), board: createBoard(24) }))
+    expect(raw).toMatchObject({ v: 3, size: 24, h: 24 })
+    expect(raw.board).toHaveLength(24 * 24)
+  })
+
+  it('the v1 key only opens shapes the first screen draws (12, 16, 24 square); any other is unreadable (review I-1)', () => {
+    // a valid v3 save of a w × h board decodes, but the DOM board can't draw it: corrupt, never rendered
+    for (const [w, h] of [[16, 12], [29, 58], [20, 20], [208, 208], [8, 208]] as const) {
+      const raw = JSON.stringify({ v: 3, size: w, h, board: encode(setCell(createBoard(w, h), w - 1, h - 1, 2)) })
+      expect(parseState(raw).corrupt).toBe(true)
+      expect(parseState(raw).state.board.w).toBe(16)
+    }
+    for (const n of [12, 16, 24]) expect(parseState(serializeState({ ...defaultState(), board: createBoard(n) })).corrupt).toBe(false)
+    // a size the data layer refuses, or cells that don't fill w × h, is corrupt (and falls back)
+    expect(parseState(JSON.stringify({ size: 209, board: '.'.repeat(209 * 209) })).corrupt).toBe(true)
+    expect(parseState(JSON.stringify({ size: 29, h: 58, board: '.'.repeat(29 * 29) })).corrupt).toBe(true)
+  })
+
+  it('a valid non-square v3 save in the v1 key is backed up and the game starts over (review I-1)', () => {
+    const backend = memoryStorage()
+    const raw = JSON.stringify({ v: 3, size: 16, h: 12, board: encode(setCell(createBoard(16, 12), 15, 11, 3)), color: 3 })
+    backend.data.set(STORAGE_KEY, raw)
+    const store = new SafeStore(backend)
+    const state = store.loadState()
+    expect(state.board).toEqual(createBoard(16))
+    expect(store.status).toBe('recovered')
+    expect(backend.data.has(STORAGE_KEY)).toBe(false)
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe(raw)
+  })
+
+  it('setAside keeps the save under the backup key and clears it (the crash reset); nothing saved, nothing done', () => {
+    const backend = memoryStorage()
+    const store = new SafeStore(backend)
+    store.setAside()
+    expect(store.status).toBe('ok')
+    expect(backend.data.size).toBe(0)
+    const raw = serializeState(defaultState())
+    backend.data.set(STORAGE_KEY, raw)
+    store.setAside()
+    expect(store.status).toBe('recovered')
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe(raw)
+    expect(backend.data.has(STORAGE_KEY)).toBe(false)
+  })
+
+  it('keeps at most three backups, newest first, dropping the oldest', () => {
+    const backend = memoryStorage()
+    const store = new SafeStore(backend)
+    backend.data.set(STORAGE_KEY, 'save 1')
+    store.setAside()
+    expect([...backend.data.keys()]).toEqual([BAD_SAVE_KEY])
+    for (const n of [2, 3, 4, 5]) {
+      backend.data.set(STORAGE_KEY, `save ${n}`)
+      store.setAside()
+    }
+    expect(['', ':2', ':3'].map(n => backend.data.get(BAD_SAVE_KEY + n))).toEqual(['save 5', 'save 4', 'save 3'])
+    expect(backend.data.size).toBe(3)
+  })
+
+  it('the v1 key holds only 12/16/24 squares both ways: writes refuse every other shape, reads back up and notice any other (audit A1-1)', () => {
+    const sizes: Array<[number, number]> = [[8, 8], [12, 12], [16, 16], [20, 20], [24, 24], [29, 29], [58, 58], [208, 208], [16, 12], [12, 16], [24, 16], [40, 30]]
+    for (const [w, h] of sizes) {
+      const ok = w === h && [12, 16, 24].includes(w)
+      const backend = memoryStorage()
+      const store = new SafeStore(backend)
+      const state = { ...defaultState(), board: setCell(createBoard(w, h), 1, 1, 5) }
+      expect(store.saveState(state)).toBe(ok)
+      expect(backend.data.has(STORAGE_KEY)).toBe(ok)
+      // the same shape planted by hand (another version, a bug): never rendered, kept as a backup, the player told
+      backend.data.set(STORAGE_KEY, serializeState(state))
+      const back = new SafeStore(backend)
+      const loaded = back.loadState()
+      expect(loaded.board.w === w && loaded.board.h === h).toBe(ok)
+      expect(back.status).toBe(ok ? 'ok' : 'recovered')
+      expect(backend.data.has(BAD_SAVE_KEY)).toBe(!ok)
+    }
+  })
+
+  it('a corrupt save bigger than 64 KB is still backed up before it goes (audit A1-5)', () => {
+    const backend = memoryStorage()
+    const huge = 'x'.repeat(70 * 1024)
+    backend.data.set(STORAGE_KEY, huge)
+    const store = new SafeStore(backend)
+    store.loadState()
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe(huge)
+    expect(backend.data.has(STORAGE_KEY)).toBe(false)
+  })
+
+  it('when the backup is refused, the original save stays and this session never saves over it (audit A1-5)', () => {
+    const backend = memoryStorage()
+    const setItem = backend.setItem
+    backend.setItem = (k, v) => { if (k.startsWith(BAD_SAVE_KEY)) throw new Error('QuotaExceededError'); setItem(k, v) }
+    backend.data.set(STORAGE_KEY, '{broken')
+    const store = new SafeStore(backend)
+    store.loadState()
+    // not 'recovered': nothing was backed up (audit S2-1)
+    expect(store.status).toBe('held')
+    expect(backend.data.get(STORAGE_KEY)).toBe('{broken')
+    expect(store.saveState({ ...defaultState(), board: createBoard(16) })).toBe(false)
+    expect(backend.data.get(STORAGE_KEY)).toBe('{broken')
+    expect(store.status).toBe('held')
+    // a crash reset that is refused too: still held (the toast says it as a crash, ui/App.tsx)
+    expect(store.setAside()).toBe(false)
+    expect(store.status).toBe('held')
+    // once a backup is written: recovered, and saving works again
+    backend.setItem = setItem
+    expect(store.setAside()).toBe(true)
+    expect(store.status).toBe('recovered')
+    expect(store.saveState({ ...defaultState(), board: createBoard(16) })).toBe(true)
+  })
+
+  it('never writes a non-square or big board to the v1 key, and stays ok (review I-2)', () => {
+    const backend = memoryStorage()
+    const store = new SafeStore(backend)
+    expect(store.saveState({ ...defaultState(), board: createBoard(16) })).toBe(true)
+    const square = backend.data.get(STORAGE_KEY)
+    for (const board of [createBoard(16, 12), createBoard(40, 30), createBoard(58), createBoard(208)]) {
+      expect(store.saveState({ ...defaultState(), board })).toBe(false)
+      expect(backend.data.get(STORAGE_KEY)).toBe(square)
+    }
+    expect(store.status).toBe('ok')
+    expect(store.saveState({ ...defaultState(), board: createBoard(24) })).toBe(true)
+  })
+
   it('recovers from corrupt or tampered data field by field', () => {
     expect(parseState('{not json').corrupt).toBe(true)
     expect(parseState('null').corrupt).toBe(true)
     const tampered = parseState(JSON.stringify({ size: 16, board: 'zz', color: 99, tool: 'rm -rf', prefs: { busyHint: 'yes' } }))
     expect(tampered.corrupt).toBe(true)
     expect(tampered.state).toMatchObject({ color: 4, tool: 'paint', prefs: { busyHint: true } })
+  })
+
+  it.each([':2', ':3', ''])('a refused %s write never loses a backup: the rotation stops, the save stays (audit phase 2)', (bad) => {
+    const backend = memoryStorage()
+    const set = backend.setItem.bind(backend)
+    const store = new SafeStore(backend)
+    backend.data.set(BAD_SAVE_KEY, 'backup A')
+    backend.data.set(BAD_SAVE_KEY + ':2', 'backup B')
+    backend.data.set(STORAGE_KEY, 'save C')
+    backend.setItem = (k: string, v: string): void => { if (k === BAD_SAVE_KEY + bad) throw new Error('QuotaExceededError'); set(k, v) }
+    expect(store.setAside()).toBe(false)
+    const kept = new Set(['', ':2', ':3'].map(n => backend.data.get(BAD_SAVE_KEY + n)))
+    expect(kept.has('backup A') && kept.has('backup B')).toBe(true)
+    expect(backend.data.get(STORAGE_KEY)).toBe('save C')
+    expect(store.saveState(defaultState())).toBe(false) // held: this session does not save over it
+    // once writes work again a later rotation completes, newest first
+    backend.setItem = set
+    const next = new SafeStore(backend)
+    expect(next.setAside()).toBe(true)
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe('save C')
+    expect(backend.data.get(BAD_SAVE_KEY + ':2')).toBe('backup A')
+    expect(backend.data.get(BAD_SAVE_KEY + ':3')).toBe('backup B')
+  })
+
+  it('setAside says whether a backup was really written', () => {
+    const ok = memoryStorage()
+    ok.data.set(STORAGE_KEY, serializeState(defaultState()))
+    expect(new SafeStore(ok).setAside()).toBe(true)
+    expect(new SafeStore(memoryStorage()).setAside()).toBe(false) // nothing to back up
+    const full = memoryStorage()
+    full.data.set(STORAGE_KEY, 'x')
+    const set = full.setItem.bind(full)
+    const store = new SafeStore(full)
+    full.setItem = (k: string, v: string): void => { if (k === BAD_SAVE_KEY) throw new Error('quota'); set(k, v) }
+    expect(store.setAside()).toBe(false)
+    expect(full.data.get(STORAGE_KEY)).toBe('x')
+    expect(new SafeStore(undefined).setAside()).toBe(false)
+  })
+
+  it('reads each pref as a stored boolean or its default, whatever shape prefs has', () => {
+    for (const bad of [null, 'yes', 7, [], true]) expect(prefsOf(bad)).toEqual(DEFAULT_PREFS)
+    expect(prefsOf({ showCodes: true, busyHint: false, extra: true, showGuide: 1 })).toEqual({ busyHint: false, showGuide: true, showCodes: true })
+    expect(Object.keys(prefsOf({ zzz: true }))).toEqual(['busyHint', 'showGuide', 'showCodes'])
   })
 
   it('keeps completed ids and the coach flag, dropping bad ids', () => {
@@ -53,6 +233,8 @@ describe('storage', () => {
     store.loadState()
     expect(store.status).toBe('recovered')
     expect(backend.data.has(STORAGE_KEY)).toBe(false)
+    // the unreadable save is kept aside, not thrown away
+    expect(backend.data.get(BAD_SAVE_KEY)).toBe('{"size":16,"board":"oops"}')
   })
 
   it('falls back to memory when storage throws or is missing', () => {
@@ -60,7 +242,7 @@ describe('storage', () => {
       const store = new SafeStore(backend)
       expect(store.status).toBe('unavailable')
       expect(store.saveState(defaultState())).toBe(false)
-      expect(store.loadState().board.size).toBe(16)
+      expect(store.loadState().board.w).toBe(16)
     }
   })
 

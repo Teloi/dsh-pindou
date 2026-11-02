@@ -26,6 +26,11 @@ const isBoardSize = (n: unknown): n is BoardSize => WORK_SIZES.includes(n as num
 /** Same values as storage.ts WORKS_KEY / MAX_WORKS (the entry's copy; tests/works.test.ts keeps them equal). */
 export const WORKS_KEY = 'dsh-pindou:works'
 export const MAX_WORKS = 60
+/**
+ * Entries kept in WORKS_KEY at most, readable or not (designer 22:05): unreadable entries (another
+ * version's, damaged, a repeated id) stay as stored and outside the 60, up to this many in all.
+ */
+export const MAX_STORED = 80
 /** One stored work, JSON-encoded, stays below this many characters (spec: under 1 KB). */
 export const MAX_WORK_CHARS = 1000
 
@@ -80,11 +85,32 @@ export function cleanWorks(raw: unknown): { works: Work[]; dropped: boolean } {
   return { works: works.slice(-MAX_WORKS), dropped: works.length !== raw.length || works.length > MAX_WORKS || works.some((w, k) => w.i !== (raw[k] as { i?: unknown } | null)?.i) }
 }
 
-/** Add a work (kept in id order); past 60 the oldest go. */
-export function addWork(wall: readonly Work[], w: Work): Work[] {
-  return [...wall.filter(x => x.i !== w.i), w].toSorted((a, b) => a.i - b.i).slice(-MAX_WORKS)
+/**
+ * The stored wall within its caps, everything else as stored and in order. Past 60
+ * readable works the oldest (smallest id) go; past 80 entries in all, the earliest
+ * stored unreadable ones go: a readable work never leaves to make room for one
+ * this version can't show (designer 22:05).
+ */
+export function capWall<T>(wall: readonly T[]): T[] {
+  const seen = new Set<number>()
+  const good: Array<[number, number]> = [] // [id, index]
+  const odd: number[] = []
+  wall.forEach((item, k) => {
+    const w = parseWork(item)
+    if (w && !seen.has(w.i)) { seen.add(w.i); good.push([w.i, k]) } else odd.push(k)
+  })
+  good.sort((a, b) => a[0] - b[0])
+  const kept = Math.min(good.length, MAX_WORKS)
+  const drop = new Set([...good.slice(0, good.length - kept).map(g => g[1]), ...odd.slice(0, Math.max(0, odd.length - (MAX_STORED - kept)))])
+  return wall.filter((_, k) => !drop.has(k))
 }
 
-export function removeWork(wall: readonly Work[], id: number): Work[] {
-  return wall.filter(x => x.i !== id)
+/** Put a work back (a deletion undone): before the first entry with a later id, then capped. */
+export function addWork<T>(wall: readonly T[], w: Work): (T | Work)[] {
+  const k = wall.findIndex(x => Number((x as Work | null)?.i) > w.i)
+  return capWall<T | Work>(k < 0 ? [...wall, w] : [...wall.slice(0, k), w, ...wall.slice(k)])
+}
+
+export function removeWork<T>(wall: readonly T[], id: number): T[] {
+  return wall.filter(x => (x as Work | null)?.i !== id)
 }

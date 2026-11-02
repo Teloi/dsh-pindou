@@ -18,6 +18,42 @@ These review suggestions were left out of 0.1.0 on purpose:
 - **Replaced games survive a reload** (known limitation of 0.1.0, see below): persist the games kept for undo after switching patterns (N1), so that undo still reaches them after a reload. This changes the storage format.
 - **Pin GitHub Actions to commit SHAs**: CI uses major-version tags (`actions/checkout@v4` and so on). Pinning needs a Renovate/Dependabot rule to keep the SHAs current; otherwise they go stale.
 
+## [0.3.0] - 2026-11-02
+
+### Added
+
+- **More sizes (big boards).** A 「更多尺寸 / More sizes」 button next to 12 / 16 / 24 opens a setup page in its own lazy chunk (`lib/client.big.js`): pegboard presets (29, 52, 57, 58, 78, 87, 104, 116, built from one board or n × n smaller ones) or a custom width × height from 8 to 116, optionally split into blocks. Boards of 58 and up show that they take 20+ minutes and save themselves. The button is hidden where DSH cannot load chunks.
+- **Canvas board for big sizes.** Zoom (buttons, + − 0, Ctrl+wheel, pinch; snaps ease 120 ms, none under reduced motion), pan, a minimap, a block list with 「下一块」, 「只看本色」, and a status line with the cell under the cursor and px per cell. Brush, eraser, picker and fill as on small boards; diff-based undo/redo (100 steps, about 3 B per changed cell, 4 MB cap). Keyboard play (arrows, Space/Enter, Delete, Shift+arrows jump a block, N, M, L) and a live region that reads the block, row, column and colour.
+- **Big-board saves in IndexedDB.** Progress autosaves when a block is done and 2 s after the last edit. Where IndexedDB can't be opened (or doesn't answer within 2 s), boards up to 58 save in localStorage (`dsh-pindou:save:*`) and bigger ones say up front that they won't be saved.
+- **Share codes `pd2:` and pattern files.** Any w × h board can be shared as a `pd2:` code (pd1 codes still open); a pattern too big for a code is exported and imported as a text file.
+- **300 px panels.** Swatches in 8 shared columns, one toolbar row with 清空 / 导出 PNG under 「更多」, and a one-time 「拖宽侧栏体验更好」 hint for big boards in a panel under 360 px.
+
+### Changed
+
+- **Lazy chunks:** the budget is now 20 KB gzip per chunk and 48 KB for all of them (it was 20 KB together). New chunks `lib/client.big.js` and `lib/client.big-store.js` (saves and share codes); the ⋯ menu's shortcut list also lives in `client.big-store.js` and shows skeleton lines until it loads, with a retry if it can't. The first-screen bundle stays within its cap.
+- **Save format:** the game save in `dsh-pindou:v1` is written as `v: 3` with the width under `size`; only 12 / 16 / 24 squares ever go there, so 0.2 still opens it.
+
+### Fixed
+
+- **Unreadable saves are backed up, never dropped.** A save that can't be read (including a non-square one in `dsh-pindou:v1`) is copied to `dsh-pindou:v1:unreadable` and the panel says 「存档读不了，已备份并重新开始」. At most 3 backups are kept, newest first, and a backup is only rotated out after it has been copied. If the backup itself is refused, the original is kept and not saved over this session: 「出错了，已重新开始」, then the longer 「存档读不了，已重新开始。原存档已保留，但这次的进度不会保存」.
+- **Panel error boundary:** a crash shows a card with 重置, and focus goes to it. After a reset the toast says 「出错了，已重新开始，出错前的进度已备份」 only when the backup was really written, otherwise just 「出错了，已重新开始」.
+- **My works:** entries the wall can't show are kept in `dsh-pindou:works` as stored instead of being deleted; only 12 / 16 / 24 squares are added to it.
+
+### Known limitations (0.3, big boards)
+
+- **208 × 208 painting is below its frame-rate target: median 43.4 fps against 45.** Not reachable in 0.3: the size picker and share-code import stop at 116 (`UI_MAX`). It must be fixed and benchmarked again before 208 is opened.
+- **208² 涂色帧率中位数 43.4 fps，低于 45 的门槛。** 0.3 里碰不到：尺寸选择和分享码导入上限是 116（`UI_MAX`）。放开 208 之前必须先修好并重新跑性能测试。
+- **58 × 58 cold fill after a zoom takes up to 472 ms**, within the 500 ms limit but with little margin.
+- **58² 冷启动补齐最长 472 ms**，没超过 500 ms 的门槛，但余量很小。
+- **116 × 116 painting has an occasional single long frame of about 97 ms.**
+- **116² 涂色偶尔有单帧长到约 97 ms 的卡顿。**
+- **`?` does not open the shortcut list**; open it from 「快捷键」 in the ⋯ menu.
+- **按 `?` 打不开快捷键列表**，要从 ⋯ 菜单里的「快捷键」进入。
+- **After the mouse moves over the canvas, idle build-ahead of the next zoom level does not resume**, so the next zoom falls back to a cold fill: a little slower, still usable.
+- **鼠标在画布上移动以后，相邻缩放级的空闲预建不会恢复**，下一次缩放会退回冷补齐，稍慢一点，但不影响使用。
+- **First zoom-in on a 208 × 208 board fills in over a moment.** With nothing cached yet, the detailed beads of the first zoom step take about 228–385 ms to fill in. Until then every cell shows its correct plain colour: never a blank area and never a seam. The tiles nearest the middle come first, and while the page is idle the next zoom level is built ahead. (208 is not reachable in 0.3; see the first item.)
+- **208² 首次放大冷缓存补齐约 228–385 ms，补齐前每格显示正确纯色，没有空白和接缝。** 离视野中心近的先补；页面空闲时会预先准备下一档缩放。（0.3 里碰不到 208，见第一条。）
+
 ## [0.2.1] - 2026-10-30
 
 ### Fixed
@@ -99,7 +135,8 @@ First release of 拼豆小憩 · Bead Break.
 - No board zoom (spec §3.4) and no row-by-row AI drop (spec §4.7); both moved to v2. See `docs/dsh-ui-constraints.md` §5.
 - Credentials are checked without a model call, so a configured but invalid key is only found on the first generation.
 
-[Unreleased]: https://github.com/Teloi/dsh-pindou/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Teloi/dsh-pindou/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Teloi/dsh-pindou/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Teloi/dsh-pindou/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Teloi/dsh-pindou/compare/v0.1.0...feat/v0.2
 [0.1.0]: https://github.com/Teloi/dsh-pindou/releases/tag/v0.1.0

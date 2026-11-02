@@ -11,7 +11,7 @@
  * Host types are not bundled; the minimal shapes used here are declared below
  * so the bundle depends on nothing but React at runtime.
  */
-import { useSyncExternalStore, type ComponentType, type ReactElement } from 'react'
+import { Component, useSyncExternalStore, type ComponentType, type ReactElement, type ReactNode } from 'react'
 import { en, makeTranslate, SafeStore, browserStorage, zh, type Translate } from '../core/index.ts'
 import { fetchApi } from './api.ts'
 import { makeBusyPill, makeEntry, type SessionProps } from './entry.tsx'
@@ -69,7 +69,9 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ensureStyles(), 'pindou: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'pindou: dictionaries')
 
-  const store = new GameStore({ store: new SafeStore(browserStorage()), api: fetchApi(), reducedMotion: prefersReducedMotion })
+  // the works wall (lib/client.works.js): loaded once per session, kept (spec §18.4/§18.6); its capWall also trims a wall past 80 on iron
+  const works = lazy(() => import('./works.tsx'), hostLoadsChunks())
+  const store = new GameStore({ store: new SafeStore(browserStorage()), api: fetchApi(), reducedMotion: prefersReducedMotion, cap: () => works.load().then(m => m?.capWall) })
   ctx.effect(() => () => { store.dispose() }, 'pindou: game store')
   const flush = (): void => { store.flush() }
   ctx.effect(() => {
@@ -79,8 +81,11 @@ export function apply(ctx: ClientContext): void {
 
   // Picture to pattern lives in lib/client.picture.js, fetched on first open (spec §18.6)
   const picture = lazy(() => import('./picture.tsx'), hostLoadsChunks())
-  // the works wall (lib/client.works.js): loaded once per session, kept (spec §18.4/§18.6)
-  const works = lazy(() => import('./works.tsx'), hostLoadsChunks())
+  // big boards on a Canvas (lib/client.big.js, plan §4.4): the 「更多尺寸」 page
+  const big = lazy(() => import('./big.tsx'), hostLoadsChunks())
+  // the ⋯ menu's shortcut list lives in lib/client.big-store.js (keys.ts): fetched when the page is idle
+  const keys = lazy(() => import('./big-store.ts'), hostLoadsChunks())
+  ;(globalThis.requestIdleCallback ?? ((f: () => void) => setTimeout(f, 50)))(() => { void keys.load() })
   const lang = (): 'zh' | 'en' => langOf(ctx.locale.getSnapshot().active)
   const tFor = (l: 'zh' | 'en'): Translate => (l === 'zh' ? tZh : tEn)
   const tZh = makeTranslate('zh')
@@ -103,12 +108,35 @@ export function apply(ctx: ClientContext): void {
     open()
   }
 
+  /** A render crash shows a reset (the save is set aside first), never a blank panel for good. */
+  class Guard extends Component<{ readonly t: Translate; readonly children: ReactNode }, { readonly e: boolean }> {
+    override state = { e: false }
+    static getDerivedStateFromError(): { e: boolean } { return { e: true } }
+    override render(): ReactNode {
+      const { t } = this.props
+      return this.state.e
+        ? (
+          <div className="pd-root" role="alert">
+            <div className="pd-card">
+              {t('crashed')}
+              {/* focus goes to 重置 when the card shows (plan 修订 20:25) */}
+              <button type="button" className="pd-btn" autoFocus onClick={() => { store.reset(); this.setState({ e: false }) }}>{t('reset')}</button>
+            </div>
+          </div>
+        )
+        : this.props.children
+    }
+  }
+
   function Body(): ReactElement {
     const l = useLang()
+    const t = tFor(l)
     return (
-      <EnvContext.Provider value={{ store, lang: l, t: tFor(l), reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works }}>
-        <App />
-      </EnvContext.Provider>
+      <Guard t={t}>
+        <EnvContext.Provider value={{ store, lang: l, t, reducedMotion: prefersReducedMotion, dark: () => isDark(), settings: () => settingsOpener(ctx.shortcuts), picture, works, big, keys }}>
+          <App />
+        </EnvContext.Provider>
+      </Guard>
     )
   }
 

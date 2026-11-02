@@ -553,6 +553,207 @@ const worksCard = p => p.locator('.pd-start .pd-big').nth(3)
 const rowShot = async (p, name, auditOpts) => { const s = p.locator('.pd-v-home .pd-works'); await s.scrollIntoViewIfNeeded(); await outShot(p, name, { clip: await s.boundingBox() }, auditOpts) }
 const setWidth = async (p, px) => { await p.evaluate(v => { document.querySelector('.pd-root').style.width = v ? `${v}px` : '' }, px); await p.waitForTimeout(300) }
 
+/** S2-1 e2e helpers: is 「已备份」 anywhere, the toast line now, wait for an exact toast line */
+const backedUp = pg => pg.evaluate(() => /已备份/.test(document.body.innerText))
+const toastNow = pg => pg.evaluate(() => document.querySelector('.pd-toast span')?.textContent ?? null)
+const waitToast = (pg, text, timeout = 6000) => pg.waitForFunction(t => document.querySelector('.pd-toast span')?.textContent === t, text, { timeout }).then(() => true, () => false)
+
+/**
+ * Save safety (designer review v0.3 phase 1, I-1): a valid but non-square v3 save in
+ * `dsh-pindou:v1` (what a v0.3 build could have written) must never crash the panel.
+ * It is unreadable to the first screen: backed up whole, the notice shows, a fresh game opens.
+ */
+async function saveSafetySection() {
+  const errorsBefore = pageErrors.length
+  // 16 wide, 12 tall, valid v3: decodes, but the DOM board only draws 12/16/24 squares
+  const cells = '.'.repeat(16 * 12 - 3) + '3a5'
+  const raw = JSON.stringify({ v: 3, size: 16, h: 12, board: cells, color: 3, tool: 'paint', mode: 'play', target: null, pattern: null, ironed: false, coached: true })
+  const init = `if (!sessionStorage.getItem('v')) { sessionStorage.setItem('v', '1'); localStorage.setItem('dsh-pindou:v1', ${JSON.stringify(raw)}) }`
+  const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', init)
+  await startSession(p, '看看 README')
+  await openPanel(p)
+  const toast = await p.locator('.pd-toast').textContent({ timeout: 5000 }).catch(() => null)
+  const st = await p.evaluate(() => ({
+    home: !!document.querySelector('.pd-v-home'), cells: document.querySelectorAll('.pd-board .pd-cell').length, alert: !!document.querySelector('.pd-root [role=alert]'),
+    backup: localStorage.getItem('dsh-pindou:v1:unreadable'), v1: localStorage.getItem('dsh-pindou:v1'),
+  }))
+  const v1 = st.v1 ? JSON.parse(st.v1) : null
+  // the rest of the save is read field by field (spec §4.3), so it may reopen on a fresh 16 × 16 board or home
+  check('V I-1 a valid 16×12 v3 save in dsh-pindou:v1: no crash, a fresh 16×16 board (or home), the notice shows, the raw save is backed up', (st.home || st.cells === 256) && !st.alert && /存档/.test(toast ?? '') && st.backup === raw, JSON.stringify({ ...st, backup: st.backup === raw, v1: undefined, toast }))
+  // the panel still plays and saves a square board again
+  if (st.home) await p.locator('.pd-start .pd-big').first().click()
+  await p.locator('.pd-board .pd-cell').first().waitFor()
+  const coach = p.locator('.pd-overlay.pd-coach button')
+  if (await coach.count()) await coach.click()
+  await p.locator('.pd-board .pd-cell').first().click()
+  await p.waitForTimeout(800)
+  const after = await p.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:v1') ?? 'null'))
+  check('V I-1 after the reset the game plays and saves a square board to v1', after?.size === after?.h && [12, 16, 24].includes(after?.size), JSON.stringify({ before: v1 && { size: v1.size, h: v1.h }, after: after && { size: after.size, h: after.h } }))
+  await outShot(p, 'v-nonsquare-v1-recovered')
+  await p.context().close()
+  const caused = pageErrors.splice(errorsBefore)
+  check('V no page errors from a non-square v1 save', caused.length === 0, caused.slice(0, 3).join(' | '))
+  // any other render crash: the outer boundary shows 「出错了」 + 重置, never a blank panel; 重置 backs the save up and starts over.
+  // The crash is forced in the plugin's own canvases only (home thumbnails draw in an effect), never the host's.
+  const boom = `window.pdBoom = true; const gc = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (...a) { if (window.pdBoom && this.closest('[aria-label="拼豆小憩"]')) throw new Error('pd e2e boom'); return gc.apply(this, a) }`
+  const c = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${boom}; ${init.replace("'v'", "'c'")}`)
+  await startSession(c, '看看 README')
+  await openPanel(c)
+  // the seeded save opens on the board: go home, where the thumbnails throw
+  if (!(await c.locator('.pd-v-home').count())) { await c.locator('.pd-head .pd-ib').first().click().catch(() => {}) }
+  const fallback = c.locator('.pd-root[role=alert]')
+  await fallback.waitFor({ timeout: 8000 }).catch(() => {})
+  const crashed = { alert: await fallback.count(), text: (await fallback.textContent().catch(() => '')) ?? '', focus: await c.evaluate(() => { const a = document.activeElement; return a?.closest('.pd-root[role=alert]') && a.tagName === 'BUTTON' ? a.textContent : null }) }
+  await outShot(c, 'v-crash-boundary')
+  await c.evaluate(() => { window.pdBoom = false })
+  // keyboard only: focus is already on 重置 (plan 修订 20:25)
+  await c.keyboard.press('Enter')
+  await c.waitForTimeout(500)
+  const back = await c.evaluate(() => ({ alert: !!document.querySelector('.pd-root[role=alert]'), root: !!document.querySelector('.pd-root'), backup: !!localStorage.getItem('dsh-pindou:v1:unreadable'), toast: document.querySelector('.pd-toast')?.textContent ?? null }))
+  check('V a render crash shows 「出错了」 + 重置 (not a blank panel), focus on 重置; Enter brings the panel back', crashed.alert === 1 && /出错了/.test(crashed.text) && /重置/.test(crashed.text) && crashed.focus === '重置' && !back.alert && back.root, JSON.stringify({ crashed, back }))
+  check('V after 重置 the toast says 「出错了，已重新开始，出错前的进度已备份」 (not the unreadable-save words) and the save is backed up', /出错了，已重新开始，出错前的进度已备份/.test(back.toast ?? '') && !/存档读不了/.test(back.toast ?? '') && back.backup, JSON.stringify(back))
+  await c.context().close()
+  // only the forced error may be reported from that page
+  const rest = pageErrors.splice(errorsBefore).filter(e => !e.includes('pd e2e boom'))
+  check('V no page errors besides the forced one', rest.length === 0, rest.slice(0, 3).join(' | '))
+  // audit S2-1 / designer 22:05: when the backup itself is refused nothing may say 「已备份」. The quota is faked on the backup keys only.
+  // Option 2 (管家): the two long lines ride in lib/client.works.js; the toast says 「出错了，已重新开始」 at once and the long line
+  // takes its place when the chunk is here. A sampler records every text the toast shows (and which element showed it).
+  const quota = `const si = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (String(k).startsWith('dsh-pindou:v1:unreadable')) throw new DOMException('full', 'QuotaExceededError'); return si.call(this, k, v) }`
+  const sampler = `window.pdTs = []; window.pdTn = 0; setInterval(() => { const s = document.querySelector('.pd-toast span'); if (!s) return; const t = s.parentElement; t.dataset.e2e ||= String(++window.pdTn); const v = t.dataset.e2e + '|' + s.textContent; if (window.pdTs.at(-1) !== v) window.pdTs.push(v) }, 20)`
+  const SHORT = '出错了，已重新开始', HELD = '存档读不了，已重新开始。原存档已保留，但这次的进度不会保存', CRASH = '出错了，已重新开始。这次的进度不会保存'
+  // 1. delayed chunk: the short line first, then the long one in place (same toast element), never blank
+  const h = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${sampler}; ${quota}; ${init.replace("'v'", "'h'")}`)
+  let hAsked = 0
+  await h.route(WORK_CHUNK, async (route) => { hAsked++; await new Promise(r => { setTimeout(r, 1200) }); await route.continue() })
+  await startSession(h, '看看 README')
+  await openPanel(h)
+  await h.locator('.pd-toast').waitFor({ timeout: 5000 }).catch(() => {})
+  const hFirst = await toastNow(h)
+  const hLong = await waitToast(h, HELD)
+  await h.waitForTimeout(150) // the sampler's next ticks
+  const hSeen = await h.evaluate(() => window.pdTs)
+  const hKept = await h.evaluate(() => ({ v1: localStorage.getItem('dsh-pindou:v1'), bak: Object.keys(localStorage).filter(k => k.startsWith('dsh-pindou:v1:unreadable')).length }))
+  check('V S2-1 an unreadable save whose backup is refused, slow chunk: 「出错了，已重新开始」 at once, then 「存档读不了，已重新开始。原存档已保留，但这次的进度不会保存」 in its place (one toast element, never blank)',
+    hFirst === SHORT && hLong && hSeen.length === 2 && hSeen[0] === `1|${SHORT}` && hSeen[1] === `1|${HELD}` && hAsked >= 1, JSON.stringify({ hFirst, hLong, hSeen, hAsked }))
+  check('V S2-1 nothing says 「已备份」, the save stays in v1, no backup written', !(await backedUp(h)) && hKept.v1 === raw && hKept.bak === 0, JSON.stringify({ same: hKept.v1 === raw, bak: hKept.bak }))
+  await h.evaluate(() => { document.querySelector('.pd-toast')?.remove() })
+  if (await h.locator('.pd-v-home').count() === 0) await h.locator('.pd-head .pd-ib').first().click().catch(() => {})
+  await openBig(h)
+  const hLine = await h.evaluate(() => [...document.querySelectorAll('.pd-bk .pd-bk-note')].map(n => n.textContent))
+  check('V S2-1 the big setup page says 「本次进度不会保存」 for the session (designer 22:05)', hLine.includes('本次进度不会保存') && !(await backedUp(h)), JSON.stringify(hLine))
+  await bigShot(h, 'v-held-setup')
+  await h.context().close()
+  // 1b. designer recheck R1: in a 300 px panel the long line wraps (≤ 3 lines, nothing cut), stays ≥ 5 s from the moment
+  // it replaces the short one, and hovering or keyboard focus holds the clock. A timer records when it appeared and left.
+  const clock = `window.pdL = null; window.pdGone = null; setInterval(() => { const s = document.querySelector('.pd-toast span'); if (s && s.textContent === ${JSON.stringify(HELD)} && window.pdL === null) window.pdL = performance.now(); if (!s && window.pdL !== null && window.pdGone === null) window.pdGone = performance.now() }, 20)`
+  const narrowToast = async (hold) => {
+    const n = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${clock}; ${quota}; ${init.replace("'v'", `'n${hold}'`)}`)
+    await n.route(WORK_CHUNK, async (route) => { await new Promise(r => { setTimeout(r, 1500) }); await route.continue() })
+    await startSession(n, '看看 README')
+    await openPanel(n)
+    await setWidth(n, 300)
+    const long = await waitToast(n, HELD)
+    await n.waitForTimeout(100)
+    const look = await n.evaluate(() => {
+      const s = document.querySelector('.pd-toast span'), cs = getComputedStyle(s), lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45
+      const r = s.getBoundingClientRect(), root = document.querySelector('.pd-root').getBoundingClientRect()
+      return { lines: Math.round(r.height / lh), cut: s.scrollHeight > s.clientHeight + 1 || s.scrollWidth > s.clientWidth + 1, inside: r.left >= root.left && r.right <= root.right, w: Math.round(root.width) }
+    })
+    return { n, long, look }
+  }
+  {
+    const { n, long, look } = await narrowToast(0)
+    await bigShot(n, 'v-held-long-300')
+    check('V recheck R1 300 px: the long line wraps to ≤ 3 lines inside the panel, nothing cut (「…这次的进度不会保存」 visible)', long && look.w === 300 && look.lines >= 2 && look.lines <= 3 && !look.cut && look.inside, JSON.stringify(look))
+    await n.waitForTimeout(4600 - (await n.evaluate(() => performance.now() - window.pdL)))
+    const at46 = await toastNow(n)
+    await n.waitForFunction(() => window.pdGone !== null, null, { timeout: 4000 }).catch(() => {})
+    const stay = await n.evaluate(() => window.pdGone === null ? null : Math.round(window.pdGone - window.pdL))
+    check('V recheck R1 the long line stays ≥ 5 s from the moment it replaced the short one (then goes)', at46 === HELD && stay !== null && stay >= 4950 && stay <= 6500, JSON.stringify({ at46, stay }))
+    await n.context().close()
+  }
+  {
+    // hover: the clock stops while the pointer is on the toast, and runs on once it leaves
+    const { n, long } = await narrowToast(1)
+    const box = await n.locator('.pd-toast').boundingBox()
+    await n.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await n.waitForTimeout(6500)
+    const hovered = await toastNow(n)
+    await n.mouse.move(5, 5)
+    await n.waitForTimeout(800)
+    const unhovered = await toastNow(n)
+    // keyboard: focus on the toast (it takes focus while it holds the long line) holds it too
+    await n.evaluate(() => { document.querySelector('.pd-toast')?.focus() })
+    const focused = await n.evaluate(() => document.activeElement?.classList.contains('pd-toast') ?? false)
+    await n.waitForTimeout(6500)
+    const kept = await toastNow(n)
+    await n.evaluate(() => { document.activeElement?.blur() })
+    await n.waitForFunction(() => !document.querySelector('.pd-toast'), null, { timeout: 7000 }).catch(() => {})
+    const gone = await toastNow(n)
+    check('V recheck R1 hovering or focusing the long toast holds it (6.5 s each); it goes once both end', long && hovered === HELD && unhovered === HELD && focused && kept === HELD && gone === null, JSON.stringify({ hovered, unhovered, focused, kept, gone }))
+    await n.context().close()
+  }
+  // 2. a crash whose backup is refused (chunk ok): the short line, then 「出错了，已重新开始。这次的进度不会保存」
+  const ch = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${sampler}; ${boom}; ${quota}; if (!sessionStorage.getItem('k2')) { sessionStorage.setItem('k2', '1'); localStorage.setItem('dsh-pindou:v1', JSON.stringify({ v: 2, size: 16, board: '.'.repeat(255) + '3', color: 3, tool: 'paint', mode: 'home', target: null, pattern: null, ironed: false, coached: true })) }`)
+  await startSession(ch, '看看 README')
+  await openPanel(ch)
+  if (!(await ch.locator('.pd-v-home').count())) { await ch.locator('.pd-head .pd-ib').first().click().catch(() => {}) }
+  await ch.locator('.pd-root[role=alert]').waitFor({ timeout: 8000 }).catch(() => {})
+  await ch.evaluate(() => { window.pdBoom = false })
+  await ch.locator('.pd-root[role=alert] button').click().catch(() => {})
+  const chLong = await waitToast(ch, CRASH)
+  await ch.waitForTimeout(150)
+  const chSeen = await ch.evaluate(() => window.pdTs.map(v => v.replace(/^\d+\|/, '')))
+  check('V S2-1 a crash whose backup is refused: 「出错了，已重新开始。这次的进度不会保存」 (after the short line), no 「已备份」', chLong && chSeen.every(v => v === SHORT || v === CRASH) && !(await backedUp(ch)), JSON.stringify({ chLong, chSeen }))
+  await ch.context().close()
+  // 3. the chunk can't load: the short line stays (never blank, no 「已备份」), 重置 still works, the setup page still says it
+  const errs3 = pageErrors.length
+  const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${sampler}; ${boom}; ${quota}; ${init.replace("'v'", "'f'")}`)
+  let fAsked = 0
+  await f.route(WORK_CHUNK, (route) => { fAsked++; return route.abort('internetdisconnected') })
+  await startSession(f, '看看 README')
+  await openPanel(f)
+  await f.locator('.pd-toast').waitFor({ timeout: 5000 }).catch(() => {})
+  await f.waitForTimeout(1500)
+  const fSeen = await f.evaluate(() => window.pdTs)
+  check('V S2-1 chunk fails: the toast stays exactly 「出错了，已重新开始」 (never blank), no 「已备份」 anywhere', fAsked >= 1 && fSeen.length === 1 && fSeen[0] === `1|${SHORT}` && !(await backedUp(f)), JSON.stringify({ fAsked, fSeen }))
+  // a crash on top (home thumbnails throw): 重置 never waits for the chunk
+  if (!(await f.locator('.pd-v-home').count())) { await f.locator('.pd-head .pd-ib').first().click().catch(() => {}) }
+  await f.locator('.pd-root[role=alert]').waitFor({ timeout: 8000 }).catch(() => {})
+  const fAlert = await f.locator('.pd-root[role=alert]').count()
+  await f.evaluate(() => { window.pdBoom = false; window.pdTs = [] })
+  await f.locator('.pd-root[role=alert] button').click().catch(() => {})
+  await f.locator('.pd-v-home, .pd-board').first().waitFor({ timeout: 3000 }).catch(() => {})
+  const fBack = await f.evaluate(() => ({ alert: !!document.querySelector('.pd-root[role=alert]'), view: !!document.querySelector('.pd-v-home, .pd-board'), toast: document.querySelector('.pd-toast span')?.textContent ?? null }))
+  await f.waitForTimeout(1000)
+  const fSeen2 = await f.evaluate(() => window.pdTs.map(v => v.replace(/^\d+\|/, '')))
+  check('V S2-1 chunk fails: 重置 brings the panel back at once with 「出错了，已重新开始」, which stays; no 「已备份」', fAlert === 1 && !fBack.alert && fBack.view && fBack.toast === SHORT && fSeen2.every(v => v === SHORT) && !(await backedUp(f)), JSON.stringify({ fAlert, fBack, fSeen2 }))
+  await f.evaluate(() => { document.querySelector('.pd-toast')?.remove() })
+  if (await f.locator('.pd-v-home').count() === 0) await f.locator('.pd-head .pd-ib').first().click().catch(() => {})
+  await openBig(f)
+  const fLine = await f.evaluate(() => [...document.querySelectorAll('.pd-bk .pd-bk-note')].map(n => n.textContent))
+  check('V S2-1 chunk fails: the big setup page still says 「本次进度不会保存」', fLine.includes('本次进度不会保存') && !(await backedUp(f)), JSON.stringify(fLine))
+  await bigShot(f, 'v-held-chunk-failed-setup')
+  await f.context().close()
+  const caused3 = pageErrors.splice(errs3).filter(e => !e.includes('pd e2e boom'))
+  check('V S2-1 chunk fails: the only errors are the aborted chunk loads (nothing thrown)', caused3.every(e => /client\.works\.js|ERR_INTERNET_DISCONNECTED|Failed to fetch|net::/i.test(e)), caused3.slice(0, 3).join(' | '))
+  // a crash with no storage at all: the crash words win over 「浏览器存储不可用，进度不会保存」 and say no 「已备份」 (21:35)
+  const none = `Storage.prototype.setItem = function () { throw new DOMException('denied', 'SecurityError') }`
+  const cn = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', `${boom}; ${none}`)
+  await startSession(cn, '看看 README')
+  await openPanel(cn)
+  await cn.locator('.pd-root[role=alert]').waitFor({ timeout: 8000 }).catch(() => {})
+  await cn.evaluate(() => { window.pdBoom = false })
+  await cn.locator('.pd-root[role=alert] button').click().catch(() => {})
+  await cn.waitForTimeout(500)
+  const cnToast = await cn.evaluate(() => [...document.querySelectorAll('.pd-toast')].map(t => t.textContent))
+  check('V S2-1 a crash with storage unavailable: one toast, exactly 「出错了，已重新开始」 (not the storage notice, no 「已备份」)', cnToast.length === 1 && cnToast[0] === '出错了，已重新开始', JSON.stringify({ cnToast }))
+  await cn.context().close()
+  const rest2 = pageErrors.splice(errorsBefore).filter(e => !e.includes('pd e2e boom'))
+  check('V S2-1 pages: no page errors besides the forced one', rest2.length === 0, rest2.slice(0, 3).join(' | '))
+}
+
 async function worksSection() {
   const errorsBefore = pageErrors.length
   // 1. a slow chunk: the row holds its height while loading, thumbnails fade in (150 ms), loaded once per session
@@ -807,7 +1008,8 @@ async function worksSection() {
     const row = await c.evaluate(worksRow)
     check('W ironing puts the piece on the wall at once, 取消熨烫 takes it off, ironing again puts it back; home shows 「我的作品 · 1」', ironed === 1 && withdrawn === 0 && await wallCount(c) === 1 && row?.title === '我的作品 · 1', JSON.stringify({ ironed, withdrawn, row }))
     await c.context().close()
-    // broken entries: only those go (written back cleaned); unreadable JSON is an empty wall and the game still saves
+    // broken entries: the wall shows only the good ones and leaves the stored list as it is (review IMPORTANT 2 / A1-6, d8d0daa:
+    // v0.3 never deletes what it can't show); unreadable JSON is an empty wall and the game still saves
     const good = seedWorks(3)
     const broken = JSON.stringify([good[0], { i: 'x' }, good[1], { i: 5, n: 16, b: 'zz', s: null }, null, good[2]])
     const b = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(broken))
@@ -815,10 +1017,23 @@ async function worksSection() {
     await openPanel(b)
     await b.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
     await b.waitForTimeout(200)
-    const cleaned = await b.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:works')).map(x => x.i))
+    const kept = await b.evaluate(() => localStorage.getItem('dsh-pindou:works'))
     const brow = await b.evaluate(worksRow)
-    check('W broken entries in storage: only they are dropped (3 of 6 kept, written back), 「我的作品 · 3」', cleaned.join() === good.map(x => x.i).join() && brow.title === '我的作品 · 3' && brow.thumbs === 3, JSON.stringify({ cleaned, brow }))
+    check('W broken entries in storage: the wall shows the 3 good ones (「我的作品 · 3」) and the stored list is left as it was', kept === broken && brow.title === '我的作品 · 3' && brow.thumbs === 3, JSON.stringify({ same: kept === broken, brow }))
     await b.context().close()
+    // the caps (designer 22:05): unreadable entries are outside the 60; past 80 in all the earliest unreadable go, never a readable work
+    const oddW = Array.from({ length: 25 }, (_, k) => ({ i: 7 + k, n: 52, b: 'x', s: null }))
+    const capSeed = [...oddW, ...seedWorks(65)]
+    const cp = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit(JSON.stringify(capSeed)))
+    await startSession(cp, '看看 README')
+    await openPanel(cp)
+    await cp.locator('.pd-v-home .pd-wt').first().waitFor({ timeout: 10000 })
+    await cp.waitForTimeout(300)
+    const capped = await cp.evaluate(() => JSON.parse(localStorage.getItem('dsh-pindou:works') ?? '[]'))
+    const crow = await cp.evaluate(worksRow)
+    const capOk = capped.length === 80 && JSON.stringify(capped.slice(0, 20)) === JSON.stringify(oddW.slice(5)) && JSON.stringify(capped.slice(20)) === JSON.stringify(capSeed.slice(30)) && crow.title === '我的作品 · 60'
+    check('W caps: 65 readable + 25 unreadable → the 60 newest readable and the 20 latest unreadable stay (80 in all), 「我的作品 · 60」', capOk, JSON.stringify({ n: capped.length, odd: capped.filter(w => w.n === 52).length, title: crow.title }))
+    await cp.context().close()
     const j = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', seedInit('{oops'))
     await startSession(j, '看看 README')
     await openPanel(j)
@@ -1001,8 +1216,1320 @@ async function readmeScreens() {
   }
 }
 
+// ── BIG. 更多尺寸: the canvas board in its lazy chunk (plan v0.3 §2–§4) ──
+const PHASE2_SHOTS = process.env.E2E_BIG_SHOTS ? resolve(process.env.E2E_BIG_SHOTS) : null
+const bigHost = p => p.locator('.pd-bk-app')
+const bigState = p => p.evaluate(() => { const g = document.querySelector('.pd-bk-app').pd.game; const s = g.get(); return { cells: [...s.history.present.cells], w: s.history.present.w, canUndo: g.canUndo, canRedo: g.canRedo, cx: s.cx, cy: s.cy, tool: s.tool, color: s.color } })
+async function bigShot(p, name, clip = true) {
+  const box = clip ? await p.locator('.pd-root').boundingBox() : null
+  await outShot(p, name, box ? { clip: box } : undefined)
+  if (PHASE2_SHOTS) { mkdirSync(PHASE2_SHOTS, { recursive: true }); copyFileSync(join(OUT, `${name}.png`), join(PHASE2_SHOTS, `${name}.png`)) }
+}
+async function openBig(p) {
+  await p.locator('.pd-start .pd-big', { hasText: /自由拼|Free play/ }).click()
+  await p.locator('.pd-board').waitFor()
+  const coach = p.locator('.pd-overlay.pd-coach button')
+  if (await coach.count()) { await coach.first().click(); await p.waitForTimeout(250) }
+  await p.getByRole('button', { name: /^(更多尺寸|More sizes)$/ }).click()
+  await p.locator('.pd-bk').waitFor({ timeout: 15000 })
+  await p.locator('.pd-bk-sizes, .pd-bk-load').first().waitFor({ timeout: 15000 })
+  await p.waitForTimeout(300)
+}
+async function bigPage(opts = {}, lang = 'zh', init) {
+  const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light', ...opts }, lang, init)
+  await startSession(p, lang === 'zh' ? '看看 README' : 'Read the README', lang)
+  await openPanel(p)
+  await openBig(p)
+  return p
+}
+async function startPreset(p, n) {
+  await p.locator('.pd-bk-sizes .pd-btn', { hasText: `${n}×${n}` }).click()
+  await bigHost(p).waitFor()
+  await p.waitForTimeout(400)
+}
+/** Zoom the canvas so a 16 × 16 corner is on screen at 16 px/cell (mice paint from 10 up). */
+const bigZoom = p => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView({ s: 16, ox: 0, oy: 0 }); c.draw() })
+const bigCell = (p, x, y) => p.evaluate(([cx, cy]) => { const c = document.querySelector('.pd-bk-app').pd; const r = c.el.getBoundingClientRect(), { s, ox, oy } = c.view; return [r.left + ox + (cx + 0.5) * s, r.top + oy + (cy + 0.5) * s] }, [x, y])
+const domCell = (p, x, y) => p.evaluate(([cx, cy]) => { const r = document.querySelectorAll('.pd-board .pd-cell')[cy * 16 + cx].getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] }, [x, y])
+
+/**
+ * Undo parity (designer steering 1): the same moves on the first screen's 16 × 16 (DOM, history.ts) and on a
+ * 58 × 58 canvas (diff-history.ts), compared after every step on the 16 × 16 corner: cells, 撤销 and 重做.
+ */
+async function undoParity() {
+  const dom = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+  await startSession(dom, '看看 README')
+  await openPanel(dom)
+  await dom.locator('.pd-start .pd-big', { hasText: /自由拼/ }).click()
+  await dom.locator('.pd-board').waitFor()
+  const coach = dom.locator('.pd-overlay.pd-coach button')
+  if (await coach.count()) { await coach.first().click(); await dom.waitForTimeout(250) }
+  const cv = await bigPage()
+  await startPreset(cv, 58)
+  await bigZoom(cv)
+  const pcVar = cssVar('--pd-c')
+  const readDom = () => dom.evaluate((v) => {
+    const pal = [...document.querySelectorAll('.pd-palette .pd-sw')].map(e => e.style.getPropertyValue(v).trim().toLowerCase())
+    const cells = [...document.querySelectorAll('.pd-board .pd-cell')].map((c) => { const b = c.querySelector('.pd-bead:not(.pd-out)'); return b ? pal.indexOf(b.style.getPropertyValue(v).trim().toLowerCase()) : -1 })
+    const tools = document.querySelectorAll('.pd-tools .pd-tool')
+    return { cells, undo: !tools[4].disabled, redo: !tools[5].disabled }
+  }, pcVar)
+  const readCv = () => cv.evaluate(() => {
+    const g = document.querySelector('.pd-bk-app').pd.game, b = g.get().history.present
+    const cells = []
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const v = b.cells[y * b.w + x]; cells.push(v === 255 || v < 0 || v === undefined ? -1 : v) }
+    const tools = document.querySelectorAll('.pd-bk-play .pd-tools .pd-tool')
+    return { cells, undo: !tools[4].disabled, redo: !tools[5].disabled, empty: g.get().history.present.cells.filter(c => c !== b.cells[0]).length }
+  })
+  // big-board EMPTY is not -1: normalise with the corner's own reading of an untouched cell
+  const emptyCv = await cv.evaluate(() => document.querySelector('.pd-bk-app').pd.game.get().history.present.cells[57 * 58 + 57])
+  const norm = c => c.map(v => (v === emptyCv ? -1 : v))
+  const steps = []
+  const same = async (label) => {
+    await dom.waitForTimeout(60)
+    const a = await readDom(), b = await readCv()
+    const ok = a.cells.length === 256 && JSON.stringify(a.cells) === JSON.stringify(norm(b.cells)) && a.undo === b.undo && a.redo === b.redo
+    steps.push({ label, ok, dom: { undo: a.undo, redo: a.redo, beads: a.cells.filter(v => v >= 0).length }, cv: { undo: b.undo, redo: b.redo, beads: norm(b.cells).filter(v => v >= 0).length } })
+    return ok
+  }
+  const both = async (fn) => { await fn(dom, domCell); await fn(cv, bigCell) }
+  const tool = n => both(async (p) => { await p.locator('.pd-tools .pd-tool:not(.pd-bk-more)').nth(n).click() })
+  const color = n => both(async (p) => { await p.locator('.pd-palette .pd-sw').nth(n).click() })
+  const click = (x, y) => both(async (p, at) => { const [cx, cy] = await at(p, x, y); await p.mouse.click(cx, cy) })
+  const drag = (x0, y0, x1, y1) => both(async (p, at) => {
+    const [ax, ay] = await at(p, x0, y0), [bx, by] = await at(p, x1, y1)
+    await p.mouse.move(ax, ay); await p.mouse.down()
+    await p.mouse.move(bx, by, { steps: 4 * Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1) })
+    await p.mouse.up()
+  })
+  const btn = n => both(async (p) => { const b = p.locator('.pd-tools .pd-tool:not(.pd-bk-more)').nth(n); if (await b.isEnabled()) await b.click() })
+  await same('start')
+  await tool(0); await color(3); await click(2, 2); await same('single cell')
+  await color(5); await drag(1, 5, 12, 5); await same('drag stroke')
+  await tool(3); await color(9); await click(6, 5); await same('fill the stroke (recolour)')
+  await color(1); await click(0, 15); await same('fill empty space')
+  await tool(0); await color(2); await click(4, 9); await same('one more bead')
+  await btn(6); await same('clear')
+  // undo everything, step by step; then redo everything
+  let undos = 0
+  for (let k = 0; k < 10 && (await readDom()).undo; k++) { await btn(4); undos++; await same(`undo ${undos}`) }
+  let redos = 0
+  for (let k = 0; k < 10 && (await readDom()).redo; k++) { await btn(5); redos++; await same(`redo ${redos}`) }
+  // new paint after an undo drops redo
+  await btn(4); await btn(4); await same('undo 2 for the branch')
+  await tool(0); await color(7); await click(14, 14); const branch = await same('new paint after undo')
+  const afterBranch = await readDom()
+  // over 100 steps: 105 single beads, then undo until it stops (both keep 100)
+  for (let k = 0; k < 105; k++) { await color(k % 2 ? 11 : 12); await click(k % 16, 1 + ((k / 16) | 0) % 14); if (k % 15 === 14) await same(`bead ${k + 1}`) }
+  await same('105 beads')
+  let deep = 0
+  for (let k = 0; k < 110 && (await readDom()).undo; k++) { await btn(4); deep++; if (deep % 10 === 0 || deep > 95) await same(`deep undo ${deep}`) }
+  const cvLeft = (await readCv()).undo
+  await same('after deep undo')
+  const wrong = steps.filter(s => !s.ok)
+  check('BIG undo parity 16 (DOM) vs 58 (canvas): single cell, drag stroke, fill, clear, undo all, redo all — board and 撤销/重做 equal at every step', wrong.length === 0 && undos === 6 && redos === 6, JSON.stringify({ undos, redos, wrong: wrong.slice(0, 3) }))
+  check('BIG undo parity: new paint after undo clears redo on both', branch && !afterBranch.redo, JSON.stringify(steps.find(s => s.label === 'new paint after undo')))
+  check('BIG undo parity: more than 100 steps — both keep exactly 100 undo steps', deep === 100 && !cvLeft, JSON.stringify({ deep, cvLeft }))
+  if (SELFCHECK) writeFileSync(join(SELFCHECK, 'big-undo-parity.json'), `${JSON.stringify(steps, null, 2)}\n`)
+  writeFileSync(join(OUT, 'big-undo-parity.json'), `${JSON.stringify(steps, null, 2)}\n`)
+  await dom.context().close()
+  await cv.context().close()
+}
+
+/** What the 58×58 (29-blocks) canvas should announce for cell `s`: review IMPORTANT 1 (23195cf read 「A1 板，{at}，空」). */
+const bigSaid = (s, v) => `${String.fromCharCode(65 + Math.floor(s.cy / 29))}${Math.floor(s.cx / 29) + 1} 板，第 ${s.cy + 1} 行第 ${s.cx + 1} 列，${v}`
+
+/** The canvas widget for keys and screen readers (plan §3.6). */
+async function bigAria() {
+  const p = await bigPage()
+  // review suggestion 3: a visible h2 「更多尺寸」 on the setup page for screen-reader navigation
+  const h2 = await p.evaluate(() => { const e = document.querySelector('.pd-bk h2'); return e && { text: e.textContent, shown: e.getBoundingClientRect().height > 0, first: e === document.querySelector('.pd-bk h1, .pd-bk h2, .pd-bk h3') } })
+  check('BIG setup page has a visible h2 「更多尺寸」, its first heading', h2?.text === '更多尺寸' && h2.shown && h2.first, JSON.stringify(h2))
+  await startPreset(p, 58)
+  const host = bigHost(p)
+  const a = await host.evaluate(el => ({ role: el.getAttribute('role'), label: el.getAttribute('aria-label'), tab: el.tabIndex }))
+  check('BIG canvas is role=application, focusable, labelled with its size and keys', a.role === 'application' && a.tab === 0 && /58×58/.test(a.label) && /方向键/.test(a.label), JSON.stringify(a))
+  await host.focus()
+  const s0 = await bigState(p)
+  const live = () => p.locator('.pd-bk-play [aria-live=polite]').textContent()
+  await p.keyboard.press('ArrowRight')
+  await p.waitForTimeout(100)
+  const s1 = await bigState(p), l1 = await live()
+  check('BIG arrows move the cursor and the live region reads block, row, column and the cell (exact text, no unfilled {placeholder})', s1.cx === s0.cx + 1 && s1.cy === s0.cy && l1 === bigSaid(s1, '空') && !/[{}]/.test(l1), JSON.stringify({ s0: [s0.cx, s0.cy], s1: [s1.cx, s1.cy], l1, want: bigSaid(s1, '空') }))
+  await p.keyboard.press('Space')
+  await p.waitForTimeout(100)
+  const s2 = await bigState(p), i = s1.cy * 58 + s1.cx
+  check('BIG Space places a bead at the cursor (one undo step)', s2.cells[i] === s2.color && s2.canUndo, JSON.stringify({ v: s2.cells[i], color: s2.color }))
+  await p.keyboard.press('Delete')
+  await p.waitForTimeout(100)
+  const s3 = await bigState(p)
+  check('BIG Delete erases it', s3.cells[i] !== s2.color)
+  await p.keyboard.press('Shift+ArrowRight')
+  await p.waitForTimeout(100)
+  const s4 = await bigState(p), l4 = await live()
+  check('BIG Shift+arrow jumps a block (29 cells) and says the new block and the real cell position', s4.cx === Math.min(57, s3.cx + 29) && l4 === bigSaid(s4, '空') && !/[{}]/.test(l4), JSON.stringify({ cx: s4.cx, l4, want: bigSaid(s4, '空') }))
+  const z0 = await host.evaluate(el => el.pd.view.s)
+  await p.keyboard.press('+')
+  await p.waitForTimeout(250)
+  const z1 = await host.evaluate(el => el.pd.view.s)
+  await p.keyboard.press('0')
+  await p.waitForTimeout(250)
+  const z2 = await host.evaluate(el => el.pd.view.s)
+  check('BIG + zooms in, 0 fits again', z1 > z0 && z2 === z0, JSON.stringify({ z0, z1, z2 }))
+  await p.keyboard.press('Control+z')
+  await p.waitForTimeout(100)
+  const s5 = await bigState(p)
+  check('BIG Ctrl+Z undoes (the erase comes back)', s5.cells[i] === s2.color)
+  await p.keyboard.press('n')
+  await p.waitForTimeout(150)
+  const s6 = await bigState(p)
+  check('BIG N goes to the next unfinished block', s6.cx % 29 === 0 && s6.cy % 29 === 0 && (s6.cx !== s5.cx || s6.cy !== s5.cy), JSON.stringify({ from: [s5.cx, s5.cy], to: [s6.cx, s6.cy] }))
+  const pressed = await p.locator('.pd-bk-play .pd-tools .pd-tool').first().getAttribute('aria-pressed')
+  await p.keyboard.press('e')
+  const erasePressed = await p.locator('.pd-bk-play .pd-tools .pd-tool').nth(1).getAttribute('aria-pressed')
+  check('BIG tools are toggle buttons with key shortcuts (E selects the eraser)', pressed === 'true' && erasePressed === 'true')
+  await p.context().close()
+}
+
+/**
+ * Designer (16b55c2 tile budget): mid-zoom, the tiles not built yet are covered, never blank or the board colour. A
+ * 208² board of beads only (every cell holds a colour), CPU ×4: fit, fully drawn; then one jump to 16 px/cell and a
+ * single draw() (the budget leaves tiles missing); every visible cell is sampled inside its bead and must be near its
+ * own colour (not transparent, not the board). The same check on the frame once every tile is in, and a screenshot.
+ */
+async function bigTileGap() {
+  // the default 2× screen, then 1.5× and 1.25× (fractional device pixels everywhere), then 1×
+  for (const dsf of [2, 1.5, 1.25, 1]) await tileGapAt(dsf)
+  for (const dsf of [1.1, 1.25, 1.5]) await snapAt(dsf)
+}
+
+/**
+ * Designer (native tiles): a settled view has a whole number of device px per cell, at any dpr — the fit, every
+ * level, a Ctrl+wheel that stops between levels; the anchor (pointer) stays on its board point, the ease's last
+ * frame is the settled view (no jump after it) and 「px/格」 shows the cell as drawn. Frames inside a gesture or an
+ * ease may be fractional.
+ */
+/** 「px/格」 reads the cell's CSS px rounded to a whole number (designer), no 「约」, and the screen-reader text is the same */
+const pxOk = v => v.px.startsWith(`${Math.round(v.s)} `) && !v.px.includes('约') && v.aria === v.px
+async function snapAt(dsf) {
+  const p = await bigPage({ deviceScaleFactor: dsf })
+  await startPreset(p, 58)
+  const whole = s => Math.abs(s * dsf - Math.round(s * dsf)) < 1e-5
+  const shown = () => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; return { s: c.view.s, ox: c.view.ox, oy: c.view.oy, px: document.querySelector('.pd-bk-px')?.textContent ?? '', aria: document.querySelector('.pd-bk-px')?.getAttribute('aria-label') ?? '', cw: c.cw, el: c.el.width, css: parseFloat(c.el.style.width) } })
+  await p.keyboard.press('Escape')
+  await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView(c.fitView()); c.draw() })
+  await p.waitForTimeout(150)
+  const fit = await shown()
+  // the levels, one + at a time from the fit (around the middle: the cursor cell is in view)
+  const levels = []
+  await bigHost(p).focus()
+  for (let i = 0; i < 9; i++) {
+    await p.keyboard.press('+')
+    await p.waitForTimeout(260)
+    const v = await shown()
+    if (levels.length && levels.at(-1).s === v.s) break
+    levels.push(v)
+  }
+  // Ctrl+wheel to 19.5 px/cell (between 16 and 24, near neither), pointer off centre, then let go
+  const w = await p.evaluate(() => {
+    const c = document.querySelector('.pd-bk-app').pd
+    c.setView({ s: 16, ox: -100, oy: -80 }); c.draw()
+    const r = c.el.getBoundingClientRect(), px = c.cw * 0.3, py = c.ch * 0.35
+    c.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 * Math.log(19.5 / 16), ctrlKey: true, clientX: r.left + px, clientY: r.top + py, bubbles: true, cancelable: true }))
+    const v = c.view
+    window.pdV = []
+    const t0 = performance.now(), f = () => { window.pdV.push([c.view.s, c.view.ox, c.view.oy]); if (performance.now() - t0 < 700) requestAnimationFrame(f) }
+    requestAnimationFrame(f)
+    return { px, py, s: v.s, fx: (px - v.ox) / v.s, fy: (py - v.oy) / v.s }
+  })
+  await p.waitForTimeout(800)
+  const after = await p.evaluate(([px, py]) => { const v = document.querySelector('.pd-bk-app').pd.view; return { s: v.s, fx: (px - v.ox) / v.s, fy: (py - v.oy) / v.s, frames: window.pdV } }, [w.px, w.py])
+  const end = await shown()
+  const fr = after.frames, last = fr.at(-1), firstEnd = fr.findIndex(f => f[0] === last[0] && f[1] === last[1] && f[2] === last[2])
+  // no jump: every frame from the ease's end on is the settled view, and the eased scales run one way to it
+  const steady = fr.slice(firstEnd).every(f => f[0] === last[0] && f[1] === last[1] && f[2] === last[2])
+  const ss = fr.map(f => f[0]), mono = ss.every((v, i) => !i || (ss[0] <= last[0] ? v >= ss[i - 1] - 1e-9 : v <= ss[i - 1] + 1e-9))
+  const drift = Math.hypot(after.fx - w.fx, after.fy - w.fy)
+  if (PHASE2_SHOTS) await bigShot(p, `snap-dpr${dsf}`)
+  check(`BIG snap @${dsf}×: the fit, every level and a Ctrl+wheel stopped between levels settle on whole device px per cell (fit ${fit.s * dsf}, levels ${levels.map(v => +(v.s * dsf).toFixed(3)).join('/')}, wheel ${+(w.s * dsf).toFixed(2)} → ${+(after.s * dsf).toFixed(3)} device px); the canvas store is its CSS box × dpr exactly`,
+    whole(fit.s) && levels.length >= 6 && levels.every(v => whole(v.s)) && !whole(w.s) && whole(after.s) && Math.abs(after.s - w.s) * dsf <= 0.5 + 1e-6 && Math.abs(end.el - end.css * dsf) < 0.01 && Math.abs(end.cw - end.css) < 0.001,
+    JSON.stringify({ fit, levels, w, after: { s: after.s }, end }))
+  check(`BIG snap @${dsf}×: the pointer's board point stays put (< 0.02 cell), the ease runs one way and its last frame is the settled view (no jump after it); 「px/格」 shows the cell's px rounded to a whole number (no 「约」, read aloud the same) at the fit, each level and after the wheel`,
+    drift < 0.02 && steady && mono && firstEnd >= 0 && pxOk(fit) && levels.every(pxOk) && pxOk(end), JSON.stringify({ drift, steady, mono, frames: fr.length, firstEnd, px: [fit.px, ...levels.map(v => v.px), end.px] }))
+  await p.context().close()
+}
+/** The tile-gap board: 208² of 16 colours from a fixed seed. */
+async function seed208(p) {
+  await p.evaluate(() => {
+    let s = 11
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const g = document.querySelector('.pd-bk-app').pd.game
+    g.set({ history: { past: [], present: { w: 208, h: 208, cells: Object.freeze(Array.from({ length: 208 * 208 }, () => Math.floor(r() * 16))) }, future: [] } })
+  })
+  await p.waitForTimeout(500)
+}
+
+/** The filled frame drawn by a fresh canvas (empty cache) at the same board and view, every tile built before it is read. */
+async function expectedFrame(dsf, view) {
+  const q = await bigPage({ deviceScaleFactor: dsf })
+  await startPreset(q, 58)
+  await seed208(q)
+  const out = await q.evaluate(v => {
+    const c = document.querySelector('.pd-bk-app').pd
+    c.setView(v)
+    let n = 0
+    while (c.draw() && n < 5000) n++
+    return { png: c.el.toDataURL(), view: c.view, W: c.el.width, H: c.el.height, left: c.draw(), draws: n + 1 }
+  }, view)
+  await q.context().close()
+  return out
+}
+
+/**
+ * The strict tile judgement (pixel for pixel, in Node). `geo` is the view and board, mid / full / want decoded
+ * RGBA frames: the mid-zoom frame, the filled frame and the independently built expected frame. Pixels on a
+ * divider line (drawn over everything, after the tiles) are left out.
+ */
+const samePx = (a, i, q, j) => a[i] === q[j] && a[i + 1] === q[j + 1] && a[i + 2] === q[j + 2] && a[i + 3] === q[j + 3]
+const isBase = (a, i, c) => a[i] === c[0] && a[i + 1] === c[1] && a[i + 2] === c[2] && a[i + 3] === 255
+function judgeTiles(geo, mid, full, want) {
+  const { view: { s, ox, oy }, d, W, H, unit, cells, pal } = geo, n = 208
+  const b = Math.min(256, Math.max(1, Math.round(s * d))), T = Math.max(1, (256 / b) | 0), k = Math.round(s * d)
+  const ex = c => Math.round((ox + c * s) * d), ey = c => Math.round((oy + c * s) * d)
+  const lw = Math.max(1, Math.round(0.06 * s * d))
+  const owner = (len, e) => { const o = new Int32Array(len).fill(-1); for (let c = 0; c < n; c++) for (let x = Math.max(0, e(c)); x < Math.min(len, e(c + 1)); x++) o[x] = c; return o }
+  const cx = owner(W, ex), cy = owner(H, ey)
+  const near = (len, e) => { const o = new Uint8Array(len); if (unit > 0) for (let u = unit; u < n; u += unit) for (let x = e(u) - lw - 1; x <= e(u) + lw + 1; x++) if (x >= 0 && x < len) o[x] = 1; return o }
+  const nx = near(W, ex), ny = near(H, ey)
+  const rgb = pal.map(h => [1, 3, 5].map(q => parseInt(h.slice(q, q + 2), 16)))
+  const tiles = new Map(), m = { px: 0, other: 0, asWant: 0, asBase: 0, worst: [] }, f = { px: 0, diff: 0, maxDiff: 0, first: [] }
+  // per cell: every visible pixel equal to the base colour (a base-covered cell); a cell with a bead never is when filled
+  const baseM = new Uint8Array(n * n).fill(1), baseF = new Uint8Array(n * n).fill(1), seen = new Uint8Array(n * n)
+  for (let y = 0; y < H; y++) {
+    if (cy[y] < 0 || ny[y]) continue
+    for (let x = 0; x < W; x++) {
+      if (cx[x] < 0 || nx[x]) continue
+      const cell = cy[y] * n + cx[x], i = (y * W + x) * 4, base = rgb[cells[cell]]
+      seen[cell] = 1
+      m.px++
+      f.px++
+      const w1 = samePx(mid, i, want, i), b1 = isBase(mid, i, base)
+      if (!isBase(mid, i, base)) baseM[cell] = 0
+      if (!isBase(full, i, base)) baseF[cell] = 0
+      const key = `${(cx[x] / T) | 0},${(cy[y] / T) | 0}`
+      let t = tiles.get(key)
+      if (!t) tiles.set(key, t = { w: 0, b: 0 })
+      if (w1) m.asWant++
+      if (b1) m.asBase++
+      if (w1 && !b1) t.w++
+      else if (b1 && !w1) t.b++
+      else if (!w1 && !b1) { m.other++; if (m.worst.length < 5) m.worst.push({ x, y, cell: [cx[x], cy[y]], mid: [...mid.subarray(i, i + 4)], want: [...want.subarray(i, i + 4)], base }) }
+      if (!samePx(full, i, want, i)) {
+        f.diff++
+        f.maxDiff = Math.max(f.maxDiff, ...[0, 1, 2, 3].map(q => Math.abs(full[i + q] - want[i + q])))
+        if (f.first.length < 5) f.first.push({ x, y, full: [...full.subarray(i, i + 4)], want: [...want.subarray(i, i + 4)] })
+      }
+    }
+  }
+  let built = 0, unbuilt = 0, mixed = 0
+  for (const t of tiles.values()) { if (t.w && t.b) mixed++; else if (t.w) built++; else if (t.b) unbuilt++ }
+  let bm = 0, bf = 0
+  for (let c = 0; c < n * n; c++) if (seen[c]) { bm += baseM[c]; bf += baseF[c] }
+  // the board gap around each cell edge on the middle row (across) and column (down) of the filled frame, at tile
+  // boundaries (cell index a multiple of T) and at ordinary edges; beads next to a divider or near the board colour skipped
+  // the board colour: the top-left corner pixel of the first whole cell in view, off the dividers
+  const okC = c => !(unit > 0 && (c % unit === 0 || c % unit === unit - 1))
+  let gx = 0, gy = 0
+  while (ex(gx) < 0 || !okC(gx)) gx++
+  while (ey(gy) < 0 || !okC(gy)) gy++
+  const bg = [...want.subarray((ey(gy) * W + ex(gx)) * 4, (ey(gy) * W + ex(gx)) * 4 + 3)]
+  const isBg = j => Math.hypot(full[j] - bg[0], full[j + 1] - bg[1], full[j + 2] - bg[2]) <= 12
+  const far = c => Math.hypot(rgb[c][0] - bg[0], rgb[c][1] - bg[1], rgb[c][2] - bg[2]) >= 60
+  const ord = {}, til = {}
+  let nT = 0, nO = 0
+  const r1 = Math.floor((k - 1) / 2)
+  const add = (edge, key) => { if (edge % T === 0) { til[key] = (til[key] ?? 0) + 1; nT++ } else { ord[key] = (ord[key] ?? 0) + 1; nO++ } }
+  for (let a = 1; a < n - 1; a++) {
+    for (let e = 1; e < n; e++) {
+      if (unit > 0 && [a, e, e - 1].some(q => q % unit === 0 || q % unit === unit - 1)) continue
+      // across: row a, edge between cells e−1 and e
+      if (ey(a) >= 0 && ey(a + 1) <= H && ex(e - 1) >= 0 && ex(e + 1) <= W && far(cells[a * n + e - 1]) && far(cells[a * n + e])) {
+        const y = ey(a) + r1, x0 = ex(e)
+        let l = 0, r = 0
+        while (l < k && isBg((y * W + x0 - 1 - l) * 4)) l++
+        while (r < k && isBg((y * W + x0 + r) * 4)) r++
+        add(e, `${l}+${r}`)
+      }
+      // down: column a, edge between rows e−1 and e
+      if (ex(a) >= 0 && ex(a + 1) <= W && ey(e - 1) >= 0 && ey(e + 1) <= H && far(cells[(e - 1) * n + a]) && far(cells[e * n + a])) {
+        const x = ex(a) + r1, y0 = ey(e)
+        let u = 0, v = 0
+        while (u < k && isBg(((y0 - 1 - u) * W + x) * 4)) u++
+        while (v < k && isBg(((y0 + v) * W + x) * 4)) v++
+        add(e, `${u}+${v}`)
+      }
+    }
+  }
+  // and the whole cell: at a whole number of device px per cell every cell of a colour is the same k × k block of
+  // pixels wherever it is, so a cell on a tile boundary must be exactly the block of that colour inside a tile
+  const blocks = new Map()
+  let nB = 0
+  for (let a = 0; a < n; a++) for (let e = 0; e < n; e++) {
+    if (!okC(a) || !okC(e) || ex(e) < 0 || ex(e + 1) > W || ey(a) < 0 || ey(a + 1) > H) continue
+    const ids = []
+    for (let y = ey(a); y < ey(a + 1); y++) ids.push(Buffer.from(full.subarray((y * W + ex(e)) * 4, (y * W + ex(e + 1)) * 4)).toString('base64'))
+    const id = ids.join(''), col = cells[a * n + e], edge = [a, e].some(q => q % T === 0 || q % T === T - 1)
+    let g = blocks.get(col)
+    if (!g) blocks.set(col, g = { inner: new Set(), edge: new Set() })
+    g[edge ? 'edge' : 'inner'].add(id)
+    nB++
+  }
+  const kinds = [...blocks.entries()].map(([col, g]) => [col, g.inner.size, g.edge.size, [...g.edge].every(id => g.inner.has(id))])
+  const blockOk = kinds.length > 4 && kinds.every(([, i, e, inside]) => i === 1 && e <= 1 && inside)
+  const ok = blockOk && Object.keys(til).every(key => key in ord)
+  return {
+    mid: { b, T, px: m.px, asWant: m.asWant, asBase: m.asBase, other: m.other, worst: m.worst, tiles: tiles.size, built, unbuilt, mixed, baseCells: bm },
+    full: { px: f.px, diff: f.diff, maxDiff: f.maxDiff, first: f.first, baseCells: bf },
+    gaps: { T, nT, nO, til, ord, nB, colours: kinds.length, odd: kinds.filter(([, i, e, inside]) => i !== 1 || e > 1 || !inside), ok },
+  }
+}
+
+/**
+ * The strict judgement of a frame in motion (perf fix: an eased frame draws the tiles of the scale it settles on,
+ * built 1:1 at that scale's b1 device px per cell, resampled nearest-neighbour onto the moving cell edges; no tile
+ * size is built per eased frame any more). Every board pixel of the moving frame, off the dividers, must be either
+ * (a) the settled frame's pixel the same tile shows at the nearest-neighbour source position of that tile
+ * (src = floor((X − tile's left edge + 0.5) × tile width at b1 / tile width on screen), ±1 source px for the
+ * sampler's rounding), the settled frame built independently on a fresh page; or (b) the cell's base colour (a tile
+ * not built yet); each tile wholly one or the other; no third colour. Every tile on screen is judged on its visible
+ * pixels; the frame's divider lines and their 1 px margin are left out, and of the reference only the divider
+ * lines' own pixels (a reference pixel next to a divider is still a tile pixel). The caller judges each frame
+ * against the target's settled frame and the start's (a frame in motion borrows the last settled tiles until the
+ * target's are built ahead) and keeps the one it matches.
+ */
+function judgeMotion(mv, frame, ref, d, cells, pal, unit) {
+  const n = 208, { s, ox, oy } = mv.view, e1 = mv.end, W = mv.W, H = mv.H
+  const b1 = Math.min(256, Math.max(1, Math.round(e1.s * d))), T = Math.max(1, (256 / b1) | 0)
+  const ex = c => Math.round((ox + c * s) * d), ey = c => Math.round((oy + c * s) * d)
+  const fx = c => Math.round((e1.ox + c * e1.s) * d), fy = c => Math.round((e1.oy + c * e1.s) * d)
+  const lw = Math.max(1, Math.round(0.06 * s * d)), lw1 = Math.max(1, Math.round(0.06 * e1.s * d))
+  const nearDiv = (v, e, l) => { if (unit <= 0) return false; for (let u = unit; u < n; u += unit) if (Math.abs(v - e(u)) <= l + 1) return true; return false }
+  // the divider's own device pixels (a line lw wide on whole pixels, from e(u) - floor(lw / 2)), not the margin
+  // nearDiv leaves round it: a reference pixel next to a divider is a tile pixel and must still be matched
+  const onDiv = (v, e, l) => { if (unit <= 0) return false; for (let u = unit; u < n; u += unit) { const a = e(u) - (l >> 1); if (v >= a && v < a + l) return true } return false }
+  const rgb = pal.map(h => [1, 3, 5].map(q => parseInt(h.slice(q, q + 2), 16)))
+  const same = (i, j) => frame[i] === ref[j] && frame[i + 1] === ref[j + 1] && frame[i + 2] === ref[j + 2] && frame[i + 3] === ref[j + 3]
+  const out = { b1, T, tiles: 0, hidden: 0, built: 0, unbuilt: 0, mixed: 0, px: 0, other: 0, worst: [] }
+  for (let ty = 0; ty * T < n; ty++) for (let tx = 0; tx * T < n; tx++) {
+    const x0 = tx * T, y0 = ty * T, nx = Math.min(T, n - x0), ny = Math.min(T, n - y0)
+    const dx = ex(x0), dy = ey(y0), dw = ex(x0 + nx) - dx, dh = ey(y0 + ny) - dy
+    // tiles cut by the canvas edge are judged too, on their visible pixels (at 1× a 21-cell tile is wider than half the box)
+    if (dx >= W || dy >= H || dx + dw <= 0 || dy + dh <= 0) continue
+    out.tiles++
+    let w = 0, b = 0
+    for (let Y = Math.max(0, dy); Y < Math.min(H, dy + dh); Y++) {
+      if (nearDiv(Y, ey, lw)) continue
+      const sy = Math.floor((Y - dy + 0.5) * ny * b1 / dh)
+      for (let X = Math.max(0, dx); X < Math.min(W, dx + dw); X++) {
+        if (nearDiv(X, ex, lw)) continue
+        const sx = Math.floor((X - dx + 0.5) * nx * b1 / dw), i = (Y * W + X) * 4
+        let asRef = false, seen = 0
+        for (let a = -1; a <= 1 && !asRef; a++) for (let c = -1; c <= 1 && !asRef; c++) {
+          const rx = fx(x0) + sx + c, ry = fy(y0) + sy + a
+          if (rx < fx(x0) || ry < fy(y0) || rx >= fx(x0 + nx) || ry >= fy(y0 + ny) || rx < 0 || ry < 0 || rx >= W || ry >= H || onDiv(rx, fx, lw1) || onDiv(ry, fy, lw1)) continue
+          seen++
+          asRef = same(i, (ry * W + rx) * 4)
+        }
+        // its source pixels all lie under a divider line of the reference frame or off its edge: not judgeable,
+        // left out like the frame's own divider pixels
+        if (!seen) { out.hidden++; continue }
+        out.px++
+        // the base layer is 1 px per cell, so its source px is a cell: ±1 cell for the sampler's rounding, as for tiles
+        const cxB = Math.min(n - 1, x0 + Math.floor((X - dx) * nx / dw)), cyB = Math.min(n - 1, y0 + Math.floor((Y - dy) * ny / dh))
+        let asBase = false
+        for (let a = -1; a <= 1 && !asBase; a++) for (let c = -1; c <= 1 && !asBase; c++) {
+          const qx = cxB + c, qy = cyB + a
+          if (qx < x0 || qy < y0 || qx >= x0 + nx || qy >= y0 + ny) continue
+          const base = rgb[cells[qx + qy * n]]
+          asBase = frame[i] === base[0] && frame[i + 1] === base[1] && frame[i + 2] === base[2] && frame[i + 3] === 255
+        }
+        if (asRef && !asBase) w++
+        else if (asBase && !asRef) b++
+        else if (!asRef && !asBase) { out.other++; if (out.worst.length < 5) out.worst.push({ X, Y, tile: [tx, ty], px: [...frame.subarray(i, i + 4)] }) }
+      }
+    }
+    if (w && b) out.mixed++
+    else if (w) out.built++
+    else if (b) out.unbuilt++
+  }
+  return out
+}
+
+const motionScore = m => m.other * 1e6 + m.mixed * 1e3 - m.px
+
+async function tileGapAt(dsf) {
+  const sfx = dsf === 2 ? '' : `-dpr${dsf}`
+  const p = await bigPage({ deviceScaleFactor: dsf })
+  await startPreset(p, 58)
+  const cdp = await p.context().newCDPSession(p)
+  await seed208(p)
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
+  const res = await p.evaluate(() => {
+    const c = document.querySelector('.pd-bk-app').pd
+    const fit = c.fitView()
+    c.setView(fit)
+    for (let i = 0; i < 400 && c.draw(); i++);
+    const cx = c.cw / 2, cy = c.ch / 2, s = 16, k = s / fit.s
+    c.setView({ s, ox: cx - (cx - fit.ox) * k, oy: cy - (cy - fit.oy) * k })
+    // colour distances: another pixel (24), another cell's colour (60)
+    const tol = { px: 24, cell: 60 }
+    const far = (a, q) => Math.hypot(a[0] - q[0], a[1] - q[1], a[2] - q[2], a[3] - q[3]) > tol.px
+    const neither = (v, a, z) => Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) > tol.cell && Math.hypot(v[0] - z[0], v[1] - z[1], v[2] - z[2]) > tol.cell
+    const look = () => {
+      const { s: vs, ox, oy } = c.view, d = c.el.width / c.cw, cx2 = c.el.getContext('2d'), { w, cells } = c.game.get().history.present
+      const img = cx2.getImageData(0, 0, c.el.width, c.el.height).data
+      let n = 0, blank = 0, off = 0
+      for (let yy = Math.max(0, Math.ceil(-oy / vs)); yy < 208 && oy + (yy + 1) * vs <= c.ch; yy += 2) {
+        for (let xx = Math.max(0, Math.ceil(-ox / vs)); xx < 208 && ox + (xx + 1) * vs <= c.cw; xx += 2) {
+          const px = Math.round((ox + (xx + 0.5) * vs) * d), py = Math.round((oy + (yy + 0.22) * vs) * d), j = (py * c.el.width + px) * 4
+          const hex = c.pal[cells[yy * w + xx]], want = [1, 3, 5].map(q => parseInt(hex.slice(q, q + 2), 16))
+          n++
+          if (img[j + 3] === 0) blank++
+          else if (Math.hypot(img[j] - want[0], img[j + 1] - want[1], img[j + 2] - want[2]) > 90) off++
+        }
+      }
+      // designer steering 2: across every tile boundary (cells at multiples of T) the two pixels at the seam each
+      // match a pixel just outside it on one side: no third colour (no bright seam), sampled through bead centres
+      // tiles are built at the view's own device px per cell, at most 256 device px a side (big-canvas.ts tileB)
+      const b = Math.min(256, Math.max(1, Math.round(vs * d))), T = Math.max(1, (256 / b) | 0)
+      const px = (x, y) => { const j = (y * c.el.width + x) * 4; return [img[j], img[j + 1], img[j + 2], img[j + 3]] }
+      let edges = 0, seam = 0
+      const seams = []
+      const across = (at, pick) => {
+        for (const o of [-1, 0]) {
+          const v = pick(at + o), l = pick(at - 2), r = pick(at + 1)
+          edges++
+          if (far(v, l) && far(v, r)) { seam++; if (seams.length < 4) seams.push({ at: at + o, v, l, r }) }
+        }
+      }
+      const ys = [], xs = []
+      for (let q = Math.max(0, Math.ceil(-oy / vs)); q < 208 && oy + (q + 1) * vs <= c.ch; q += 3) ys.push([Math.round((oy + (q + 0.5) * vs) * d), q])
+      for (let q = Math.max(0, Math.ceil(-ox / vs)); q < 208 && ox + (q + 1) * vs <= c.cw; q += 3) xs.push([Math.round((ox + (q + 0.5) * vs) * d), q])
+      // the gap test: how many pixels around a cell edge match neither cell's colour (the board between beads,
+      // anti-aliasing); a seam widens it, so at tile boundaries it may be no wider than at ordinary cell edges
+      const rgbOf = (x, y) => { const h = c.pal[cells[y * w + x]]; return [1, 3, 5].map(q => parseInt(h.slice(q, q + 2), 16)).concat(255) }
+      const gap = (e, pick, a, z) => { let g = 0; for (let i = e - 1; i >= e - 6 && neither(pick(i), a, z); i--) g++; for (let i = e; i < e + 6 && neither(pick(i), a, z); i++) g++; return g }
+      let gapT = 0, gapC = 0, maskN = 0, maskDiff = 0
+      const edgeAt = (o, X) => Math.round((o + X * vs) * d)
+      // the pattern test: every cell comes from the same sprite at a whole-pixel pitch, so which pixels near an
+      // edge show the board (between beads) is the same at a tile boundary as one cell earlier; a seam breaks it
+      const P = Math.round(vs * d), whole = Math.abs(vs * d - P) < 0.05, bgc = px(edgeAt(ox, T + 1), edgeAt(oy, T + 1)), isBg = v => Math.hypot(v[0] - bgc[0], v[1] - bgc[1], v[2] - bgc[2]) <= 12
+      const nearBg = a => Math.hypot(a[0] - bgc[0], a[1] - bgc[1], a[2] - bgc[2]) <= 40
+      const pattern = (e, pick, cs) => {
+        if (!whole || cs.some(nearBg)) return
+        maskN++
+        for (let i = -4; i < 4; i++) if (isBg(pick(e + i)) !== isBg(pick(e - P + i))) { maskDiff++; return }
+      }
+      for (let X = T; X < 207; X += T) {
+        const e = edgeAt(ox, X)
+        if (e > 8 && e < c.el.width - 8) {
+          for (const [y, q] of ys) {
+            across(e, x => px(x, y))
+            const pick = x => px(x, y)
+            gapT = Math.max(gapT, gap(e, pick, rgbOf(X - 1, q), rgbOf(X, q)))
+            pattern(e, pick, [rgbOf(X - 2, q), rgbOf(X - 1, q), rgbOf(X, q)])
+            gapC = Math.max(gapC, gap(edgeAt(ox, X - 1), pick, rgbOf(X - 2, q), rgbOf(X - 1, q)), gap(edgeAt(ox, X + 1), pick, rgbOf(X, q), rgbOf(X + 1, q)))
+          }
+        }
+      }
+      for (let Y = T; Y < 207; Y += T) {
+        const e = edgeAt(oy, Y)
+        if (e > 8 && e < c.el.height - 8) {
+          for (const [x, q] of xs) {
+            across(e, y => px(x, y))
+            const pick = y => px(x, y)
+            gapT = Math.max(gapT, gap(e, pick, rgbOf(q, Y - 1), rgbOf(q, Y)))
+            pattern(e, pick, [rgbOf(q, Y - 2), rgbOf(q, Y - 1), rgbOf(q, Y)])
+            gapC = Math.max(gapC, gap(edgeAt(oy, Y - 1), pick, rgbOf(q, Y - 2), rgbOf(q, Y - 1)), gap(edgeAt(oy, Y + 1), pick, rgbOf(q, Y), rgbOf(q, Y + 1)))
+          }
+        }
+      }
+      // and anywhere on the frame: no column / row one pixel wide that matches neither neighbour (a blended seam,
+      // e.g. the 29-cell divider drawn at a fractional position), sampled every 3rd row / column
+      const W = c.el.width, H = c.el.height, thin = [], unit = c.game.get().unit
+      // the 29-cell dividers (plan §2.4) are meant to be there: a crisp line of max(1, round(0.06 × cell)) px whose
+      // pixels blend the accent with the cell under each; skipped here, checked to be that wide below
+      const lw = Math.max(1, Math.round(0.06 * vs * d)), div = (e, o) => unit > 0 && Array.from({ length: Math.floor(208 / unit) }, (_, i) => Math.round((o + (i + 1) * unit * vs) * d)).some(at => e >= at - lw && e <= at + lw)
+      for (let x = 1; x < W - 1; x++) { if (div(x, ox)) continue; let q = 0; for (let y = 0; y < H; y += 3) if (far(px(x, y), px(x - 1, y)) && far(px(x, y), px(x + 1, y))) q++; if (q > 20) thin.push(`x${x}:${q}`) }
+      for (let y = 1; y < H - 1; y++) { if (div(y, oy)) continue; let q = 0; for (let x = 0; x < W; x += 3) if (far(px(x, y), px(x, y - 1)) && far(px(x, y), px(x, y + 1))) q++; if (q > 20) thin.push(`y${y}:${q}`) }
+      // the dividers themselves: no blended fringe pixel just outside the line on either side
+      let fringe = 0
+      if (unit > 0) for (let i = 1; i * unit < 208; i++) {
+        for (const [o, len, ss, pick] of [[ox, W, ys, (a, b2) => px(a, b2)], [oy, H, xs, (a, b2) => px(b2, a)]]) {
+          const first = Math.round((o + i * unit * vs) * d) - Math.floor(lw / 2), last = first + lw - 1
+          if (first < 3 || last > len - 4) continue
+          for (const [t] of ss) if (far(pick(first - 1, t), pick(first - 2, t)) || far(pick(last + 1, t), pick(last + 2, t))) fringe++
+        }
+      }
+      return { n, blank, off, edges, seam, seams, thin: thin.slice(0, 8), fringe, gapT, gapC, maskN, maskDiff }
+    }
+    // designer (native tiles): each bead as drawn is centred and mirror-symmetric in its cell. Every pixel of a sampled
+    // cell is classed board / bead / hole (nearest of the board colour, the bead's colour, the hole's mix(-0.5));
+    // then: the board gap the same width each side (left = right, top = bottom, on the middle rows / columns), the
+    // classes the same mirrored left↔right and top↔bottom along those lines (a dropped row or a one-pixel transition
+    // row on one side breaks it), and the hole's centroid within 0.5 device px of the cell's centre, its margins
+    // differing by 1 px at most
+    const beads = () => {
+      // the canvas's own scale (its cell edges are round((o + c·s)·dpr), big-canvas.ts draw)
+      const { s: vs, ox, oy } = c.view, d = Math.min(3, devicePixelRatio), { w, cells } = c.game.get().history.present
+      const img = c.el.getContext('2d').getImageData(0, 0, c.el.width, c.el.height).data, W = c.el.width
+      const ex = q => Math.round((ox + q * vs) * d), ey = q => Math.round((oy + q * vs) * d)
+      // rgb channels; AMB: an anti-aliased pixel whose class depends on the shading under it, never compared
+      const RGB = [0, 1, 2], AMB = -1
+      const dist = (a, q) => Math.hypot(...RGB.map(i => a[i] - q[i])), differ = (m, q) => m !== AMB && q !== AMB && m !== q
+      // the board colour: a cell's corner pixel, outside its round bead
+      const c0 = (Math.round((oy + (Math.max(0, Math.ceil(-oy / vs)) + 1) * vs) * d) * W + Math.round((ox + (Math.max(0, Math.ceil(-ox / vs)) + 1) * vs) * d)) * 4
+      const bg = [img[c0], img[c0 + 1], img[c0 + 2]], unit = c.game.get().unit
+      let n = 0, gapOff = 0, mirrorOff = 0, holeOff = 0, worst = 0, marginOff = 0
+      const odd = []
+      for (let yy = Math.max(0, Math.ceil(-oy / vs)) + 1; yy < 207 && oy + (yy + 2) * vs <= c.ch; yy += 2) {
+        for (let xx = Math.max(0, Math.ceil(-ox / vs)) + 1; xx < 207 && ox + (xx + 2) * vs <= c.cw; xx += 2) {
+          // not next to a 29-cell divider (drawn on the cell edge)
+          if (unit > 0 && [xx, yy].some(q => q % unit === 0 || q % unit === unit - 1)) continue
+          const hex = c.pal[cells[yy * w + xx]], bead = RGB.map(i => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16)), hole = bead.map(q => Math.round(q * 0.5))
+          if (dist(bead, bg) < 60 || dist(hole, bg) < 60) continue
+          const x0 = ex(xx), y0 = ey(yy), kw = ex(xx + 1) - x0, kh = ey(yy + 1) - y0
+          const dbh = dist(bead, hole), dbg = Math.min(dist(bead, bg), dist(hole, bg))
+          // −1: an anti-aliased edge pixel whose class depends on the shading under it (the highlight is up-left), not compared
+          const cls = (x, y) => { const j = ((y0 + y) * W + x0 + x) * 4, v = [img[j], img[j + 1], img[j + 2]], a = dist(v, bg), o = dist(v, hole); return a <= 12 ? 0 : o <= 0.15 * dbh ? 2 : a >= 0.5 * dbg && o >= 0.5 * dbh ? 1 : AMB }
+          n++
+          const r1 = Math.floor((kw - 1) / 2), r2 = kw - 1 - r1
+          const sides = [[y => cls(r1, y), kh], [y => cls(r2, y), kh], [x => cls(x, r1), kw], [x => cls(x, r2), kw]]
+          let gapBad = false, mirBad = false
+          for (const [f, len] of sides) {
+            let lead = 0, trail = 0
+            while (lead < len && f(lead) === 0) lead++
+            while (trail < len && f(len - 1 - trail) === 0) trail++
+            if (lead !== trail) gapBad = true
+            for (let i = 0; i < len; i++) if (differ(f(i), f(len - 1 - i))) mirBad = true
+          }
+          // the whole cell mirrored too: row y against row kh−1−y, column x against kw−1−x (where a dropped or
+          // doubled row shows: the rows that differ from their mirror)
+          const rowsOff = [], colsOff = []
+          for (let y = 0; y < kh / 2; y++) for (let x = 0; x < kw; x++) if (differ(cls(x, y), cls(x, kh - 1 - y))) { rowsOff.push(y); break }
+          for (let x = 0; x < kw / 2; x++) for (let y = 0; y < kh; y++) if (differ(cls(x, y), cls(kw - 1 - x, y))) { colsOff.push(x); break }
+          if (rowsOff.length || colsOff.length) mirBad = true
+          let hn = 0, sx = 0, sy = 0, hx0 = kw, hx1 = -1, hy0 = kh, hy1 = -1
+          for (let y = 0; y < kh; y++) for (let x = 0; x < kw; x++) if (cls(x, y) === 2) { hn++; sx += x + 0.5; sy += y + 0.5; hx0 = Math.min(hx0, x); hx1 = Math.max(hx1, x); hy0 = Math.min(hy0, y); hy1 = Math.max(hy1, y) }
+          const dev = hn ? Math.hypot(sx / hn - kw / 2, sy / hn - kh / 2) : 99
+          worst = Math.max(worst, dev)
+          const mBad = !hn || Math.abs(hx0 - (kw - 1 - hx1)) > 1 || Math.abs(hy0 - (kh - 1 - hy1)) > 1
+          if (gapBad) gapOff++
+          if (mirBad) mirrorOff++
+          if (dev > 0.5) holeOff++
+          if (mBad) marginOff++
+          if ((gapBad || mirBad || dev > 0.5 || mBad) && odd.length < 3) odd.push({ cell: [xx, yy], k: kw, rows: [r1, r2].map(r => Array.from({ length: kw }, (_, x) => 'x012'[cls(x, r) + 1]).join('')), cols: [r1, r2].map(r => Array.from({ length: kh }, (_, y) => 'x012'[cls(r, y) + 1]).join('')), rowsOff, colsOff, dev: Math.round(dev * 100) / 100 })
+        }
+      }
+      return { n, gapOff, mirrorOff, holeOff, marginOff, worst: Math.round(worst * 100) / 100, bad: odd }
+    }
+    const t0 = performance.now()
+    const missing = c.draw()
+    const mid = look(), midPng = c.el.toDataURL()
+    let frames = 1
+    while (c.draw() && frames < 400) frames++
+    const left = c.draw(), g = c.game.get()
+    const geo = { view: c.view, d: Math.min(3, devicePixelRatio), W: c.el.width, H: c.el.height, unit: g.unit, cells: [...g.history.present.cells], pal: c.pal, fullPng: c.el.toDataURL() }
+    return { missing, left, mid, full: look(), frames, fillMs: Math.round(performance.now() - t0), midPng, bead: beads(), s: c.view.s, k: c.view.s * Math.min(3, devicePixelRatio), geo }
+  })
+  // the mid-zoom frame itself (the canvas as drawn, tiles still missing)
+  if (PHASE2_SHOTS) writeFileSync(join(PHASE2_SHOTS, `tile-gap-mid${sfx}.png`), Buffer.from(res.midPng.split(',')[1], 'base64'))
+  const midPx = decodePng(Buffer.from(res.midPng.split(',')[1], 'base64')), geo = res.geo
+  delete res.midPng
+  delete res.geo
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+  await bigShot(p, `tile-gap-full${sfx}`)
+  // the expected filled frame, independently: a fresh page (its own canvas, empty tile cache), the same board and
+  // view, every tile built synchronously before the frame is read (no budget, no middle-first, no throttling)
+  const want = await expectedFrame(dsf, geo.view)
+  const strict = judgeTiles(geo, midPx.data, decodePng(Buffer.from(geo.fullPng.split(',')[1], 'base64')).data, decodePng(Buffer.from(want.png.split(',')[1], 'base64')).data)
+  check(`BIG tiles @${dsf}×: the expected filled frame was built independently (a fresh canvas, same board and view, every tile built synchronously) at the same size`,
+    want.left === false && want.W === geo.W && want.H === geo.H && JSON.stringify(want.view) === JSON.stringify(geo.view), JSON.stringify({ want: { ...want, png: undefined }, W: geo.W, H: geo.H, view: geo.view }))
+  check(`BIG tiles @${dsf}×: strict mid-zoom frame — every board pixel equals the filled pixel at the same zoom and place (a built tile) or its cell's base colour (a tile not built yet), each tile wholly one or the other (both sides of every tile boundary), no third colour or blended line; some tiles are still base (it is a mid frame)`,
+    strict.mid.px > 100000 && strict.mid.other === 0 && strict.mid.mixed === 0 && strict.mid.built > 0 && strict.mid.unbuilt > 0 && strict.mid.baseCells > 0, JSON.stringify(strict.mid))
+  check(`BIG tiles @${dsf}×: strict filled frame — no cell left in its base colour, and pixel-for-pixel equal to the independently built expected frame`,
+    res.left === false && strict.full.px > 100000 && strict.full.baseCells === 0 && strict.full.diff === 0, JSON.stringify(strict.full))
+  check(`BIG tiles @${dsf}×: strict filled frame — at tile boundaries the board gap between beads is as at ordinary cell edges (across and down, gap widths ${JSON.stringify(strict.gaps.til)} ⊆ ${JSON.stringify(strict.gaps.ord)}) and every cell on a tile boundary is pixel for pixel the same block as a cell of its colour inside a tile`,
+    strict.gaps.nT > 20 && strict.gaps.nO > 100 && strict.gaps.nB > 200 && strict.gaps.ok, JSON.stringify(strict.gaps))
+  check(`BIG tiles @${dsf}×: filled at 16 px/cell (${res.k} device px, whole) every bead is centred and symmetric — the board gap the same each side, the bead mirror-symmetric left↔right and top↔bottom (no dropped or one-pixel transition row), the hole's centroid ≤ 0.5 device px off the centre and its margins within 1 px`,
+    Number.isInteger(res.k) && res.bead.n > 60 && res.bead.gapOff === 0 && res.bead.mirrorOff === 0 && res.bead.holeOff === 0 && res.bead.marginOff === 0, JSON.stringify(res.bead))
+  check(`BIG tiles @${dsf}×: mid-zoom on 208² (tiles still missing after one budgeted frame) every sampled cell shows its own colour — no blank, no board colour`, res.missing && res.mid.n > 150 && res.mid.blank === 0 && res.mid.off === 0 && res.full.blank === 0 && res.full.off === 0, JSON.stringify(res))
+  // The earlier seam judgement's mid-zoom half (3 px samples: a tile-boundary pixel near neither side = a seam;
+  // > 20 one-pixel colour changes in a row = a blended line) is replaced by the strict per-pixel mid-frame check
+  // above: it fails the correct filled frame itself (1.5× 146, 1.25× 104, 1× 84 hits), because a built tile's own
+  // board gap + anti-aliased rim next to a flat base cell reads as a third colour, and the anti-aliased hole edges
+  // give 21–31 changes a row. Its filled half stays, at every dpr. Control: e2e/repro/strict-judge-a44692b.mjs.
+  check(`BIG tiles @${dsf}×: [earlier judgement, filled half] after fill-in the gap at a tile boundary no wider than at ordinary cell edges and the board-between-beads pattern the same as one cell earlier`,
+    res.full.edges > 40 && res.full.gapT <= res.full.gapC && res.full.maskN > 40 && res.full.maskDiff === 0, JSON.stringify({ dpr: dsf, full: [res.full.edges, res.full.gapT, res.full.gapC, res.full.maskN, res.full.maskDiff, res.full.seam, res.full.fringe] }))
+  // frames in motion (perf fix): one level out (an eased step) after the build-ahead had its quiet time; every eased
+  // frame drawn is captured and judged against the settled frame built independently (judgeMotion)
+  await p.waitForTimeout(900)
+  const mv = await p.evaluate(async () => {
+    const c = document.querySelector('.pd-bk-app').pd, draw = c.draw.bind(c), shots = []
+    c.draw = () => { const r = draw(); if (shots.length < 4) shots.push({ view: { ...c.view }, png: c.el.toDataURL() }); return r }
+    const start = { ...c.view }
+    c.step(-1)
+    for (let i = 0; i < 30; i++) await new Promise(r => requestAnimationFrame(r))
+    c.draw = draw
+    let n = 0
+    while (c.draw() && n < 5000) n++
+    const end = c.view
+    return { start, end, W: c.el.width, H: c.el.height, shots: shots.filter(x => Math.abs(x.view.s - end.s) > 1e-6) }
+  })
+  const mref = await expectedFrame(dsf, mv.end), mrefPx = decodePng(Buffer.from(mref.png.split(',')[1], 'base64')).data
+  // a frame in motion draws the target's tiles when the build-ahead made them, else the last settled ones: judge
+  // each frame against both settled frames (target and start), each built independently, and keep the one it is
+  const sref = await expectedFrame(dsf, mv.start), srefPx = decodePng(Buffer.from(sref.png.split(',')[1], 'base64')).data
+  const mres = mv.shots.map(x => {
+    const f = decodePng(Buffer.from(x.png.split(',')[1], 'base64')).data
+    const a = { from: 'target', ...judgeMotion({ view: x.view, end: mv.end, W: mv.W, H: mv.H }, f, mrefPx, geo.d, geo.cells, geo.pal, geo.unit) }
+    const z = { from: 'start', ...judgeMotion({ view: x.view, end: mv.start, W: mv.W, H: mv.H }, f, srefPx, geo.d, geo.cells, geo.pal, geo.unit) }
+    return motionScore(a) <= motionScore(z) ? a : z
+  })
+  if (PHASE2_SHOTS && mv.shots[0]) writeFileSync(join(PHASE2_SHOTS, `tile-gap-motion${sfx}.png`), Buffer.from(mv.shots[0].png.split(',')[1], 'base64'))
+  check(`BIG tiles @${dsf}×: strict motion frames — every eased frame's board pixel is the settled scale's tile resampled nearest-neighbour (±1 source px) or its cell's base colour, each tile wholly one or the other, no third colour; tiles built ahead are used (built > 0)`,
+    mres.length > 0 && mref.left === false && sref.left === false && mres.every(m => m.tiles > 0 && m.px > 50000 && m.px > 10 * m.hidden && m.other === 0 && m.mixed === 0) && mres.some(m => m.built > 0),
+    JSON.stringify(mres.map(m => ({ ...m, worst: m.worst.slice(0, 3) }))))
+  // a view left off whole px (a setView mid-sweep) builds nothing while in motion: it must not ask for frame after
+  // frame (the full run's page.screenshot timed out behind such a loop), and once it stays put it fills in
+  const still = await p.evaluate(async () => {
+    const c = document.querySelector('.pd-bk-app').pd, draw = c.draw.bind(c)
+    let n = 0
+    c.draw = () => { n++; return draw() }
+    const v = c.view
+    c.setView({ s: v.s * 1.037, ox: v.ox - 3.3, oy: v.oy - 2.1 })
+    c.paint()
+    await new Promise(r => setTimeout(r, 100))
+    const early = n
+    await new Promise(r => setTimeout(r, 2500))
+    c.draw = draw
+    return { early, total: n, left: c.draw() }
+  })
+  check(`BIG tiles @${dsf}×: a view off whole device px draws once, does not loop frame after frame, and fills in once it stays put`,
+    still.early <= 2 && still.total <= 60 && still.left === false, JSON.stringify(still))
+  await p.context().close()
+}
+
+/** I3: record the canvas's view.s every frame for 700 ms; then the distinct scales it went through */
+const zoomSample = p => p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; window.pdS = []; const t0 = performance.now(); const f = () => { window.pdS.push([Math.round(performance.now() - t0), c.view.s]); if (performance.now() - t0 < 700) requestAnimationFrame(f) }; requestAnimationFrame(f) })
+const zoomSteps = async (p) => { await p.waitForTimeout(800); return p.evaluate(() => window.pdS.map(x => x[1]).filter((v, i, a) => v !== a[i - 1])) }
+
+/**
+ * Review I3: the zoom snap eases (120 ms, ease-out) around the pointer, so the cell under it stays put; keys ease one
+ * level around the cursor cell; none of it eases under reduced motion. A rAF sampler records view.s every frame.
+ */
+async function bigI3() {
+  for (const reduce of [false, true]) {
+    const p = await bigPage(reduce ? { reducedMotion: 'reduce' } : {})
+    await startPreset(p, 58)
+    const tag = reduce ? ' (reduced motion: no easing)' : ''
+    // Ctrl+wheel from 24 to 29.15 px/cell with the pointer off centre, then let go: it snaps to 32
+    const w = await p.evaluate(() => {
+      const c = document.querySelector('.pd-bk-app').pd
+      c.setView({ s: 24, ox: -100, oy: -80 }); c.draw()
+      const r = c.el.getBoundingClientRect(), px = c.cw * 0.25, py = c.ch * 0.3
+      c.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 * Math.log(29.15 / 24), ctrlKey: true, clientX: r.left + px, clientY: r.top + py, bubbles: true, cancelable: true }))
+      const v = c.view
+      return { px, py, s: v.s, fx: (px - v.ox) / v.s, fy: (py - v.oy) / v.s }
+    })
+    await zoomSample(p)
+    const ws = await zoomSteps(p)
+    const w2 = await p.evaluate(([px, py]) => { const v = document.querySelector('.pd-bk-app').pd.view; return { s: v.s, fx: (px - v.ox) / v.s, fy: (py - v.oy) / v.s } }, [w.px, w.py])
+    const drift = Math.hypot(w2.fx - w.fx, w2.fy - w.fy)
+    const mid = ws.filter(v => v > w.s + 0.01 && v < 31.99)
+    check(`BIG I3 Ctrl+wheel to 29.15 then stop: snaps to 32 around the pointer (the cell under it moves < 0.02 cell)${reduce ? ', in one step' : ', easing through in-between scales'}${tag}`,
+      Math.abs(w.s - 29.15) < 0.01 && w2.s === 32 && drift < 0.02 && (reduce ? mid.length === 0 : mid.length >= 2), JSON.stringify({ w, w2, drift: +drift.toFixed(4), ws }))
+    // + on the keyboard: one level, around the cursor cell (its centre stays on the same screen pixel)
+    const host = bigHost(p)
+    await host.focus()
+    await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView({ s: 16, ox: -40, oy: -40 }); c.draw(); c.game.set({ cx: 20, cy: 14 }) })
+    await p.keyboard.press('ArrowRight')
+    await p.keyboard.press('ArrowLeft')
+    await p.waitForTimeout(100)
+    const k0 = await p.evaluate(() => { const v = document.querySelector('.pd-bk-app').pd.view; return { s: v.s, x: v.ox + 20.5 * v.s, y: v.oy + 14.5 * v.s } })
+    await zoomSample(p)
+    await p.keyboard.press('+')
+    const ks = await zoomSteps(p)
+    const k1 = await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd, v = c.view, g = c.game.get(); return { s: v.s, x: v.ox + (g.cx + 0.5) * v.s, y: v.oy + (g.cy + 0.5) * v.s, cx: g.cx, cy: g.cy } })
+    const kmid = ks.filter(v => v > 16.01 && v < 23.99)
+    check(`BIG I3 + zooms 16 → 24 around the cursor cell (its centre moves < 0.5 px)${reduce ? ', in one step' : ', easing over about 120 ms'}${tag}`,
+      k1.s === 24 && k1.cx === 20 && Math.hypot(k1.x - k0.x, k1.y - k0.y) < 0.5 && (reduce ? kmid.length === 0 : kmid.length >= 2), JSON.stringify({ k0, k1, ks }))
+    // the zoom buttons ease the same way
+    await zoomSample(p)
+    await p.locator('.pd-bk-zoom .pd-ib').nth(2).click()
+    const bs = await zoomSteps(p)
+    const b1 = await p.evaluate(() => document.querySelector('.pd-bk-app').pd.view.s)
+    check(`BIG I3 the + button zooms 24 → 32${reduce ? ' in one step' : ', easing'}${tag}`, b1 === 32 && (reduce ? bs.filter(v => v > 24.01 && v < 31.99).length === 0 : bs.filter(v => v > 24.01 && v < 31.99).length >= 2), JSON.stringify({ b1, bs }))
+    await p.context().close()
+  }
+}
+
+/** I4: the narrow-panel layout of the big page (toolbar rows, swatch, overflow, 「更多」, hint) */
+const narrowLook = p => p.evaluate(() => {
+  const vis = [...document.querySelectorAll('.pd-bk-play .pd-tools > *')].filter(e => e.getBoundingClientRect().width > 0)
+  const sc = document.querySelector('.pd-scroll'), pal = document.querySelector('.pd-bk-play .pd-palette').getBoundingClientRect(), view = document.querySelector('.pd-bk-play').getBoundingClientRect()
+  const more = document.querySelector('.pd-bk-more')
+  return {
+    rows: new Set(vis.map(e => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2) })).size, n: vis.length,
+    sw: Math.round(document.querySelector('.pd-bk-play .pd-swb').getBoundingClientRect().width),
+    over: sc ? sc.scrollWidth - sc.clientWidth : null, palOut: Math.round(pal.right - view.right), more: more ? more.getBoundingClientRect().width > 0 : false,
+    inline: [...document.querySelectorAll('.pd-bk-x .pd-tool')].map(e => e.getBoundingClientRect().width > 0),
+    hint: [...document.querySelectorAll('.pd-bk-play p[role=status]')].map(e => e.textContent),
+  }
+})
+
+/**
+ * Review I4: a 300 px panel on a 58×58 board: 28 px swatches, nothing wider than the panel, one toolbar row with
+ * clear and export under 「更多」, and the 「拖宽侧栏体验更好」 hint the first time only. With a mouse and with touch (36 px hits).
+ */
+async function bigI4() {
+  for (const touch of [false, true]) {
+    const p = await bigPage(touch ? { hasTouch: true } : {})
+    const tag = touch ? ' (touch)' : ' (mouse)'
+    await setWidth(p, 300)
+    await startPreset(p, 58)
+    const a = await narrowLook(p)
+    await bigShot(p, `big-i4-300${touch ? '-touch' : ''}`)
+    check(`BIG I4 300 px${tag}: one toolbar row (clear and export under 「更多」), 28 px swatches, no horizontal overflow`,
+      a.rows === 1 && a.more && a.inline.every(v => !v) && a.sw === 28 && a.over === 0 && a.palOut <= 0, JSON.stringify(a))
+    check(`BIG I4 300 px${tag}: a 58×58 board shows 「拖宽侧栏体验更好」 the first time`, a.hint.some(h => h.startsWith('拖宽侧栏体验更好')), JSON.stringify(a.hint))
+    // 「更多」 opens clear and export below; Escape folds them again
+    await p.locator('.pd-bk-more').click()
+    const open = await p.evaluate(() => ({ exp: document.querySelector('.pd-bk-more').getAttribute('aria-expanded'), shown: [...document.querySelectorAll('.pd-bk-x .pd-tool')].map(e => [e.getAttribute('aria-label'), e.getBoundingClientRect().width > 0]) }))
+    // recheck R3: each item shows its name next to the icon, inside the panel
+    const labels = await p.evaluate(() => [...document.querySelectorAll('.pd-bk-x .pd-tool')].map((e) => { const l = e.querySelector('.pd-bk-l'), r = (l ?? e).getBoundingClientRect(), root = document.querySelector('.pd-root').getBoundingClientRect(); return [l?.textContent ?? null, r.width > 0, r.left >= root.left && e.getBoundingClientRect().right <= root.right] }))
+    check(`BIG recheck R3 300 px${tag}: the open 「更多」 menu reads 清空 and 导出 PNG beside the icons, inside the panel`, labels.map(x => x.join()).join('|') === '清空,true,true|导出 PNG,true,true', JSON.stringify(labels))
+    if (!touch) await bigShot(p, 'big-i4-300-more')
+    await p.keyboard.press('Escape')
+    const shut = await p.evaluate(() => ({ exp: document.querySelector('.pd-bk-more').getAttribute('aria-expanded'), shown: [...document.querySelectorAll('.pd-bk-x .pd-tool')].some(e => e.getBoundingClientRect().width > 0) }))
+    check(`BIG I4 300 px${tag}: 「更多」 opens 清空 and 导出 PNG, Escape folds them`, open.exp === 'true' && open.shown.map(x => x.join()).join('|') === '清空,true|导出 PNG,true' && shut.exp === 'false' && !shut.shown, JSON.stringify({ open, shut }))
+    if (!touch) {
+      // recheck R2, keyboard only: Enter opens 「更多」, Tab reaches 清空 and 导出 PNG, Escape closes the menu and focus is back
+      // on 「更多」 (not 「分享」 or the page); an item chosen from the menu also gives focus back to 「更多」
+      const name = () => p.evaluate(() => { const el = document.activeElement; return el ? (el.getAttribute("aria-label") ?? el.className) : null })
+      await p.evaluate(() => { document.querySelector('.pd-bk-app').pd.game.applyAt(3, 3, 'paint') }) // one bead, so the menu's items are enabled
+      await p.waitForTimeout(150)
+      await p.locator('.pd-bk-more').focus()
+      await p.keyboard.press('Enter')
+      await p.keyboard.press('Tab')
+      const k1 = await name()
+      await p.keyboard.press('Tab')
+      const k2 = await name()
+      await p.keyboard.press('Escape')
+      await p.waitForTimeout(100)
+      const kEsc = { focus: await name(), exp: await p.locator('.pd-bk-more').getAttribute('aria-expanded'), share: await p.locator('.pd-bk-share').count() }
+      // Escape on the 「更多」 button itself with the menu open: the same
+      await p.keyboard.press('Enter')
+      await p.keyboard.press('Escape')
+      const kEsc2 = { focus: await name(), exp: await p.locator('.pd-bk-more').getAttribute('aria-expanded') }
+      // choose 清空 from the menu by keyboard: the menu folds and focus is on 「更多」 (the item is hidden now)
+      await p.keyboard.press('Enter')
+      await p.keyboard.press('Tab')
+      await p.keyboard.press('Enter')
+      await p.waitForTimeout(150)
+      const kItem = { focus: await name(), exp: await p.locator('.pd-bk-more').getAttribute('aria-expanded'), cleared: await p.locator('.pd-toast').count() }
+      await bigShot(p, 'big-r2-more-kbd-after-esc')
+      check('BIG recheck R2 keyboard: 「更多」 → Tab 清空 → 导出 PNG; Escape closes the menu with focus back on 「更多」 (no share panel); Escape on the button the same; choosing 清空 folds the menu onto 「更多」',
+        k1 === '清空' && k2 === '导出 PNG' && kEsc.focus === '更多' && kEsc.exp === 'false' && kEsc.share === 0 && kEsc2.focus === '更多' && kEsc2.exp === 'false' && kItem.focus === '更多' && kItem.exp === 'false' && kItem.cleared === 1,
+        JSON.stringify({ k1, k2, kEsc, kEsc2, kItem }))
+      await p.keyboard.press('Control+z')
+      // the hint is once ever: a new 58×58 board in the same narrow panel goes without it
+      await p.locator('.pd-bk-top .pd-btn', { hasText: '新建' }).click()
+      await startPreset(p, 58)
+      const again = await narrowLook(p)
+      check('BIG I4 the hint does not come back on the next big board', !again.hint.some(h => h.startsWith('拖宽侧栏体验更好')), JSON.stringify(again.hint))
+    }
+    // 560 px: clear and export back in the toolbar, no 「更多」
+    await setWidth(p, 560)
+    const w = await narrowLook(p)
+    check(`BIG I4 560 px${tag}: clear and export in the toolbar, no 「更多」, one row, no overflow`, w.rows === 1 && !w.more && w.inline.every(Boolean) && w.over === 0, JSON.stringify(w))
+    const wl = await p.evaluate(() => [...document.querySelectorAll('.pd-bk-x .pd-bk-l')].some(l => l.getBoundingClientRect().width > 0))
+    check(`BIG recheck R3 560 px${tag}: the toolbar's clear and export stay icon-only (the labels are the menu's)`, !wl, String(wl))
+    await p.context().close()
+  }
+}
+
+/**
+ * Recheck R4: the 「拖宽侧栏体验更好」 hint follows the toolbar's container query (panel ≤ 340 px), so a 360 px sidebar
+ * never shows it and a 340 px one does (fresh profile each, the hint being once ever).
+ */
+async function bigHintWidth() {
+  const res = {}
+  for (const px of [360, 341, 340]) {
+    const p = await bigPage()
+    await setWidth(p, px)
+    await startPreset(p, 58)
+    res[px] = (await narrowLook(p)).hint.some(h => h.startsWith('拖宽侧栏体验更好'))
+    if (px === 360) await bigShot(p, 'big-r4-360-no-hint')
+    await p.context().close()
+  }
+  check('BIG recheck R4 the wider-sidebar hint: none at 360 or 341 px, shown at 340 px (the container query\'s width)', !res[360] && !res[341] && res[340], JSON.stringify(res))
+}
+
+/**
+ * Recheck P2: on a 208 × 208 board left at 「全图」, idle time builds the next zoom level's tiles ahead, so the first
+ * step in (about the middle, as the + button does) is drawn whole at once, with no base-layer stand-ins.
+ */
+async function bigAhead() {
+  const p = await bigPage()
+  // the designer's case: a 480 px wide panel, where the next level's tiles fit in PREBUILD_MAX (48); on a
+  // 1280 px page they don't (≈ 9 × 6 at 8 px/格), so only the middle 48 are built ahead and the edges come after
+  await setWidth(p, 480)
+  await startPreset(p, 58)
+  await p.evaluate(() => {
+    let s = 7
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const g = document.querySelector('.pd-bk-app').pd.game
+    g.set({ history: { past: [], present: { w: 208, h: 208, cells: Object.freeze(Array.from({ length: 208 * 208 }, () => Math.floor(r() * 16))) }, future: [] } })
+  })
+  await p.evaluate(() => { const c = document.querySelector('.pd-bk-app').pd; c.setView(c.fitView()) })
+  await p.waitForTimeout(2500)
+  const r = await p.evaluate(() => {
+    const c = document.querySelector('.pd-bk-app').pd, v = c.view
+    const s = [4, 8, 12, 16, 24, 32, 48, 64].find(l => l > v.s && Math.ceil(Math.log2(l * devicePixelRatio)) !== Math.ceil(Math.log2(Math.max(1, v.s * devicePixelRatio))))
+    const k = s / v.s, cx = c.cw / 2, cy = c.ch / 2
+    c.setView({ s, ox: cx - (cx - v.ox) * k, oy: cy - (cy - v.oy) * k })
+    const t0 = performance.now(), missing = c.draw()
+    return { from: v.s, to: c.view.s, missing, ms: Math.round(performance.now() - t0), box: [c.cw, c.ch] }
+  })
+  await bigShot(p, 'big-p2-ahead-first-step')
+  check('BIG recheck P2: after idle at 「全图」 the first step in on 208² is drawn whole at once (its tiles were built ahead)', r.to > r.from && !r.missing, JSON.stringify(r))
+  await p.context().close()
+}
+
+/** Recheck R7 (user S5): at 300 px 「px/格」 gets a line of its own at the end of the status bar, whole and inside the panel. */
+async function bigStatusNarrow() {
+  const p = await bigPage()
+  await setWidth(p, 300)
+  await startPreset(p, 58)
+  await p.locator('.pd-bk-zoom .pd-ib').nth(2).click()
+  await p.waitForTimeout(400)
+  const r = await p.evaluate(() => {
+    const st = document.querySelector('.pd-bk-st')
+    const px = [...st.children].find(e => /px\/格/.test(e.textContent))
+    if (!px) return null
+    const b = px.getBoundingClientRect()
+    const root = document.querySelector('.pd-root').getBoundingClientRect()
+    const others = [...st.children].filter(e => e !== px && e.getBoundingClientRect().width > 0).map(e => e.getBoundingClientRect())
+    return { text: px.textContent, top: Math.round(b.top), below: others.every(o => o.bottom <= b.top + 1), alone: !others.some(o => Math.abs(o.top - b.top) < 4),
+      whole: px.scrollWidth <= Math.ceil(b.width) + 1 && b.height < 24, inside: b.left >= root.left - 1 && b.right <= root.right + 1 }
+  })
+  await bigShot(p, 'big-r7-300-px-line')
+  check('BIG recheck R7 300 px: 「px/格」 sits on its own last line of the status bar, whole and inside the panel', !!r && r.below && r.alone && r.whole && r.inside, JSON.stringify(r))
+  await p.context().close()
+}
+
+/**
+ * Review suggestions S4, S5, S7 (v03-p2 findings): touch zoom buttons take the 36 px touch hit (not a fixed
+ * 32), a tap on a too-small board zooms straight to 32 (a level, so a pinch afterwards keeps it), and the status
+ * bar says 「列 x 行 y」 instead of 「y:x」.
+ */
+async function bigSuggest() {
+  const p = await bigPage({ hasTouch: true })
+  const cdp = await p.context().newCDPSession(p)
+  // a touch screen: (pointer: coarse), as on a phone or tablet
+  await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'pointer', value: 'coarse' }, { name: 'any-pointer', value: 'coarse' }] })
+  await setWidth(p, 560)
+  await startPreset(p, 58)
+  const z = await p.evaluate(() => ({ coarse: matchMedia('(pointer: coarse)').matches, btn: [...document.querySelectorAll('.pd-bk-zoom .pd-ib')].map(b => Math.round(b.getBoundingClientRect().width)) }))
+  await bigShot(p, 'big-s7-touch-zoom-36')
+  check('BIG S7 touch: the zoom buttons are 36 px (the touch hit), not 32', z.coarse && z.btn.length >= 3 && z.btn.every(w => w === 36), JSON.stringify(z))
+  const s0 = await p.evaluate(() => document.querySelector('.pd-bk-app').pd.view.s)
+  const [cx, cy] = await bigCell(p, 20, 20)
+  await p.touchscreen.tap(cx, cy)
+  await p.waitForTimeout(500)
+  const s1 = await p.evaluate(() => document.querySelector('.pd-bk-app').pd.view.s)
+  check('BIG S4 touch: a tap on a too-small board zooms straight to 32 px/cell (a level, nothing to snap later)', s0 < 24 && s1 === 32, JSON.stringify({ s0, s1 }))
+  const st = await p.evaluate(() => document.querySelector('.pd-bk-st').textContent)
+  await bigShot(p, 'big-s5-status-col-row')
+  check('BIG S5 the status bar says 「列 x 行 y」 (no bare y:x)', /列 \d+ 行 \d+/.test(st) && !/\d+:\d+/.test(st), st)
+  await p.context().close()
+}
+
+/** A share code over 20 KB is never truncated: 「复制分享码」 becomes 「导出图纸文件」 + the reason (designer steering 3). */
+async function bigShare() {
+  const p = await bigPage()
+  await startPreset(p, 58)
+  // the UI opens at most 116 (where codes stay < 10 KB); a 208² board with 35 % noise (≈ 21.5 KB) is set on the game directly
+  const seed = 7
+  await p.evaluate((n) => {
+    let s = n
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const g = document.querySelector('.pd-bk-app').pd.game
+    const e = g.get().history.present.cells[0]
+    const cells = Object.freeze(Array.from({ length: 208 * 208 }, () => (r() < 0.35 ? Math.floor(r() * 16) : e)))
+    g.set({ history: { past: [], present: { w: 208, h: 208, cells }, future: [] } })
+  }, seed)
+  await p.waitForTimeout(500)
+  await p.locator('.pd-bk-top .pd-btn', { hasText: '分享' }).click()
+  const exportBtn = p.locator('.pd-bk-share .pd-btn', { hasText: '导出图纸文件' })
+  await exportBtn.waitFor({ timeout: 10000 })
+  const ui = await p.evaluate(() => ({ text: document.querySelector('.pd-bk-share').textContent, copy: [...document.querySelectorAll('.pd-bk-share .pd-btn')].some(b => b.textContent.includes('复制分享码')) }))
+  check('BIG share > 20 KB: 「导出图纸文件」 replaces 「复制分享码」, with 「图案太大，分享码放不下，请改用文件分享」', !ui.copy && ui.text.includes('图案太大，分享码放不下，请改用文件分享'), JSON.stringify(ui))
+  await bigShot(p, 'big-share-too-big-zh')
+  const [dl] = await Promise.all([p.waitForEvent('download'), exportBtn.click()])
+  const file = join(OUT, dl.suggestedFilename())
+  await dl.saveAs(file)
+  const code = readFileSync(file, 'utf8')
+  const { decodeV4 } = await import(pathToFileURL(join(REPO, 'src/core/codec-v4.ts')).href)
+  const d = await decodeV4(code)
+  const want = await p.evaluate(() => [...document.querySelector('.pd-bk-app').pd.game.get().history.present.cells])
+  check('BIG the exported pattern file is the whole code (> 20 KB, decodes to the same 208² board: never truncated)', code.length > 20 * 1024 && code.startsWith('pd2:208x208:') && d.ok && d.board.w === 208 && JSON.stringify([...d.board.cells]) === JSON.stringify(want), JSON.stringify({ name: dl.suggestedFilename(), len: code.length, ok: d.ok }))
+  await p.context().close()
+  // English: the same swap with the English line
+  const e = await bigPage({}, 'en')
+  await startPreset(e, 58)
+  await e.evaluate(() => {
+    let s = 7
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const g = document.querySelector('.pd-bk-app').pd.game
+    const em = g.get().history.present.cells[0]
+    g.set({ history: { past: [], present: { w: 208, h: 208, cells: Object.freeze(Array.from({ length: 208 * 208 }, () => (r() < 0.35 ? Math.floor(r() * 16) : em))) }, future: [] } })
+  })
+  await e.waitForTimeout(400)
+  await e.locator('.pd-bk-top .pd-btn', { hasText: 'Share' }).click()
+  await e.locator('.pd-bk-share .pd-btn', { hasText: 'Export pattern file' }).waitFor({ timeout: 10000 })
+  const en = await e.evaluate(() => document.querySelector('.pd-bk-share').textContent)
+  check('BIG share > 20 KB (English): Export pattern file + the reason, no copy button', en.includes('too big for a share code') && !en.includes('Copy share code'), en)
+  await bigShot(e, 'big-share-too-big-en')
+  // a small board keeps 「复制分享码」
+  await e.context().close()
+}
+
+const NO_IDB = 'Object.defineProperty(window, "indexedDB", { configurable: true, get() { return undefined } });'
+const HANG_IDB = 'try { IDBFactory.prototype.open = function () { window.pdIdbAsked = (window.pdIdbAsked || 0) + 1; return new EventTarget() } } catch {}'
+const NO_LOCAL = 'Storage.prototype.setItem = function () { throw new DOMException("blocked", "SecurityError") };'
+
+/** Storage per plan §4.3 + suggestions 1–2. */
+async function bigStorage() {
+  // IndexedDB missing: boards ≤ 58 save to dsh-pindou:save:*; bigger ones say they cannot be saved
+  const p = await bigPage({}, 'zh', NO_IDB)
+  const note = await p.locator('.pd-bk-note').first().textContent().catch(() => '')
+  await bigShot(p, 'big-idb-unavailable-setup')
+  await p.locator('.pd-bk-form input').nth(0).fill('40')
+  await p.locator('.pd-bk-form input').nth(1).fill('30')
+  await p.locator('.pd-bk-form .pd-btn', { hasText: '开始' }).click()
+  await bigHost(p).waitFor()
+  await p.waitForTimeout(300)
+  await bigZoom(p)
+  for (const [x, y] of [[1, 1], [2, 2], [3, 3]]) { const [cx, cy] = await bigCell(p, x, y); await p.mouse.click(cx, cy) }
+  await p.waitForTimeout(2600)
+  const saved = await p.evaluate(() => ({ big: localStorage.getItem('dsh-pindou:save:big'), keys: Object.keys(localStorage).filter(k => k.startsWith('dsh-pindou')) }))
+  const rec = saved.big ? JSON.parse(saved.big) : null
+  check('BIG IDB unavailable: a 40×30 board saves to dsh-pindou:save:big (pd2)', rec?.w === 40 && rec?.h === 30 && rec.code.startsWith('pd2:40x30:'), JSON.stringify({ keys: saved.keys, rec: rec && { w: rec.w, h: rec.h } }))
+  check('BIG IDB unavailable: the setup says big boards cannot be saved here', /此环境无法保存大图进度/.test(note ?? ''), note)
+  await bigShot(p, 'big-idb-unavailable-40x30')
+  // back to setup: 继续上次 offers the local save
+  await p.locator('.pd-bk-top .pd-btn', { hasText: '新建' }).click()
+  const resume = await p.locator('.pd-bk-wide').textContent({ timeout: 5000 }).catch(() => '')
+  check('BIG IDB unavailable: 继续上次 · 40×30 comes back from localStorage', /40×30/.test(resume ?? ''), resume)
+  await startPreset(p, 78)
+  const tooBig = await p.locator('.pd-bk-note').first().textContent().catch(() => '')
+  check('BIG IDB unavailable: a 78×78 board plays but says it will not be saved', /此环境无法保存大图进度/.test(tooBig ?? ''), tooBig)
+  await p.context().close()
+
+  // IndexedDB hangs: a still skeleton + 「正在读取存档…」 after 300 ms, the setup by 2 s, nothing else
+  const h = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', HANG_IDB)
+  await startSession(h, '看看 README')
+  await openPanel(h)
+  await h.locator('.pd-start .pd-big', { hasText: /自由拼/ }).click()
+  await h.locator('.pd-board').waitFor()
+  const hc = h.locator('.pd-overlay.pd-coach button')
+  if (await hc.count()) { await hc.first().click(); await h.waitForTimeout(250) }
+  await h.getByRole('button', { name: /^更多尺寸$/ }).click()
+  await h.locator('.pd-bk').waitFor({ timeout: 15000 })
+  const early = await h.evaluate(() => ({ load: !!document.querySelector('.pd-bk-load'), sizes: !!document.querySelector('.pd-bk-sizes') }))
+  await h.waitForTimeout(700)
+  const mid = await h.evaluate(() => ({ load: document.querySelector('.pd-bk-load')?.textContent ?? null, skel: !!document.querySelector('.pd-bk-skel'), asked: window.pdIdbAsked ?? 0 }))
+  await bigShot(h, 'big-loading-skeleton')
+  await h.locator('.pd-bk-sizes').waitFor({ timeout: 4000 })
+  const late = await h.evaluate(() => ({ load: !!document.querySelector('.pd-bk-load'), notes: [...document.querySelectorAll('.pd-bk-note')].map(n => n.textContent) }))
+  check('BIG slow IndexedDB: nothing for the first 300 ms, then a still skeleton + 「正在读取存档…」, then the setup after the 2 s fallback', !early.sizes && mid.load === '正在读取存档…' && mid.skel && !late.load && mid.asked > 0, JSON.stringify({ early, mid, late }))
+  // review IMPORTANT 3 / plan 修订 20:25: after the timeout no 「此环境无法保存大图进度…」; one quiet line only for a size over 58
+  const SLOW = '这次没连上浏览器数据库，大于 58×58 的图案关闭后不会保存'
+  const quiet = () => h.evaluate(() => ({ notes: [...document.querySelectorAll('.pd-bk-note')].map(n => n.textContent), line: [...document.querySelectorAll('.pd-bk p[role=status]')].map(n => n.textContent), toast: document.querySelector('.pd-toast')?.textContent ?? null }))
+  const at40 = await quiet()
+  await h.locator('.pd-bk-form input').nth(0).fill('78')
+  await h.locator('.pd-bk-form input').nth(1).fill('78')
+  await h.waitForTimeout(150)
+  const at78 = await quiet()
+  await bigShot(h, 'big-setup-idb-slow-78')
+  await h.locator('.pd-bk-form input').nth(0).fill('58')
+  await h.locator('.pd-bk-form input').nth(1).fill('58')
+  await h.waitForTimeout(150)
+  const at58 = await quiet()
+  check('BIG slow IndexedDB: no notice at 40×30 or 58×58, and only 「这次没连上浏览器数据库，大于 58×58 的图案关闭后不会保存」 once 78×78 is typed in (no 此环境无法保存大图进度)',
+    at40.notes.length === 0 && at40.line.length === 0 && at58.line.length === 0 && at58.notes.length === 0 && at78.notes.length === 0 && at78.line.length === 1 && at78.line[0] === SLOW && !/此环境/.test(JSON.stringify([at40, at58, at78])) && at40.toast === null,
+    JSON.stringify({ at40, at58, at78 }))
+  await startPreset(h, 78)
+  const play78 = await quiet()
+  const under = await h.evaluate(() => { const l = document.querySelector('.pd-bk-play > p[role=status]'); return l ? { after: l.previousElementSibling?.className ?? null, card: getComputedStyle(l).backgroundColor, size: getComputedStyle(l).fontSize } : null })
+  await bigShot(h, 'big-play-idb-slow-78')
+  // designer S1: on the game page too it is one line of secondary text under the toolbar, not the gray card
+  check('BIG slow IndexedDB: a 78×78 board plays with the same quiet line as secondary text under the toolbar (no card)',
+    play78.notes.length === 0 && play78.line.length === 1 && play78.line[0] === SLOW && under?.after === 'pd-tools' && under.size === '11.5px' && /rgba\(0, 0, 0, 0\)|transparent/.test(under.card), JSON.stringify({ play78, under }))
+  await h.context().close()
+
+  // neither IndexedDB nor localStorage: 「浏览器存储不可用，进度不会保存」 once, dismissible, not in the way
+  const n = await bigPage({}, 'zh', NO_IDB + NO_LOCAL)
+  const bar = n.locator('.pd-bk-bar')
+  const barText = await bar.textContent({ timeout: 5000 }).catch(() => '')
+  const sizesOk = await n.locator('.pd-bk-sizes .pd-btn').first().isEnabled()
+  await bigShot(n, 'big-storage-unavailable')
+  await bar.getByRole('button', { name: '关闭' }).click()
+  await startPreset(n, 58)
+  const after = await n.evaluate(() => ({ bar: !!document.querySelector('.pd-bk-bar'), notes: [...document.querySelectorAll('.pd-bk-note')].map(x => x.textContent) }))
+  check('BIG no storage at all: 「浏览器存储不可用，进度不会保存」 at the top, dismissible, the page still works and the notice stays closed', /浏览器存储不可用，进度不会保存/.test(barText ?? '') && sizesOk && !after.bar && after.notes.length === 0, JSON.stringify({ barText, after }))
+  await n.context().close()
+}
+
+/** Phase-2 screenshots: 300 and 560 px, light and dark, Chinese and English. */
+async function bigShots() {
+  for (const [lang, scheme] of [['zh', 'light'], ['zh', 'dark'], ['en', 'light'], ['en', 'dark']]) {
+    const p = await bigPage({ colorScheme: scheme }, lang)
+    for (const w of [300, 560]) {
+      await setWidth(p, w)
+      await bigShot(p, `big-setup-${w}-${scheme}-${lang}`)
+    }
+    await startPreset(p, 58)
+    await p.evaluate(() => {
+      const g = document.querySelector('.pd-bk-app').pd.game
+      for (let y = 10; y < 48; y++) for (let x = 10; x < 48; x++) if ((x - 29) ** 2 + (y - 29) ** 2 < 300) g.applyAt(x, y, 'paint')
+    })
+    for (const w of [300, 560]) {
+      await setWidth(p, w)
+      await p.waitForTimeout(500)
+      await bigShot(p, `big-58-${w}-${scheme}-${lang}`)
+    }
+    await p.context().close()
+  }
+}
+
+/**
+ * Review I-2 (fixed in 0dbcfe6): saving a non-square (40×30) or big (78×78) board never writes dsh-pindou:v1, so the
+ * v0.2-format game save there keeps its 16×16 board and still opens after a reload; with IndexedDB and without it.
+ */
+async function bigI2() {
+  for (const [label, init] of [['IDB', undefined], ['no IDB', NO_IDB]]) {
+    const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh', init)
+    await startSession(p, '看看 README')
+    await openPanel(p)
+    await p.locator('.pd-start .pd-big', { hasText: /自由拼/ }).click()
+    await p.locator('.pd-board').waitFor()
+    const coach = p.locator('.pd-overlay.pd-coach button')
+    if (await coach.count()) { await coach.first().click(); await p.waitForTimeout(250) }
+    // a first-screen move: dsh-pindou:v1 holds the v0.2-format square save
+    const [dx, dy] = await domCell(p, 3, 3)
+    await p.mouse.click(dx, dy)
+    await p.waitForTimeout(900)
+    const v1 = await p.evaluate(() => localStorage.getItem('dsh-pindou:v1'))
+    const j = v1 ? JSON.parse(v1) : null
+    check(`BIG I-2 (${label}): the first screen saved a v0.2-format 16×16 game to dsh-pindou:v1`, j?.size === 16 && (j.h ?? 16) === 16 && typeof j.board === 'string', JSON.stringify(j && { v: j.v, size: j.size, h: j.h }))
+    const v1Now = () => p.evaluate(() => localStorage.getItem('dsh-pindou:v1'))
+    const paint3 = async () => { await bigZoom(p); for (const [x, y] of [[1, 1], [2, 2], [3, 3]]) { const [cx, cy] = await bigCell(p, x, y); await p.mouse.click(cx, cy) } await p.waitForTimeout(2600) }
+    await p.getByRole('button', { name: /^更多尺寸$/ }).click()
+    await p.locator('.pd-bk-sizes').waitFor({ timeout: 15000 })
+    await p.locator('.pd-bk-form input').nth(0).fill('40')
+    await p.locator('.pd-bk-form input').nth(1).fill('30')
+    await p.locator('.pd-bk-form .pd-btn', { hasText: '开始' }).click()
+    await bigHost(p).waitFor()
+    await p.waitForTimeout(300)
+    await paint3()
+    const after40 = await v1Now()
+    await p.locator('.pd-bk-top .pd-btn', { hasText: '新建' }).click()
+    await startPreset(p, 78)
+    await paint3()
+    const after78 = await v1Now()
+    const keys = await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('dsh-pindou')).toSorted())
+    // the first screen may re-save its own game (its page changes), but only ever that 16×16 square with the same beads
+    const same = (raw) => { const k = raw ? JSON.parse(raw) : null; return k?.size === 16 && (k.h ?? 16) === 16 && k.board === j.board }
+    const changed = (raw) => { const k = raw ? JSON.parse(raw) : {}; return Object.keys({ ...k, ...j }).filter(f => JSON.stringify(k[f]) !== JSON.stringify(j[f])) }
+    check(`BIG I-2 (${label}): saving a 40×30 and a 78×78 board never writes them to dsh-pindou:v1 (still the 16×16 game, same beads)`, same(after40) && same(after78), JSON.stringify({ fields40: changed(after40), fields78: changed(after78), keys }))
+    // the v0.2 key still opens: reload, nothing set aside as unreadable, the first screen comes back
+    const v1Last = await v1Now()
+    await p.reload()
+    await p.waitForTimeout(2500)
+    const notice = p.locator('button', { hasText: /^继续$/ })
+    if (await notice.count()) await notice.first().click()
+    // the host may bring the session back by itself
+    if (await p.getByRole('button', { name: HOST.zh.choose }).isVisible()) await startSession(p, '看看 README')
+    await openPanel(p)
+    await p.locator('.pd-start, .pd-board').first().waitFor({ timeout: 15000 })
+    await p.waitForTimeout(600)
+    const back = await p.evaluate(() => ({ v1: localStorage.getItem('dsh-pindou:v1'), bad: Object.keys(localStorage).filter(k => k.startsWith('dsh-pindou:v1:unreadable')) }))
+    check(`BIG I-2 (${label}): after a reload dsh-pindou:v1 still holds the 16×16 game and opens (nothing set aside as unreadable)`, same(back.v1) && same(v1Last) && back.bad.length === 0, JSON.stringify({ same: same(back.v1), bad: back.bad }))
+    await p.context().close()
+  }
+}
+
+/**
+ * The store chunk (lib/client.big-store.js: saves + share codes, split off client.big.js). Delayed: the setup
+ * shows the skeleton at once, never a blank page, and fills in place. Failed: the setup still opens, the
+ * 「进度不会保存」 bar says so, the board plays, share and import say 「这部分没加载出来」, no page error.
+ */
+const STORE_CHUNK = /\/dsh-pindou\/client\.big-store\.js\?/
+/** Load the page again, so a route set after newPage sees the entry's idle preload of a chunk too. */
+async function reloadUnder(p, lang = 'zh') {
+  await p.reload()
+  await p.getByRole('button', { name: HOST[lang].choose }).waitFor({ timeout: 30000 })
+}
+
+/**
+ * The ⋯ menu's shortcut list rides in lib/client.big-store.js (keys.ts, off the first screen). Not there yet: the
+ * menu shows skeleton lines under 「快捷键」 and fills them in place; the chunk fails: 「加载失败，点此重试」, which
+ * fetches it again (never blank).
+ */
+async function keysChunk() {
+  const p = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh')
+  // held until the menu has been looked at (then let through)
+  let release
+  const gate = new Promise(r => { release = r })
+  await p.route(STORE_CHUNK, async (route) => { await gate; await route.continue() })
+  // the plugin preloads the chunk as soon as the page is idle: load the page again under the route
+  await reloadUnder(p)
+  await startSession(p, '看看 README')
+  await openPanel(p)
+  await p.locator('[data-pd-menu-btn]').click()
+  await p.locator('.pd-menu').waitFor()
+  const early = await p.evaluate(() => { const m = document.querySelector('.pd-menu'); window.pdMenu = m; return { skel: m.querySelectorAll('.pd-keys[aria-busy] .pd-skel').length, title: m.textContent.includes('快捷键'), lines: m.textContent.includes('B 画笔') } })
+  await bigShot(p, 'keys-skeleton')
+  release()
+  await p.locator('.pd-menu .pd-keys li', { hasText: 'B 画笔' }).waitFor({ timeout: 8000 }).catch(() => {})
+  const late = await p.evaluate(() => { const m = document.querySelector('.pd-menu'); return { same: m === window.pdMenu, n: m.querySelectorAll('.pd-keys li').length, busy: !!m.querySelector('[aria-busy]'), esc: m.textContent.includes('Esc 关闭菜单或卡片') } })
+  await bigShot(p, 'keys-filled')
+  check('KEYS chunk not ready: the ⋯ menu shows 3 skeleton lines under 「快捷键」, then the 5 lines in place (same open menu)',
+    early.skel === 3 && early.title && !early.lines && late.same && late.n === 5 && !late.busy && late.esc, JSON.stringify({ early, late }))
+  await p.context().close()
+  const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' }, 'zh')
+  let asked = 0
+  await f.route(STORE_CHUNK, (route) => { asked++; return route.abort('internetdisconnected') })
+  await reloadUnder(f)
+  await startSession(f, '看看 README')
+  await openPanel(f)
+  await f.locator('[data-pd-menu-btn]').click()
+  const retry = f.locator('.pd-menu button.pd-mi', { hasText: '加载失败，点此重试' })
+  const shown = await retry.waitFor({ timeout: 6000 }).then(() => true, () => false)
+  await bigShot(f, 'keys-failed')
+  await f.unroute(STORE_CHUNK)
+  await retry.click().catch(() => {})
+  const back = await f.locator('.pd-menu .pd-keys li', { hasText: 'B 画笔' }).waitFor({ timeout: 6000 }).then(() => true, () => false)
+  check('KEYS chunk fails: the menu says 「加载失败，点此重试」 (not blank); a click fetches it again and the lines come', asked >= 1 && shown && back, JSON.stringify({ asked, shown, back }))
+  await f.context().close()
+}
+async function bigStoreChunk() {
+  const before = pageErrors.length
+  const open = async (p) => {
+    await startSession(p, '看看 README')
+    await openPanel(p)
+    await p.locator('.pd-start .pd-big', { hasText: /自由拼/ }).click()
+    await p.locator('.pd-board').waitFor()
+    const coach = p.locator('.pd-overlay.pd-coach button')
+    if (await coach.count()) { await coach.first().click(); await p.waitForTimeout(250) }
+    await p.getByRole('button', { name: /^更多尺寸$/ }).click()
+    await p.locator('.pd-bk').waitFor({ timeout: 15000 })
+  }
+  // delayed 1.5 s
+  const d = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+  let asked = 0, release
+  // held until the skeleton has been seen: since the shortcut list rides in this chunk the entry preloads it when
+  // idle, so a fixed delay could run out before the page opens; and the page is loaded again under the route
+  const gate = new Promise(r => { release = r })
+  await d.route(STORE_CHUNK, async (route) => { asked++; await gate; await route.continue() })
+  await reloadUnder(d)
+  await open(d)
+  const look = () => d.evaluate(() => ({ skel: !!document.querySelector('.pd-bk-skel'), sizes: !!document.querySelector('.pd-bk-sizes'), text: document.querySelector('.pd-bk')?.textContent.length ?? 0 }))
+  const early = await look()
+  await d.waitForTimeout(400)
+  const mid = await look()
+  await bigShot(d, 'big-store-chunk-delayed-skeleton')
+  release()
+  await d.locator('.pd-bk-sizes').waitFor({ timeout: 8000 })
+  const late = await look()
+  const panel = await d.evaluate(() => document.querySelectorAll('.pd-bk').length)
+  await bigShot(d, 'big-store-chunk-delayed-filled')
+  check('BIG store chunk delayed: the skeleton at once (never blank), then the setup fills the same panel', asked > 0 && early.skel && !early.sizes && mid.skel && late.sizes && !late.skel && panel === 1, JSON.stringify({ asked, early, mid, late, panel }))
+  await startPreset(d, 58)
+  await d.waitForTimeout(2600)
+  const saved = await d.evaluate(() => [...document.querySelectorAll('.pd-bk-note')].map(n => n.textContent).join(' '))
+  check('BIG store chunk delayed: a 58×58 board then plays with saves (no 「不会保存」)', !/不会保存/.test(saved), saved)
+  await d.context().close()
+  // failed
+  const f = await newPage({ viewport: { width: 1280, height: 860 }, colorScheme: 'light' })
+  let fAsked = 0
+  await f.route(STORE_CHUNK, (route) => { fAsked++; return route.abort('internetdisconnected') })
+  await reloadUnder(f)
+  await open(f)
+  await f.locator('.pd-bk-sizes').waitFor({ timeout: 8000 })
+  const bar = await f.evaluate(() => document.querySelector('.pd-bk')?.textContent ?? '')
+  await bigShot(f, 'big-store-chunk-failed-setup')
+  // recheck R5: storage is fine, the chunk is not: it says so (never 「浏览器存储不可用」 or 「已备份」) and offers 重试
+  check('BIG store chunk failed: the setup still opens and says 「这部分没加载出来，这次的进度不会保存」 with 重试 (no 「浏览器存储不可用」, no 「已备份」)',
+    bar.includes('这部分没加载出来，这次的进度不会保存') && bar.includes('重试') && !/浏览器存储不可用|已备份/.test(bar), bar.slice(0, 160))
+  await f.locator('.pd-bk textarea').first().fill('pd4:8x8:x')
+  await f.locator('.pd-btn', { hasText: /^导入$/ }).click()
+  const impErr = await f.locator('.pd-bk-err').textContent({ timeout: 5000 }).catch(() => '')
+  check('BIG store chunk failed: import says 「这部分没加载出来，请稍后再试」 and retries the chunk', impErr === '这部分没加载出来，请稍后再试' && fAsked >= 2, JSON.stringify({ impErr, fAsked }))
+  await startPreset(f, 29)
+  const [cx, cy] = await bigCell(f, 2, 2)
+  await f.mouse.click(cx, cy)
+  const painted = await f.evaluate(() => { const g = document.querySelector('.pd-bk-app').pd.game.get(); return g.history.past.length })
+  await f.locator('.pd-bk-top .pd-btn', { hasText: '分享' }).click()
+  const shareErr = await f.locator('.pd-bk-share [role=alert]').textContent({ timeout: 5000 }).catch(() => '')
+  await bigShot(f, 'big-store-chunk-failed-share')
+  check('BIG store chunk failed: the board plays (a click paints) and 分享 says 「这部分没加载出来，请稍后再试」', painted > 0 && shareErr === '这部分没加载出来，请稍后再试', JSON.stringify({ painted, shareErr }))
+  // 重试 while it still fails: the bar stays as it was (never blank)
+  const asked0 = fAsked
+  await f.locator('.pd-bk-bar .pd-btn', { hasText: /^重试$/ }).click()
+  await f.waitForTimeout(400)
+  const still = await f.evaluate(() => document.querySelector('.pd-bk-bar')?.textContent ?? '')
+  // the network back: 重试 loads the chunk, the bar goes, the board in play is saved at once (新建 offers 「继续上次 · 29×29」)
+  await f.unroute(STORE_CHUNK)
+  await f.locator('.pd-bk-bar .pd-btn', { hasText: /^重试$/ }).click()
+  const gone = await f.waitForFunction(() => !document.querySelector('.pd-bk-bar'), null, { timeout: 8000 }).then(() => true, () => false)
+  await f.waitForTimeout(400)
+  await bigShot(f, 'big-r5-retry-ok')
+  await f.locator('.pd-bk-top .pd-btn', { hasText: '新建' }).click()
+  const resume = await f.locator('.pd-bk-wide').textContent({ timeout: 5000 }).catch(() => '')
+  check('BIG recheck R5 重试: while the chunk still fails the bar stays (asked again); once it loads the bar goes and the board in play is saved (新建 → 「继续上次 · 29×29」)',
+    fAsked > asked0 && still.includes('这部分没加载出来，这次的进度不会保存') && gone && /继续上次 · 29×29/.test(resume ?? ''), JSON.stringify({ asked0, fAsked, still: still.slice(0, 60), gone, resume }))
+  await f.context().close()
+  const errs = pageErrors.splice(before)
+  check('BIG store chunk: no page errors, delayed or failed', errs.length === 0, errs.slice(0, 3).join(' | '))
+}
+
+async function bigSection() {
+  const before = pageErrors.length
+  await bigAria()
+  await bigI3()
+  await bigI4()
+  await bigHintWidth()
+  await bigStatusNarrow()
+  await bigAhead()
+  await bigSuggest()
+  await bigTileGap()
+  await bigStoreChunk()
+  await keysChunk()
+  await undoParity()
+  await bigShare()
+  await bigStorage()
+  await bigI2()
+  await bigShots()
+  const errs = pageErrors.splice(before)
+  check('BIG no page errors on the big-board pages', errs.length === 0, errs.slice(0, 3).join(' | '))
+}
+
 // E2E_ONLY=t1 runs just the picture section, E2E_ONLY=k just the guide rings, E2E_ONLY=w just my works,
-// E2E_ONLY=s just the README panel shots (the rest of the suite is unchanged)
+// E2E_ONLY=s just the README panel shots, E2E_ONLY=v just save safety, E2E_ONLY=big just the big boards, E2E_ONLY=i2 just the I-2 check (the rest of the suite is unchanged)
 const ONLY = process.env.E2E_ONLY ?? ''
 try {
   {
@@ -1035,9 +2562,23 @@ try {
     await h.close()
   }
   sections: {
+  if (ONLY === 'i4') { log('BIG. review I4 narrow panel e2e'); await bigI4(); break sections }
+  if (ONLY === 'sg') { log('BIG. review S4 S5 S7'); await bigSuggest(); break sections }
+  if (ONLY === 'rc') { log('BIG. designer recheck R2–R7 + P2 + the shortcut list chunk'); await keysChunk(); await bigI4(); await bigHintWidth(); await bigStoreChunk(); await bigStatusNarrow(); await bigAhead(); break sections }
+  if (ONLY === 'sc') { log('BIG. store chunk delayed / failed'); await bigStoreChunk(); break sections }
+  if (ONLY === 'tg') { log('BIG. tile gaps mid-zoom'); await bigTileGap(); break sections }
+  if (ONLY === 'i3') { log('BIG. review I3 zoom e2e'); await bigI3(); break sections }
+  if (ONLY === 'big') { log('BIG. more sizes (v0.3)'); await bigSection(); break sections }
+  if (ONLY === 'i2') { log('BIG. review I-2 e2e'); await bigI2(); break sections }
   if (ONLY === 'k') { log('K. guide rings (spec §18.5)'); await guideRingSection(); break sections }
   if (ONLY === 'w') { log('W. my works (spec §18.4)'); await worksSection(); break sections }
   if (ONLY === 's') { log('S. README panel screenshots'); await readmeScreens(); break sections }
+  if (ONLY === 'v') { log('V. save safety (review I-1)'); await saveSafetySection(); break sections }
+  if (ONLY === 'keys') { log('KEYS. the ⋯ menu shortcut list from client.big-store.js'); await keysChunk(); break sections }
+  log('V. save safety (review I-1)')
+  await saveSafetySection()
+  log('BIG. more sizes (v0.3)')
+  await bigSection()
   // ── T1. picture to pattern (spec §18.2) + lazy modules (spec §18.6), in the real product ──
   log('T1. picture to pattern')
   {
