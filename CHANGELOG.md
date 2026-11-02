@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Known limitations (0.3, big boards)
+
+- **First zoom-in on a 208 × 208 board fills in over a moment.** With nothing cached yet, the detailed beads of the first zoom step take about 228–385 ms to fill in. Until then every cell shows its correct plain colour: never a blank area and never a seam. The tiles nearest the middle come first, and while the page is idle the next zoom level is built ahead.
+- **208² 首次放大冷缓存补齐约 228–385 ms，补齐前每格显示正确纯色，没有空白和接缝。** 离视野中心近的先补；页面空闲时会预先准备下一档缩放。
+
 ### Moved to the next version
 
 - **Daily pattern (每日一拼, spec §18.3, F1)** was taken out of 0.2.0 before release. Its code is kept on the `f1` branch (8f0bc97) and the 60 daily patterns stay with the spec; 0.2.0 has no daily strip, no streak and no `daily:` source.
