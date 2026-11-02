@@ -1620,6 +1620,35 @@ async function bigI4() {
     const shut = await p.evaluate(() => ({ exp: document.querySelector('.pd-bk-more').getAttribute('aria-expanded'), shown: [...document.querySelectorAll('.pd-bk-x .pd-tool')].some(e => e.getBoundingClientRect().width > 0) }))
     check(`BIG I4 300 px${tag}: 「更多」 opens 清空 and 导出 PNG, Escape folds them`, open.exp === 'true' && open.shown.map(x => x.join()).join('|') === '清空,true|导出 PNG,true' && shut.exp === 'false' && !shut.shown, JSON.stringify({ open, shut }))
     if (!touch) {
+      // recheck R2, keyboard only: Enter opens 「更多」, Tab reaches 清空 and 导出 PNG, Escape closes the menu and focus is back
+      // on 「更多」 (not 「分享」 or the page); an item chosen from the menu also gives focus back to 「更多」
+      const name = () => p.evaluate(() => { const el = document.activeElement; return el ? (el.getAttribute("aria-label") ?? el.className) : null })
+      await p.evaluate(() => { document.querySelector('.pd-bk-app').pd.game.applyAt(3, 3, 'paint') }) // one bead, so the menu's items are enabled
+      await p.waitForTimeout(150)
+      await p.locator('.pd-bk-more').focus()
+      await p.keyboard.press('Enter')
+      await p.keyboard.press('Tab')
+      const k1 = await name()
+      await p.keyboard.press('Tab')
+      const k2 = await name()
+      await p.keyboard.press('Escape')
+      await p.waitForTimeout(100)
+      const kEsc = { focus: await name(), exp: await p.locator('.pd-bk-more').getAttribute('aria-expanded'), share: await p.locator('.pd-bk-share').count() }
+      // Escape on the 「更多」 button itself with the menu open: the same
+      await p.keyboard.press('Enter')
+      await p.keyboard.press('Escape')
+      const kEsc2 = { focus: await name(), exp: await p.locator('.pd-bk-more').getAttribute('aria-expanded') }
+      // choose 清空 from the menu by keyboard: the menu folds and focus is on 「更多」 (the item is hidden now)
+      await p.keyboard.press('Enter')
+      await p.keyboard.press('Tab')
+      await p.keyboard.press('Enter')
+      await p.waitForTimeout(150)
+      const kItem = { focus: await name(), exp: await p.locator('.pd-bk-more').getAttribute('aria-expanded'), cleared: await p.locator('.pd-toast').count() }
+      await bigShot(p, 'big-r2-more-kbd-after-esc')
+      check('BIG recheck R2 keyboard: 「更多」 → Tab 清空 → 导出 PNG; Escape closes the menu with focus back on 「更多」 (no share panel); Escape on the button the same; choosing 清空 folds the menu onto 「更多」',
+        k1 === '清空' && k2 === '导出 PNG' && kEsc.focus === '更多' && kEsc.exp === 'false' && kEsc.share === 0 && kEsc2.focus === '更多' && kEsc2.exp === 'false' && kItem.focus === '更多' && kItem.exp === 'false' && kItem.cleared === 1,
+        JSON.stringify({ k1, k2, kEsc, kEsc2, kItem }))
+      await p.keyboard.press('Control+z')
       // the hint is once ever: a new 58×58 board in the same narrow panel goes without it
       await p.locator('.pd-bk-top .pd-btn', { hasText: '新建' }).click()
       await startPreset(p, 58)

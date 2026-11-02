@@ -259,6 +259,9 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
   const [saveErr, setSaveErr] = useState(false)
   const [active, setActive] = useState(0)
   const [more, setMore] = useState(false)
+  const moreRef = useRef<HTMLButtonElement>(null)
+  // the 「更多」 menu closes back onto its button: Escape and its items never leave focus on a hidden one (recheck R2)
+  const fold = (): void => { setMore(false); moreRef.current?.focus() }
   const [hint, setHint] = useState(false)
   const uid = useId().replaceAll(':', '')
   const pal = kit.palette
@@ -360,7 +363,7 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
   const clear = (): void => { if (game.clear()) setToast(true) }
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key === 'Escape' && more) { e.stopPropagation(); setMore(false); return }
+    if (e.key === 'Escape' && more) { e.stopPropagation(); fold(); return }
     if (e.key === 'Escape' && share !== false) { e.stopPropagation(); setShare(false); return }
     if (isTyping(e.target)) return
     const mod = e.metaKey || e.ctrlKey
@@ -440,12 +443,13 @@ function Play({ env, kit, t, game, st, onNew }: PlayProps): ReactElement {
           disabled={!game.canRedo} onClick={() => { game.redo() }}>{ic(5)}</button>
         <span className="pd-sep" aria-hidden />
         {/* a narrow panel keeps one row: clear and export fold under 「更多」 (review I4, plan §3.1 fig. 3) */}
-        <button type="button" className="pd-tool pd-bk-more" aria-label={t('more')} title={t('more')} aria-expanded={more} aria-controls={`${uid}-x`} onClick={() => { setMore(!more) }}>⋯</button>
-        <span id={`${uid}-x`} className={more ? 'pd-bk-x pd-on' : 'pd-bk-x'}>
+        <button ref={moreRef} type="button" className="pd-tool pd-bk-more" aria-label={t('more')} title={t('more')} aria-expanded={more} aria-controls={`${uid}-x`} onClick={() => { setMore(!more) }}>⋯</button>
+        {/* the open menu handles its own Escape */}
+        <span id={`${uid}-x`} className={more ? 'pd-bk-x pd-on' : 'pd-bk-x'} onKeyDown={(e) => { if (e.key === 'Escape' && more) { e.stopPropagation(); fold() } }}>
           <button type="button" className="pd-tool" aria-label={t('clear')} title={t('clear')}
-            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { setMore(false); clear() }}>{ic(6)}</button>
+            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { fold(); clear() }}>{ic(6)}</button>
           <button type="button" className="pd-tool" aria-label={t('png')} title={t('png')}
-            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { setMore(false); kit.exportBoard(env, { board, target: null }) }}>{ic(7)}</button>
+            disabled={board.cells.every(c => c === EMPTY)} onClick={() => { fold(); kit.exportBoard(env, { board, target: null }) }}>{ic(7)}</button>
         </span>
       </div>
       {hint ? <p className="pd-tokens pd-bk-bar" role="status"><span>{t('wide')}</span><button type="button" className="pd-ib" aria-label={t('close')} onClick={() => { setHint(false) }}>×</button></p> : null}
